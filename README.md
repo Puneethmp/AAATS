@@ -619,3 +619,4 @@ Planned: markets/india/storage.py
 - [2026-04-27] backtesting/engine.py: iterrows() performance acceptable for daily bars; becomes bottleneck at tick/sweep scale — Status: NEEDS_REVIEW
 - [2026-04-27] backtesting/engine.py: profit_factor=inf when no losing trades; downstream validators must guard against inf — Status: NEEDS_REVIEW (handled in validators.py)
 - [2026-04-27] backtesting/engine.py: Bar-level Sharpe spikes on short sparse-trade datasets; overfitting gate catches it but callers must check result.approved before using sharpe_ratio — Status: NEEDS_REVIEW
+"# AAATS" 
