@@ -1,0 +1,53 @@
+# ── Secrets — NEVER commit ────────────────────────────────────
+.env
+*.env
+secrets/
+
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+MANIFEST
+*.egg
+
+# ── Virtual Environment ───────────────────────────────────────
+venv/
+env/
+ENV/
+.venv/
+
+# ── Trading Data — never commit raw market data ───────────────
+data/
+logs/
+
+# ── ML model weights ──────────────────────────────────────────
+models/
+*.pkl
+*.joblib
+*.pt
+*.pth
+
+# ── IDE ───────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# ── OS ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Testing / Coverage ────────────────────────────────────────
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+
+# ── Pre-commit ────────────────────────────────────────────────
+.pre-commit-cache/
