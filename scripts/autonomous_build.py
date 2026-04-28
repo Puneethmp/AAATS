@@ -2,281 +2,399 @@
 """
 AAATS Autonomous Build Runner
 
-Runs in GitHub Actions to perform autonomous module builds.
-Reads SESSION_STATE.md, determines next module, executes build.
+Calls Claude API to generate code for the next module, writes files to disk,
+runs tests, and commits to git. Runs every 6 hours via GitHub Actions.
 
 Usage:
-    python scripts/autonomous_build.py [--dry-run] [--module MODULE_NAME]
+    python scripts/autonomous_build.py [--dry-run]
 """
 
 import os
 import sys
 import subprocess
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
-# Get project root
+from anthropic import Anthropic
+
 PROJECT_ROOT = Path(__file__).parent.parent
 SESSION_STATE = PROJECT_ROOT / "SESSION_STATE.md"
 AUTO_BUILD_SYSTEM = PROJECT_ROOT / "AUTO_BUILD_SYSTEM.md"
 AUTO_APPROVAL_RULES = PROJECT_ROOT / "AUTO_APPROVAL_RULES.md"
 
+
 def log(message, level="INFO"):
-    """Log message with timestamp"""
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     print(f"[{timestamp}] {level}: {message}")
 
+
+def read_file_safe(path):
+    try:
+        with open(path, "r") as f:
+            return f.read()
+    except Exception:
+        return ""
+
+
 def read_session_state():
-    """Read SESSION_STATE.md and extract build info"""
     if not SESSION_STATE.exists():
         log("SESSION_STATE.md not found", "ERROR")
         return None
+    content = read_file_safe(SESSION_STATE)
+    return {"content": content, "exists": True}
 
-    with open(SESSION_STATE, 'r') as f:
-        content = f.read()
-
-    return {
-        'content': content,
-        'exists': True
-    }
 
 def get_next_module(state):
-    """Extract next module from session state"""
-    content = state['content']
+    content = state["content"]
 
-    # Parse next module from section markers
-    modules = {
-        'US Momentum': 'strategies/us/momentum.py',
-        'India Storage': 'markets/india/storage.py',
-        'US Mean Reversion': 'strategies/us/mean_reversion.py',
+    module_queue = [
+        {
+            "name": "US Momentum Strategy",
+            "file": "strategies/us/momentum.py",
+            "test_file": "tests/test_strategies/test_us/test_momentum.py",
+            "marker": "US Momentum",
+        },
+        {
+            "name": "US Mean Reversion Strategy",
+            "file": "strategies/us/mean_reversion.py",
+            "test_file": "tests/test_strategies/test_us/test_mean_reversion.py",
+            "marker": "Mean Reversion",
+        },
+        {
+            "name": "India Momentum Strategy",
+            "file": "strategies/india/momentum.py",
+            "test_file": "tests/test_strategies/test_india/test_momentum.py",
+            "marker": "India Momentum",
+        },
+    ]
+
+    for module in module_queue:
+        file_path = PROJECT_ROOT / module["file"]
+        if not file_path.exists():
+            return {**module, "found": True}
+
+    return {
+        "name": "US Momentum Strategy",
+        "file": "strategies/us/momentum.py",
+        "test_file": "tests/test_strategies/test_us/test_momentum.py",
+        "found": True,
     }
 
-    for module_name, file_path in modules.items():
-        if f"🔴 IN PROGRESS\n\n### Module" in content or f"NEXT: {module_name}" in content:
-            return {
-                'name': module_name,
-                'file': file_path,
-                'found': True
-            }
 
-    # Default to US Momentum if in Phase 2
-    if "Phase 2" in content:
-        return {
-            'name': 'US Momentum',
-            'file': 'strategies/us/momentum.py',
-            'found': True
-        }
+def call_claude_for_build(session_state, next_module):
+    """Call Claude API to generate the next module's code."""
+    api_key = os.environ.get("CLAUDE_API_KEY")
+    if not api_key:
+        log("CLAUDE_API_KEY environment variable not set", "ERROR")
+        return None
 
-    return {'found': False}
+    client = Anthropic(api_key=api_key)
 
-def run_health_checks():
-    """Run system health checks"""
-    log("Running health checks...", "INFO")
+    system_prompt = """You are an autonomous Python code generator for AAATS (Autonomous Algorithmic Trading System).
+
+Generate production-quality Python code for the specified trading module.
+
+CRITICAL: Respond ONLY with a valid JSON object. No markdown fences, no explanation outside JSON.
+
+Response format:
+{
+  "files": [
+    {
+      "path": "relative/path/from/project/root.py",
+      "content": "complete python file content as a string"
+    }
+  ],
+  "summary": "Brief description of what was built",
+  "next_module": "Name of next module to build"
+}
+
+Code requirements:
+- Python 3.12+ with full type hints
+- Dataclass-based design for signals and results
+- All methods fully implemented (no pass, no TODO, no placeholder)
+- Python logging module (not print)
+- Exception handling with informative messages
+- Pandas for data calculations
+- Tests use synthetic data only (no external API calls)
+- Each test file has at minimum: test_happy_path, test_edge_cases, test_invalid_input
+"""
+
+    auto_build_context = read_file_safe(AUTO_BUILD_SYSTEM)[:2000]
+    session_content = session_state["content"][:3000]
+
+    user_message = f"""Build this module now:
+
+Module: {next_module['name']}
+Implementation file: {next_module['file']}
+Test file: {next_module['test_file']}
+
+Current project state:
+{session_content}
+
+Build system context:
+{auto_build_context}
+
+For US Momentum Strategy (SMA50/SMA200 crossover):
+- Class MomentumStrategy with __init__(self, fast_period=50, slow_period=200)
+- Method calculate_signals(df: pd.DataFrame) -> pd.DataFrame
+  - Adds columns: sma_fast, sma_slow, signal (1/-1/0), momentum_score
+  - Signal +1: sma_fast > sma_slow AND price above sma_fast (uptrend)
+  - Signal -1: sma_fast < sma_slow AND price below sma_fast (downtrend)
+  - Signal 0: neutral / insufficient data
+- Method generate_orders(df_with_signals: pd.DataFrame, portfolio_value: float) -> list[dict]
+  - Returns list of {{"symbol": str, "action": "BUY"/"SELL"/"HOLD", "quantity": int, "price": float}}
+  - Position size: 5% of portfolio per signal
+- Method backtest(df: pd.DataFrame) -> dict with keys: total_return, sharpe_ratio, max_drawdown, num_trades
+- Include __init__.py in strategies/ and strategies/us/ directories
+
+Respond with JSON only — no other text."""
+
+    log(f"Calling Claude API to build: {next_module['name']}", "INFO")
+
+    response = client.messages.create(
+        model="claude-opus-4-5",
+        max_tokens=8096,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_message}],
+    )
+
+    return response.content[0].text
+
+
+def parse_claude_response(response_text):
+    """Parse Claude's JSON response, extracting JSON block if needed."""
+    text = response_text.strip()
 
     try:
-        # Check Python
-        result = subprocess.run(['python', '--version'], capture_output=True, text=True)
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Strip markdown code fences if present
+    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if fence_match:
+        try:
+            return json.loads(fence_match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # Find outermost JSON object
+    brace_match = re.search(r"\{.*\}", text, re.DOTALL)
+    if brace_match:
+        try:
+            return json.loads(brace_match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    log("Failed to parse Claude response as JSON", "ERROR")
+    log(f"Response preview: {response_text[:300]}", "DEBUG")
+    return None
+
+
+def write_generated_files(build_result):
+    """Write all files from Claude's build result to disk."""
+    if not build_result or "files" not in build_result:
+        log("No files in build result", "ERROR")
+        return False
+
+    written = []
+    for file_info in build_result["files"]:
+        path = PROJECT_ROOT / file_info["path"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            f.write(file_info["content"])
+        log(f"Written: {file_info['path']}", "INFO")
+        written.append(file_info["path"])
+
+    # Ensure __init__.py files exist for packages
+    ensure_init_files(written)
+    return len(written) > 0
+
+
+def ensure_init_files(written_paths):
+    """Create __init__.py for any new package directories."""
+    dirs_needing_init = set()
+    for rel_path in written_paths:
+        path = PROJECT_ROOT / rel_path
+        for parent in path.parents:
+            if parent == PROJECT_ROOT:
+                break
+            init = parent / "__init__.py"
+            if not init.exists():
+                dirs_needing_init.add(parent)
+
+    for d in dirs_needing_init:
+        init = d / "__init__.py"
+        init.write_text("")
+        log(f"Created: {init.relative_to(PROJECT_ROOT)}", "INFO")
+
+
+def run_health_checks():
+    log("Running health checks...", "INFO")
+    try:
+        result = subprocess.run(["python", "--version"], capture_output=True, text=True)
         log(f"Python: {result.stdout.strip()}", "INFO")
-
-        # Check pytest
-        result = subprocess.run(['pytest', '--version'], capture_output=True, text=True)
+        result = subprocess.run(["pytest", "--version"], capture_output=True, text=True)
         log(f"Pytest: {result.stdout.strip()}", "INFO")
-
-        # Check git
-        result = subprocess.run(['git', 'status', '--short'], capture_output=True, text=True, cwd=PROJECT_ROOT)
-        if result.stdout.strip():
-            log(f"Git status:\n{result.stdout}", "INFO")
-        else:
-            log("Git: Working tree clean", "INFO")
-
+        result = subprocess.run(
+            ["git", "status", "--short"], capture_output=True, text=True, cwd=PROJECT_ROOT
+        )
+        log(f"Git status: {result.stdout.strip() or 'clean'}", "INFO")
         return True
-
     except Exception as e:
         log(f"Health check failed: {e}", "ERROR")
         return False
 
-def run_tests(test_path="tests/"):
-    """Run pytest on specified path"""
-    log(f"Running tests: {test_path}", "INFO")
 
+def run_tests(test_path="tests/"):
+    log(f"Running tests: {test_path}", "INFO")
     try:
         result = subprocess.run(
-            ['pytest', test_path, '-v', '--tb=short', '-q'],
+            ["pytest", str(test_path), "-v", "--tb=short", "-q"],
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
-            timeout=300
+            timeout=300,
         )
-
-        log(f"Tests output:\n{result.stdout}", "INFO")
-
-        if result.returncode == 0:
-            log("All tests passed!", "INFO")
-            return True
-        else:
-            log(f"Some tests failed:\n{result.stderr}", "WARNING")
-            return False
-
+        output = result.stdout[-3000:] if len(result.stdout) > 3000 else result.stdout
+        log(f"Test output:\n{output}", "INFO")
+        return result.returncode == 0
     except subprocess.TimeoutExpired:
-        log("Tests timed out", "ERROR")
+        log("Tests timed out after 300s", "ERROR")
         return False
     except Exception as e:
         log(f"Test run failed: {e}", "ERROR")
         return False
 
-def build_module(module_info, dry_run=False):
-    """
-    Build the specified module
 
-    In real usage, this would invoke Claude Code.
-    For GitHub Actions, we log the build that should happen.
-    """
-
-    log(f"Building module: {module_info['name']}", "INFO")
-
-    if dry_run:
-        log("DRY RUN: Skipping actual build", "INFO")
-        return True
-
-    module_name = module_info['name']
-    module_file = module_info['file']
-
-    log(f"Module: {module_name}", "INFO")
-    log(f"File: {module_file}", "INFO")
-
-    # Create directory if needed
-    module_dir = Path(module_file).parent
-    module_dir.mkdir(parents=True, exist_ok=True)
-
-    log("Note: Actual build requires Claude Code CLI", "WARNING")
-    log("See AUTO_BUILD_SYSTEM.md for manual build instructions", "INFO")
-
-    return True
-
-def update_session_state(module_info, success):
-    """Update SESSION_STATE.md with build results"""
-
+def update_session_state(module_info, success, summary=""):
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-    status = "✅ COMPLETED" if success else "❌ FAILED"
+    status = "COMPLETED" if success else "FAILED"
 
     update_text = f"""
-
 ## Build Session: {timestamp}
 - **Status:** {status}
 - **Module:** {module_info.get('name', 'Unknown')}
 - **File:** {module_info.get('file', 'Unknown')}
-- **Trigger:** GitHub Actions (Cloud-based)
-- **Environment:** Ubuntu Latest
-- **Tokens used:** ~20-25k (estimated)
+- **Claude API:** Used (autonomous generation)
+- **Summary:** {summary}
+- **Trigger:** GitHub Actions (every 6 hours)
 """
-
     try:
-        with open(SESSION_STATE, 'a') as f:
+        with open(SESSION_STATE, "a") as f:
             f.write(update_text)
-
-        log(f"Updated SESSION_STATE.md", "INFO")
+        log("Updated SESSION_STATE.md", "INFO")
         return True
-
     except Exception as e:
         log(f"Failed to update SESSION_STATE.md: {e}", "ERROR")
         return False
 
+
 def commit_changes(module_info):
-    """Commit changes to git"""
-
     try:
-        # Stage changes
-        subprocess.run(['git', 'add', '-A'], cwd=PROJECT_ROOT, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=PROJECT_ROOT, check=True)
 
-        # Check if there are changes
         result = subprocess.run(
-            ['git', 'diff', '--cached', '--quiet'],
-            cwd=PROJECT_ROOT
+            ["git", "diff", "--cached", "--quiet"], cwd=PROJECT_ROOT
         )
-
         if result.returncode == 0:
             log("No changes to commit", "INFO")
             return True
 
-        # Commit
         timestamp = datetime.utcnow().strftime("%Y-%m-%d")
-        commit_msg = f"Autonomous build: {timestamp} — {module_info.get('name', 'Phase 2')}"
+        commit_msg = (
+            f"Autonomous build: {timestamp} — {module_info.get('name', 'Phase 2')} (Claude API)"
+        )
 
         subprocess.run(
-            ['git', 'commit', '-m', commit_msg],
+            ["git", "commit", "-m", commit_msg],
             cwd=PROJECT_ROOT,
             check=True,
-            capture_output=True
+            capture_output=True,
         )
-
         log(f"Committed: {commit_msg}", "INFO")
 
-        # Push (GitHub Actions has token automatically)
-        subprocess.run(
-            ['git', 'push', 'origin', 'main'],
+        push = subprocess.run(
+            ["git", "push", "origin", "main"],
             cwd=PROJECT_ROOT,
-            capture_output=True
+            capture_output=True,
+            text=True,
         )
+        if push.returncode == 0:
+            log("Pushed to origin/main", "INFO")
+        else:
+            log(f"Push failed: {push.stderr}", "WARNING")
 
-        log("Pushed to origin/main", "INFO")
         return True
-
     except subprocess.CalledProcessError as e:
         log(f"Git operation failed: {e}", "ERROR")
         return False
-    except Exception as e:
-        log(f"Commit failed: {e}", "ERROR")
-        return False
+
 
 def main():
-    """Main build orchestration"""
-
-    log("Starting AAATS Autonomous Build", "INFO")
+    log("Starting AAATS Autonomous Build with Claude API", "INFO")
     log(f"Project root: {PROJECT_ROOT}", "INFO")
 
-    # Parse arguments
-    dry_run = '--dry-run' in sys.argv
+    dry_run = "--dry-run" in sys.argv
     if dry_run:
         log("DRY RUN MODE ENABLED", "WARNING")
 
-    # 1. Health checks
     if not run_health_checks():
         log("Health checks failed, aborting", "ERROR")
         return 1
 
-    # 2. Read session state
     state = read_session_state()
     if not state:
         log("Cannot read SESSION_STATE.md", "ERROR")
         return 1
 
-    # 3. Determine next module
     next_module = get_next_module(state)
-    if not next_module['found']:
-        log("Cannot determine next module from SESSION_STATE.md", "WARNING")
-        next_module = {
-            'name': 'Phase 2 (Next)',
-            'file': 'strategies/us/momentum.py',
-            'found': False
-        }
+    log(f"Next module: {next_module['name']} -> {next_module['file']}", "INFO")
 
-    log(f"Next module: {next_module['name']}", "INFO")
-
-    # 4. Run tests
+    # Run existing tests before building
     run_tests()
 
-    # 5. Build module
-    build_module(next_module, dry_run=dry_run)
+    if dry_run:
+        log("DRY RUN: Skipping Claude API call and file generation", "INFO")
+        update_session_state(next_module, True, "Dry run — no API call made")
+        commit_changes(next_module)
+        return 0
 
-    # 6. Update session state
-    update_session_state(next_module, success=True)
+    # Call Claude API to generate code
+    claude_response = call_claude_for_build(state, next_module)
+    if not claude_response:
+        log("Claude API call failed", "ERROR")
+        update_session_state(next_module, False, "Claude API call failed — check CLAUDE_API_KEY secret")
+        commit_changes(next_module)
+        return 1
 
-    # 7. Commit changes
+    # Parse Claude's response
+    build_result = parse_claude_response(claude_response)
+    if not build_result:
+        log("Failed to parse Claude response", "ERROR")
+        update_session_state(next_module, False, "Failed to parse Claude response as JSON")
+        commit_changes(next_module)
+        return 1
+
+    # Write generated files
+    success = write_generated_files(build_result)
+    summary = build_result.get("summary", "Module generated by Claude API")
+    log(f"Build summary: {summary}", "INFO")
+
+    # Run tests on newly generated code
+    if success:
+        test_path = PROJECT_ROOT / next_module.get("test_file", "tests/")
+        run_tests(test_path if test_path.exists() else "tests/")
+
+    # Update session state and commit
+    update_session_state(next_module, success, summary)
     commit_changes(next_module)
 
     log("Autonomous build completed successfully", "INFO")
     return 0
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     sys.exit(main())

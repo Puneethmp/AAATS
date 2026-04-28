@@ -2,38 +2,36 @@ name: AAATS Autonomous Build
 
 on:
   schedule:
-    # Run daily at 8 AM UTC (adjust timezone as needed)
-    - cron: '0 8 * * *'
+    - cron: '0 */6 * * *'  # Every 6 hours
 
-  # Allow manual trigger from GitHub UI
   workflow_dispatch:
 
 jobs:
   autonomous-build:
     runs-on: ubuntu-latest
 
+    env:
+      CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+
     steps:
-      # 1. Checkout code
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2. Set up Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
           cache: 'pip'
 
-      # 3. Install dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install anthropic
           pip install -r requirements.txt
           pip install pytest pytest-cov
 
-      # 4. Read session state
       - name: Read session state
         run: |
           echo "=== READING SESSION STATE ==="
@@ -43,155 +41,37 @@ jobs:
           python --version
           pytest --version
 
-      # 5. Configure git
       - name: Configure Git
         run: |
           git config --global user.name "Claude Autonomous Builder"
           git config --global user.email "claude-build@aaats.dev"
 
-      # 6. Run health checks
-      - name: Run system health checks
+      - name: Run autonomous build with Claude API
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
         run: |
-          echo "=== HEALTH CHECKS ==="
-          echo "Python: $(python --version)"
-          echo "Pytest: $(pytest --version)"
-          echo "Git status:"
-          git status
-          echo ""
-          echo "Running Phase 1 tests..."
-          pytest tests/test_us/ tests/test_india/ -v --tb=short -q || true
+          echo "=== RUNNING AUTONOMOUS BUILD ==="
+          echo "Claude API key present: $( [ -n "$CLAUDE_API_KEY" ] && echo YES || echo NO )"
+          python scripts/autonomous_build.py
 
-      # 7. Determine next module to build
-      - name: Determine next module
-        id: next_module
-        run: |
-          echo "Reading SESSION_STATE.md to find next module..."
-
-          # Extract next module from SESSION_STATE.md
-          NEXT_MODULE=$(grep -A 2 "🔴 IN PROGRESS\|NEXT:" SESSION_STATE.md | grep "Module\|File:" | head -1)
-
-          if grep -q "US Momentum" SESSION_STATE.md; then
-            echo "module=US_Momentum" >> $GITHUB_OUTPUT
-            echo "NEXT_MODULE=strategies/us/momentum.py" >> $GITHUB_ENV
-          elif grep -q "India Storage" SESSION_STATE.md; then
-            echo "module=India_Storage" >> $GITHUB_OUTPUT
-            echo "NEXT_MODULE=markets/india/storage.py" >> $GITHUB_ENV
-          else
-            echo "module=Unknown" >> $GITHUB_OUTPUT
-            echo "NEXT_MODULE=unknown" >> $GITHUB_ENV
-          fi
-
-          echo "Next module: $NEXT_MODULE"
-
-      # 8. Build next module (Framework)
-      - name: Build Phase 2.1 - US Momentum Strategy
-        if: always()
-        run: |
-          echo "=== BUILDING NEXT MODULE ==="
-          echo "Following AUTO_BUILD_SYSTEM.md process..."
-          echo ""
-          echo "Module: strategies/us/momentum.py"
-          echo "Type: US Momentum Strategy (SMA50/SMA200)"
-          echo ""
-          echo "Build steps:"
-          echo "1. PRE-BUILD VALIDATION"
-          echo "2. DESIGN REVIEW"
-          echo "3. CODE GENERATION"
-          echo "4. UNIT TESTS"
-          echo "5. INTEGRATION TEST"
-          echo "6. COMPLETION REPORT"
-          echo ""
-
-          # Create strategies directory if it doesn't exist
-          mkdir -p strategies/us
-          mkdir -p tests/test_strategies/test_us
-
-          # Check if module already exists
-          if [ -f "strategies/us/momentum.py" ]; then
-            echo "✅ Module already exists, skipping generation"
-          else
-            echo "⏳ Generating module (would be done by Claude Code)"
-            echo "Note: This requires Claude Code CLI with autonomous build enabled"
-            echo "See AUTO_BUILD_SYSTEM.md for implementation details"
-          fi
-
-      # 9. Run tests
       - name: Run tests
         run: |
-          echo "=== RUNNING TESTS ==="
+          echo "=== POST-BUILD TESTS ==="
           pytest tests/ -v --tb=short -q || true
 
-      # 10. Update session state
-      - name: Update session state
-        run: |
-          echo "=== UPDATING SESSION STATE ==="
-
-          # Get current timestamp
-          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-
-          # Append session note
-          echo "" >> SESSION_STATE.md
-          echo "## Build Session: $TIMESTAMP (GitHub Actions)" >> SESSION_STATE.md
-          echo "" >> SESSION_STATE.md
-          echo "- Status: Build session executed via GitHub Actions" >> SESSION_STATE.md
-          echo "- Module: Next in queue (see above)" >> SESSION_STATE.md
-          echo "- Tests: $(pytest tests/ -q --co -q 2>/dev/null | wc -l) tests available" >> SESSION_STATE.md
-          echo "- Tokens used this session: ~20-25k (estimated)" >> SESSION_STATE.md
-
-          echo "Session state updated at $TIMESTAMP"
-
-      # 11. Commit changes
-      - name: Commit and push changes
-        run: |
-          git add -A
-
-          # Check if there are changes
-          if git diff --cached --quiet; then
-            echo "✅ No changes to commit"
-          else
-            echo "📝 Committing changes..."
-            git commit -m "Autonomous build: $(date -u +%Y-%m-%d) — Phase 2 development"
-
-            # Push changes
-            git push origin main || git push origin $(git rev-parse --abbrev-ref HEAD)
-            echo "✅ Changes pushed to repository"
-          fi
-
-      # 12. Generate build summary
       - name: Generate build summary
         if: always()
         run: |
-          echo "=== BUILD SUMMARY ==="
-          echo "Date: $(date -u)"
-          echo "Trigger: ${{ github.event_name }}"
-          echo "Session: GitHub Actions (Cloud-based, always on)"
-          echo ""
-          echo "Phase 1 Status:"
-          echo "  Complete: 9/11 modules (82%)"
-          echo "  Next: Phase 2 (Strategies)"
-          echo ""
-          echo "Environment:"
-          echo "  Python: $(python --version)"
-          echo "  Pytest: $(pytest --version)"
-          echo ""
-          echo "✅ Build session completed"
-
-      # 13. Notify via GitHub
-      - name: Set job summary
-        if: always()
-        run: |
-          echo "## 🤖 AAATS Autonomous Build Completed" >> $GITHUB_STEP_SUMMARY
+          echo "## AAATS Autonomous Build Completed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Status:** ✅ Build session executed" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** Build session executed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Next Steps:**" >> $GITHUB_STEP_SUMMARY
-          echo "- Check SESSION_STATE.md for progress" >> $GITHUB_STEP_SUMMARY
-          echo "- Review commits for code changes" >> $GITHUB_STEP_SUMMARY
-          echo "- Next scheduled run: Tomorrow at 8 AM UTC" >> $GITHUB_STEP_SUMMARY
+          echo "**Next scheduled run:** In 6 hours" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Claude API:** Active (autonomous code generation)" >> $GITHUB_STEP_SUMMARY
 
-# Permissions needed for pushing to repo
 permissions:
   contents: write
   pull-requests: write
