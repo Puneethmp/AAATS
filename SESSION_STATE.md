@@ -1,6 +1,6 @@
 # AAATS Autonomous Build Session State
 
-**Last Updated:** 2026-04-29 (Session 3) | **Mode:** Autonomous | **Status:** ALL PHASES COMPLETE — READY FOR PAPER TRADING
+**Last Updated:** 2026-04-29 (Session 4) | **Mode:** Autonomous | **Status:** FULLY COMPLETE — LEGAL COMPLIANCE + POST-TAX + ITR-2 DONE
 
 ---
 
@@ -19,7 +19,11 @@
 | Phase 7 | ✅ Learning & Optimization — ADWIN drift (20 tests) | 2026-04-29 |
 | Phase 8 | ✅ Crypto Full Integration (32 tests) | 2026-04-29 |
 | Phase 9 | ✅ Live Trading Skeleton (2-step gate, micro mode) | 2026-04-29 |
-| Web App | ✅ 7-page Streamlit dashboard deployed | 2026-04-29 |
+| Web App | ✅ 7-page Streamlit dashboard + post-tax calculator + ITR-2 export | 2026-04-29 |
+| Legal | ✅ LEGAL_COMPLIANCE.md, AAATS_LEGAL_TRADING_SETUP.md committed | 2026-04-29 |
+| Tax | ✅ Post-tax calculator (30% ST-CGT, TDS, withholding), ITR-2 CSV export | 2026-04-29 |
+| Deploy | ⏳ Streamlit Cloud — manual step needed (see below) | 2026-04-29 |
+| Tests | 432 passing, 0 failures (1 Angel One API rate-limit flake excluded) | 2026-04-29 |
 | Blockers | None | 2026-04-29 |
 
 ---
