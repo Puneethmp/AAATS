@@ -1,10 +1,12 @@
 name: AAATS Autonomous Build
 
 on:
-  schedule:
-    - cron: '0 */2 * * *'  # Every 2 hours (4 times per day)
+  # Schedule DISABLED — all 22 modules complete, no further autonomous builds needed
+  # Re-enable only if new phases are planned
+  # schedule:
+  #   - cron: '0 */2 * * *'
 
-  workflow_dispatch:
+  workflow_dispatch:  # Manual trigger only
 
 jobs:
   autonomous-build:
