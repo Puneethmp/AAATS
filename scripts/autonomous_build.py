@@ -17,6 +17,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+import requests
 from anthropic import Anthropic
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -333,6 +334,32 @@ def commit_changes(module_info):
         return False
 
 
+def send_telegram_notification(status: str, message: str) -> bool:
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        log("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set, skipping notification", "WARNING")
+        return False
+
+    emoji = "✅" if status == "SUCCESS" else "🚨"
+    text = f"{emoji} AAATS BUILD {status}\n\n{message}"
+
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=10,
+        )
+        if response.ok:
+            log("Telegram notification sent", "INFO")
+            return True
+        log(f"Telegram notification failed: {response.text}", "WARNING")
+        return False
+    except Exception as e:
+        log(f"Telegram notification error: {e}", "WARNING")
+        return False
+
+
 def main():
     log("Starting AAATS Autonomous Build with Claude API", "INFO")
     log(f"Project root: {PROJECT_ROOT}", "INFO")
@@ -367,6 +394,7 @@ def main():
     if not claude_response:
         log("Claude API call failed", "ERROR")
         update_session_state(next_module, False, "Claude API call failed — check CLAUDE_API_KEY secret")
+        send_telegram_notification("FAILURE", "Claude API call failed — check CLAUDE_API_KEY secret")
         commit_changes(next_module)
         return 1
 
@@ -375,6 +403,7 @@ def main():
     if not build_result:
         log("Failed to parse Claude response", "ERROR")
         update_session_state(next_module, False, "Failed to parse Claude response as JSON")
+        send_telegram_notification("FAILURE", "Failed to parse Claude response as JSON")
         commit_changes(next_module)
         return 1
 
@@ -390,6 +419,7 @@ def main():
 
     # Update session state and commit
     update_session_state(next_module, success, summary)
+    send_telegram_notification("SUCCESS", f"Built {next_module['name']}: {summary}")
     commit_changes(next_module)
 
     log("Autonomous build completed successfully", "INFO")

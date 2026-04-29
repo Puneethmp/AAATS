@@ -2,7 +2,7 @@ name: AAATS Autonomous Build
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Every 6 hours
+    - cron: '0 */2 * * *'  # Every 2 hours (4 times per day)
 
   workflow_dispatch:
 
@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install anthropic
+          pip install anthropic requests
           pip install -r requirements.txt
           pip install pytest pytest-cov
 
@@ -71,6 +71,28 @@ jobs:
           echo "**Next scheduled run:** In 6 hours" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Claude API:** Active (autonomous code generation)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Send Telegram failure notification
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "{\"chat_id\":\"${TELEGRAM_CHAT_ID}\",\"text\":\"🚨 AAATS BUILD FAILED\\n\\nCheck logs at: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\\n\\nRun: ${{ github.run_id }}\"}"
+
+      - name: Send Telegram success notification
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          SUMMARY=$(head -20 SESSION_STATE.md 2>/dev/null || echo "No session state available")
+          TEXT="$(printf '✅ AAATS BUILD SUCCESS\n\n%s' "${SUMMARY}")"
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${TEXT}"
 
 permissions:
   contents: write
