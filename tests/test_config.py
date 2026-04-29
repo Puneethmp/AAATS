@@ -63,7 +63,7 @@ class TestIndiaConfig:
         return dict(
             angel_api_key="key",
             angel_client_id="A12345",
-            angel_password="pass",
+            angel_pin="1234",
             angel_totp_secret="totp",
             **kwargs,
         )
