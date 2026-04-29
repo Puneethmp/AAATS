@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import plotly.graph_objects as go
 import streamlit as st
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from streamlit_app.data_layer import (
+from data_layer import (
     get_equity_curve,
     get_monthly_returns,
     get_portfolio_summary,

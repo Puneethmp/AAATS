@@ -1,8 +1,18 @@
 """
 AAATS Trading Dashboard — Main Streamlit Entry Point.
 
-Run with:  streamlit run streamlit_app/app.py
+Run locally:  streamlit run streamlit_app/app.py
+Streamlit Cloud: sets main file to streamlit_app/app.py
 """
+
+import sys
+from pathlib import Path
+
+# Ensure streamlit_app/ is in sys.path so 'from views import X'
+# and 'from data_layer import X' resolve on Streamlit Cloud.
+_APP_DIR = str(Path(__file__).parent)
+if _APP_DIR not in sys.path:
+    sys.path.insert(0, _APP_DIR)
 
 import streamlit as st
 
@@ -55,29 +65,29 @@ with st.sidebar:
 
 # ── Page routing ───────────────────────────────────────────────────────────────
 if page == "📊 Dashboard":
-    from streamlit_app.pages import page_dashboard
+    from views import page_dashboard
     page_dashboard.render()
 
 elif page == "📈 Performance Analytics":
-    from streamlit_app.pages import page_analytics
+    from views import page_analytics
     page_analytics.render()
 
 elif page == "💡 Investment Guide":
-    from streamlit_app.pages import page_investment_guide
+    from views import page_investment_guide
     page_investment_guide.render()
 
 elif page == "🎯 Strategy Details":
-    from streamlit_app.pages import page_strategy
+    from views import page_strategy
     page_strategy.render()
 
 elif page == "⚠️ Risk & Alerts":
-    from streamlit_app.pages import page_risk
+    from views import page_risk
     page_risk.render()
 
 elif page == "⚙️ Settings & Account":
-    from streamlit_app.pages import page_settings
+    from views import page_settings
     page_settings.render()
 
 elif page == "📄 Reports & Export":
-    from streamlit_app.pages import page_reports
+    from views import page_reports
     page_reports.render()
