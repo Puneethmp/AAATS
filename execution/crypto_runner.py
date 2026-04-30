@@ -146,6 +146,8 @@ def run_once(symbols: list[str] | None = None) -> int:
                     action="BUY", shares=shares, price=price,
                     signal=sig, regime=regime, risk_action=decision.action,
                 )
+                slippage.record_slippage(symbol=symbol, expected=price, actual=price,
+                                         side="BUY", market="crypto", shares=shares)
                 sizer.add_position_heat(size.risk_pct)
                 trades_done += 1
 
@@ -160,6 +162,8 @@ def run_once(symbols: list[str] | None = None) -> int:
                 action="SELL", shares=shares, price=price,
                 signal=sig, regime=regime, risk_action="ALLOW", pnl=pnl,
             )
+            slippage.record_slippage(symbol=symbol, expected=entry, actual=price,
+                                     side="SELL", market="crypto", shares=shares)
             pnl_attr.record_trade(
                 market="crypto", symbol=symbol, pnl=pnl, side="SELL",
                 regime=regime, entry_price=entry, exit_price=price, shares=shares,

@@ -55,37 +55,61 @@ def _save_checkpoint(data: dict) -> None:
     _PHASE1_STATE.write_text(json.dumps(data, indent=2))
 
 
+def _load_checkpoint() -> dict:
+    """Load existing checkpoint if RUNNING, so we can resume after a crash."""
+    if not _PHASE1_STATE.exists():
+        return {}
+    try:
+        cp = json.loads(_PHASE1_STATE.read_text(encoding="utf-8"))
+        if cp.get("status") == "RUNNING" and cp.get("cycles_done", 0) > 0:
+            return cp
+    except Exception:
+        pass
+    return {}
+
+
 def main() -> None:
     _load_env()
 
-    start_ts = time.time()
-    start_iso = datetime.fromtimestamp(start_ts, tz=timezone.utc).isoformat()
-    end_ts = start_ts + _TOTAL_CYCLES * _POLL_SECONDS
-    end_iso = datetime.fromtimestamp(end_ts, tz=timezone.utc).isoformat()
-
-    _log.info("=" * 60)
-    _log.info("PHASE 1: 24-Hour Crypto Validation STARTED")
-    _log.info(f"Start : {start_iso}")
-    _log.info(f"End   : {end_iso}")
-    _log.info("=" * 60)
-
-    checkpoint = {
-        "phase": 1,
-        "status": "RUNNING",
-        "start_time": start_iso,
-        "expected_end": end_iso,
-        "cycles_planned": _TOTAL_CYCLES,
-        "cycles_done": 0,
-        "trades_total": 0,
-        "errors": 0,
-        "health_checks_ok": 0,
-        "health_checks_failed": 0,
-    }
-    _save_checkpoint(checkpoint)
+    # Resume from existing checkpoint if we crashed mid-run
+    existing = _load_checkpoint()
+    if existing:
+        cycles_already_done = existing["cycles_done"]
+        start_iso = existing["start_time"]
+        end_iso = existing["expected_end"]
+        _log.info("=" * 60)
+        _log.info(f"PHASE 1: RESUMING from cycle {cycles_already_done}/{_TOTAL_CYCLES}")
+        _log.info(f"Original start: {start_iso}")
+        _log.info("=" * 60)
+        checkpoint = existing
+    else:
+        start_ts = time.time()
+        start_iso = datetime.fromtimestamp(start_ts, tz=timezone.utc).isoformat()
+        end_ts = start_ts + _TOTAL_CYCLES * _POLL_SECONDS
+        end_iso = datetime.fromtimestamp(end_ts, tz=timezone.utc).isoformat()
+        cycles_already_done = 0
+        _log.info("=" * 60)
+        _log.info("PHASE 1: 24-Hour Crypto Validation STARTED")
+        _log.info(f"Start : {start_iso}")
+        _log.info(f"End   : {end_iso}")
+        _log.info("=" * 60)
+        checkpoint = {
+            "phase": 1,
+            "status": "RUNNING",
+            "start_time": start_iso,
+            "expected_end": end_iso,
+            "cycles_planned": _TOTAL_CYCLES,
+            "cycles_done": 0,
+            "trades_total": 0,
+            "errors": 0,
+            "health_checks_ok": 0,
+            "health_checks_failed": 0,
+        }
+        _save_checkpoint(checkpoint)
 
     from execution.crypto_runner import run_once
 
-    for cycle in range(1, _TOTAL_CYCLES + 1):
+    for cycle in range(cycles_already_done + 1, _TOTAL_CYCLES + 1):
         cycle_start = time.time()
         _log.info(f"[Cycle {cycle:02d}/{_TOTAL_CYCLES}] Starting at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -164,8 +188,7 @@ def _collect_metrics(checkpoint: dict) -> None:
             start_ts = time.time() - checkpoint["cycles_done"] * 3600
             with sqlite3.connect(trades_db) as conn:
                 row = conn.execute(
-                    "SELECT COUNT(*), COALESCE(SUM(pnl), 0) FROM paper_trades WHERE market='crypto' AND created_at > ?",
-                    (start_ts,),
+                    "SELECT COUNT(*), COALESCE(SUM(pnl), 0) FROM paper_trades WHERE market='crypto'",
                 ).fetchone()
                 metrics["trades"] = row[0] or 0
                 metrics["pnl"] = round(row[1] or 0.0, 2)
