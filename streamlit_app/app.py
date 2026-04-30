@@ -33,6 +33,7 @@ with st.sidebar:
         "Navigation",
         [
             "📊 Dashboard",
+            "🏛️ Institutional Testing",
             "📈 Performance Analytics",
             "💡 Investment Guide",
             "🎯 Strategy Details",
@@ -67,6 +68,10 @@ with st.sidebar:
 if page == "📊 Dashboard":
     from views import page_dashboard
     page_dashboard.render()
+
+elif page == "🏛️ Institutional Testing":
+    from views import page_institutional
+    page_institutional.render()
 
 elif page == "📈 Performance Analytics":
     from views import page_analytics

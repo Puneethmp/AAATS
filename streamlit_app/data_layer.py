@@ -14,8 +14,15 @@ from typing import Any
 
 import pandas as pd
 
-_DEFAULT_DB = str(Path(__file__).parent.parent / "data" / "aaats.db")
-_PAPER_DB = str(Path(__file__).parent.parent / "data" / "paper_trades.db")
+_ROOT        = Path(__file__).parent.parent
+_DEFAULT_DB  = str(_ROOT / "data" / "aaats.db")
+_PAPER_DB    = str(_ROOT / "data" / "paper_trades.db")
+_STATUS_DB   = str(_ROOT / "data" / "status.db")
+_EQUITY_DB   = str(_ROOT / "data" / "equity_curve.db")
+_SLIPPAGE_DB = str(_ROOT / "data" / "slippage.db")
+_POSITIONS_DB = str(_ROOT / "data" / "positions.db")
+_AUDIT_DB    = str(_ROOT / "data" / "compliance_audit.db")
+_ANOMALY_DB  = str(_ROOT / "data" / "anomalies.db")
 
 
 def _connect(db_path: str) -> sqlite3.Connection | None:
@@ -139,6 +146,100 @@ def get_strategy_breakdown(db_path: str = _PAPER_DB) -> pd.DataFrame:
         avg_pnl=("pnl", "mean"),
     ).reset_index()
     return breakdown
+
+
+def get_engine_status(db_path: str = _STATUS_DB) -> pd.DataFrame:
+    """Return live engine status rows written by the trading runners."""
+    conn = _connect(db_path)
+    if conn is None:
+        return pd.DataFrame(columns=[
+            "market", "last_run", "regime", "symbols_scanned", "trades_today", "status", "error"
+        ])
+    try:
+        df = pd.read_sql_query("SELECT * FROM engine_status", conn)
+        conn.close()
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
+def get_institutional_metrics() -> dict:
+    """Return live institutional risk/compliance metrics from all DBs."""
+    import json
+    result: dict = {
+        "phase1": {},
+        "drawdown_pct": 0.0,
+        "avg_slippage_bps": 0.0,
+        "open_positions": 0,
+        "anomalies_24h": 0,
+        "audit_entries": 0,
+        "halt_state": {},
+    }
+    try:
+        cp = Path(_ROOT / "data" / "phase1_checkpoint.json")
+        if cp.exists():
+            result["phase1"] = json.loads(cp.read_text(encoding="utf-8", errors="ignore"))
+    except Exception:
+        pass
+
+    conn_eq = _connect(_EQUITY_DB)
+    if conn_eq:
+        try:
+            row = conn_eq.execute(
+                "SELECT current_drawdown FROM equity_curve WHERE market='crypto' ORDER BY timestamp DESC LIMIT 1"
+            ).fetchone()
+            result["drawdown_pct"] = round((row[0] or 0.0) * 100, 2) if row else 0.0
+            conn_eq.close()
+        except Exception:
+            pass
+
+    conn_sl = _connect(_SLIPPAGE_DB)
+    if conn_sl:
+        try:
+            row = conn_sl.execute("SELECT AVG(ABS(slippage_bps)) FROM slippage WHERE market='crypto'").fetchone()
+            result["avg_slippage_bps"] = round(row[0] or 0.0, 1) if row else 0.0
+            conn_sl.close()
+        except Exception:
+            pass
+
+    conn_pos = _connect(_POSITIONS_DB)
+    if conn_pos:
+        try:
+            row = conn_pos.execute("SELECT COUNT(*) FROM positions WHERE closed=0").fetchone()
+            result["open_positions"] = row[0] if row else 0
+            conn_pos.close()
+        except Exception:
+            pass
+
+    import time
+    conn_an = _connect(_ANOMALY_DB)
+    if conn_an:
+        try:
+            row = conn_an.execute(
+                "SELECT COUNT(*) FROM anomalies WHERE timestamp > ?", (time.time() - 86400,)
+            ).fetchone()
+            result["anomalies_24h"] = row[0] if row else 0
+            conn_an.close()
+        except Exception:
+            pass
+
+    conn_au = _connect(_AUDIT_DB)
+    if conn_au:
+        try:
+            row = conn_au.execute("SELECT COUNT(*) FROM compliance_audit").fetchone()
+            result["audit_entries"] = row[0] if row else 0
+            conn_au.close()
+        except Exception:
+            pass
+
+    try:
+        halt_path = Path(_ROOT / "data" / "halt_state.json")
+        if halt_path.exists():
+            result["halt_state"] = json.loads(halt_path.read_text(encoding="utf-8", errors="ignore"))
+    except Exception:
+        pass
+
+    return result
 
 
 def get_recent_alerts(limit: int = 20) -> list[dict[str, str]]:

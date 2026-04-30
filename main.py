@@ -32,6 +32,12 @@ def main() -> None:
         default="all",
         help="Which market module to start.",
     )
+    parser.add_argument(
+        "--enforce-all-controls",
+        action="store_true",
+        default=True,
+        help="Enforce all 27 institutional controls (default: always on).",
+    )
     args = parser.parse_args()
 
     _log.info(f"AAATS starting. mode={args.mode} market={args.market}")
