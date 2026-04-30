@@ -23,8 +23,17 @@ ENV/
 .venv/
 
 # ── Trading Data — never commit raw market data ───────────────
-data/
+data/*
 logs/
+# Allow dashboard state files for Streamlit Cloud
+!data/paper_trades.db
+!data/positions.db
+!data/equity_curve.db
+!data/slippage.db
+!data/status.db
+!data/halt_state.json
+!data/phase1_checkpoint.json
+!data/phase1_metrics.json
 
 # ── ML model weights ──────────────────────────────────────────
 models/
