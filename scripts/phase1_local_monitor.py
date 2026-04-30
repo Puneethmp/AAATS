@@ -24,6 +24,9 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
+# Force UTF-8 output on Windows so emoji/unicode prints correctly
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 # ── Colour helpers (works on Windows 10+ terminals) ──────────────────────────
 GREEN  = "\033[92m"
@@ -33,10 +36,10 @@ CYAN   = "\033[96m"
 RESET  = "\033[0m"
 BOLD   = "\033[1m"
 
-def ok(msg):  print(f"  {GREEN}✅ {msg}{RESET}")
-def warn(msg):print(f"  {YELLOW}⚠️  {msg}{RESET}")
-def err(msg): print(f"  {RED}❌ {msg}{RESET}")
-def info(msg):print(f"  {CYAN}ℹ️  {msg}{RESET}")
+def ok(msg):  print(f"  {GREEN}[OK]  {msg}{RESET}")
+def warn(msg):print(f"  {YELLOW}[WARN] {msg}{RESET}")
+def err(msg): print(f"  {RED}[ERR]  {msg}{RESET}")
+def info(msg):print(f"  {CYAN}[INFO] {msg}{RESET}")
 
 
 # ── Component file existence check ────────────────────────────────────────────
@@ -270,11 +273,11 @@ def run_validation(phase: int, checkpoint_path: Path) -> dict:
     # ── Summary ───────────────────────────────────────────────────────────────
     print(f"\n{BOLD}{CYAN}{'='*60}{RESET}")
     if results["all_ok"]:
-        print(f"{BOLD}{GREEN}  ✅ ALL INSTITUTIONAL CONTROLS VERIFIED — PHASE {phase} HEALTHY{RESET}")
+        print(f"{BOLD}{GREEN}  [OK] ALL INSTITUTIONAL CONTROLS VERIFIED -- PHASE {phase} HEALTHY{RESET}")
     else:
-        print(f"{BOLD}{YELLOW}  ⚠️  {len(results['issues'])} ISSUE(S) DETECTED:{RESET}")
+        print(f"{BOLD}{YELLOW}  [WARN] {len(results['issues'])} ISSUE(S) DETECTED:{RESET}")
         for issue in results["issues"]:
-            print(f"     • {issue}")
+            print(f"     * {issue}")
     print(f"{BOLD}{CYAN}{'='*60}{RESET}\n")
 
     return results
