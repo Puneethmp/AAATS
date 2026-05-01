@@ -57,7 +57,8 @@ def get_logger(market: str, module: str):
     sink_key = f"{market}::{module}"
 
     if sink_key not in _registered_sinks:
-        log_dir = Path("logs") / market
+        import os as _os
+        log_dir = Path(_os.environ.get("AAATS_LOGS", "logs")) / market
         log_dir.mkdir(parents=True, exist_ok=True)
 
         _base_logger.add(

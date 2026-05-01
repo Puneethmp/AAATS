@@ -8,13 +8,15 @@ Streamlit Cloud: sets main file to streamlit_app/app.py
 import sys
 from pathlib import Path
 
-# Ensure streamlit_app/ is in sys.path so 'from views import X'
-# and 'from data_layer import X' resolve on Streamlit Cloud.
-_APP_DIR = str(Path(__file__).parent)
-if _APP_DIR not in sys.path:
-    sys.path.insert(0, _APP_DIR)
+# Ensure streamlit_app/ and project root are in sys.path
+_APP_DIR  = str(Path(__file__).parent)
+_ROOT_DIR = str(Path(__file__).parent.parent)
+for _p in (_APP_DIR, _ROOT_DIR):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import streamlit as st
+from data_layer import get_engine_status, write_halt_state
 
 st.set_page_config(
     page_title="AAATS Trading Dashboard",
@@ -33,6 +35,7 @@ with st.sidebar:
         "Navigation",
         [
             "📊 Dashboard",
+            "🏥 System Health",
             "🏛️ Institutional Testing",
             "📈 Performance Analytics",
             "💡 Investment Guide",
@@ -46,19 +49,28 @@ with st.sidebar:
 
     st.divider()
 
-    # System status
+    # Live system status from status.db
     st.markdown("**System Status**")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("🟢 Alpaca")
-        st.markdown("🟢 Angel One")
-    with col2:
-        st.markdown("🟢 DB")
-        st.markdown("🟡 Crypto")
+    _icons = {"OK": "🟢", "RUNNING": "🔄", "HALTED": "🔴", "ERROR": "🔴",
+              "IDLE": "⚪", "MARKET_CLOSED": "🌙"}
+    try:
+        _sdf = get_engine_status()
+        if not _sdf.empty:
+            for _, _row in _sdf.iterrows():
+                _ic = _icons.get(str(_row.get("status", "IDLE")), "⚪")
+                st.markdown(f"{_ic} {str(_row['market']).title()}")
+        else:
+            st.markdown("⚪ No runners active")
+    except Exception:
+        st.markdown("⚪ Status unavailable")
 
     st.divider()
     if st.button("🔴 HALT ALL MARKETS", type="primary", use_container_width=True):
-        st.error("⚠️ Manual halt initiated. All markets paused.")
+        ok = write_halt_state(us=True, india=True, crypto=True)
+        if ok:
+            st.error("⚠️ Halt written — all markets stop on next cycle.")
+        else:
+            st.error("⚠️ Could not write halt_state.json.")
         st.session_state["manual_halt"] = True
 
     st.caption("Paper Mode 🟡")
@@ -68,6 +80,10 @@ with st.sidebar:
 if page == "📊 Dashboard":
     from views import page_dashboard
     page_dashboard.render()
+
+elif page == "🏥 System Health":
+    from views import page_health
+    page_health.render()
 
 elif page == "🏛️ Institutional Testing":
     from views import page_institutional

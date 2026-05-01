@@ -21,10 +21,12 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional
 
+import os as _os
+
 from foundation.logger import get_logger
 
 _log = get_logger("risk", "position_manager")
-_DB = Path("data/positions.db")
+_DB = Path(_os.environ.get("AAATS_DATA", "data")) / "positions.db"
 
 
 @dataclass

@@ -18,6 +18,7 @@ Programmatic usage:
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -27,7 +28,7 @@ from observability.alerts import send_alert
 MarketType = Literal["us", "india", "crypto", "all"]
 _SingleMarket = Literal["us", "india", "crypto"]
 
-HALT_FILE = Path("data/halt_state.json")
+HALT_FILE = Path(os.environ.get("AAATS_DATA", "data")) / "halt_state.json"
 
 _ALL_MARKETS: list[_SingleMarket] = ["us", "india", "crypto"]
 

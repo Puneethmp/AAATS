@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import sys
 import time
 from datetime import datetime, timezone
@@ -26,13 +27,39 @@ from foundation.kill_switch import is_halted
 
 _log = get_logger("phase1", "runner")
 
-_LOG_DIR = Path("logs")
-_LOG_DIR.mkdir(exist_ok=True)
-
-_PHASE1_STATE = Path("data/phase1_checkpoint.json")
-_METRICS_OUT  = Path("data/phase1_metrics.json")
+_DATA_DIR     = Path(os.environ.get("AAATS_DATA", "data"))
+_PHASE1_STATE = _DATA_DIR / "phase1_checkpoint.json"
+_METRICS_OUT  = _DATA_DIR / "phase1_metrics.json"
 _POLL_SECONDS = 3600        # 1-hour cycles
 _TOTAL_CYCLES = 24          # 24 cycles = 24 hours
+_HEARTBEAT_INTERVAL = 30    # check halt state every 30s during sleep
+
+# ── Graceful shutdown ──────────────────────────────────────────────────────────
+_shutdown_requested = False
+
+
+def _handle_sigint(signum, frame) -> None:
+    global _shutdown_requested
+    _shutdown_requested = True
+    _log.warning("SIGINT received — will stop after current cycle completes")
+
+
+signal.signal(signal.SIGINT, _handle_sigint)
+try:
+    signal.signal(signal.SIGTERM, _handle_sigint)
+except AttributeError:
+    pass  # SIGTERM not available on Windows
+
+
+def _interruptible_sleep(seconds: float) -> bool:
+    """Sleep in short intervals, returning True if interrupted by halt/shutdown."""
+    end = time.time() + seconds
+    while time.time() < end:
+        if _shutdown_requested or is_halted("crypto"):
+            return True
+        remaining = end - time.time()
+        time.sleep(min(_HEARTBEAT_INTERVAL, max(0, remaining)))
+    return False
 
 # ─── load .env credentials into os.environ ────────────────────────────────────
 def _load_env() -> None:
@@ -51,7 +78,7 @@ def _load_env() -> None:
 
 
 def _save_checkpoint(data: dict) -> None:
-    _PHASE1_STATE.parent.mkdir(exist_ok=True)
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
     _PHASE1_STATE.write_text(json.dumps(data, indent=2))
 
 
@@ -113,8 +140,8 @@ def main() -> None:
         cycle_start = time.time()
         _log.info(f"[Cycle {cycle:02d}/{_TOTAL_CYCLES}] Starting at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-        if is_halted("crypto"):
-            _log.warning("Crypto market HALTED — stopping Phase 1")
+        if _shutdown_requested or is_halted("crypto"):
+            _log.warning("Crypto market HALTED or shutdown requested — stopping Phase 1")
             checkpoint["status"] = "HALTED"
             _save_checkpoint(checkpoint)
             break
@@ -133,16 +160,22 @@ def main() -> None:
         checkpoint["status"] = "RUNNING"
         _save_checkpoint(checkpoint)
 
-        # Sleep until next cycle (skip sleep on last cycle)
+        # Interruptible sleep: checks halt/SIGINT every 30s instead of blocking for full hour
         if cycle < _TOTAL_CYCLES:
             elapsed = time.time() - cycle_start
             sleep_for = max(0, _POLL_SECONDS - elapsed)
-            _log.info(f"Sleeping {sleep_for/60:.1f} min until next cycle…")
-            time.sleep(sleep_for)
+            _log.info(f"Sleeping {sleep_for/60:.1f} min until next cycle (checks halt every {_HEARTBEAT_INTERVAL}s)")
+            interrupted = _interruptible_sleep(sleep_for)
+            if interrupted:
+                _log.warning("Sleep interrupted by halt/shutdown — stopping after this cycle")
+                checkpoint["status"] = "HALTED"
+                _save_checkpoint(checkpoint)
+                break
 
     # ── Completion ─────────────────────────────────────────────────────────────
     end_actual = datetime.fromtimestamp(time.time(), tz=timezone.utc).isoformat()
-    checkpoint["status"] = "COMPLETED"
+    if checkpoint.get("status") != "HALTED":
+        checkpoint["status"] = "COMPLETED"
     checkpoint["actual_end"] = end_actual
     _save_checkpoint(checkpoint)
 
@@ -182,7 +215,7 @@ def _collect_metrics(checkpoint: dict) -> None:
     }
 
     # Query paper trades DB
-    trades_db = Path("data/paper_trades.db")
+    trades_db = _DATA_DIR / "paper_trades.db"
     if trades_db.exists():
         try:
             start_ts = time.time() - checkpoint["cycles_done"] * 3600
@@ -196,7 +229,7 @@ def _collect_metrics(checkpoint: dict) -> None:
             pass
 
     # Slippage
-    slippage_db = Path("data/slippage.db")
+    slippage_db = _DATA_DIR / "slippage.db"
     if slippage_db.exists():
         try:
             with sqlite3.connect(slippage_db) as conn:
