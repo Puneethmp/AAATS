@@ -25,6 +25,8 @@ from typing import Any
 import pandas as pd
 
 from foundation.logger import get_logger
+from monitoring.heartbeat_monitor import emit_heartbeat
+from monitoring.realtime_state_manager import MarketState, PositionSnapshot, publish_state
 from risk.engine import RiskDecision, RiskEngine
 
 _log = get_logger("trading", "paper_loop")
@@ -277,3 +279,87 @@ def get_paper_summary(db_path: str) -> dict[str, Any]:
         "win_rate": float(win_rate),
         "markets": df["market"].value_counts().to_dict(),
     }
+
+
+def emit_cycle_heartbeat(
+    market: str,
+    cycle_count: int,
+    status: str = "RUNNING",
+    error: str = "",
+) -> None:
+    """
+    Emit a heartbeat for the current trading cycle.
+    
+    Should be called at the start/end of each trading cycle to signal
+    that the backend is alive and processing.
+    
+    Args:
+        market: Market identifier (us, india, crypto)
+        cycle_count: Current cycle number
+        status: Status string (RUNNING, IDLE, HALTED, ERROR, MARKET_CLOSED)
+        error: Error message if status is ERROR
+    """
+    emit_heartbeat(market, status, cycle_count, error, min_interval_seconds=15.0)
+
+
+def publish_cycle_state(
+    market: str,
+    regime: str,
+    positions: list[Position],
+    capital: float,
+    cycle_count: int,
+    total_pnl: float = 0.0,
+    daily_pnl: float = 0.0,
+    active_signals: list[str] | None = None,
+) -> None:
+    """
+    Publish real-time state for the current trading cycle.
+    
+    Should be called after each cycle to update the dashboard with
+    current portfolio state.
+    
+    Args:
+        market: Market identifier
+        regime: Current market regime
+        positions: List of open positions
+        capital: Current cash balance
+        cycle_count: Current cycle number
+        total_pnl: Total realized PnL
+        daily_pnl: Today's PnL
+        active_signals: List of active strategy signals
+    """
+    # Convert positions to snapshots
+    position_snapshots = [
+        PositionSnapshot(
+            symbol=pos.symbol,
+            shares=float(pos.shares),
+            entry_price=pos.entry_price,
+            current_price=pos.entry_price,  # Updated by caller with real price
+            unrealized_pnl=0.0,  # Updated by caller
+            entry_time=pos.entry_time,
+        )
+        for pos in positions
+    ]
+    
+    # Calculate portfolio value
+    portfolio_value = capital + sum(
+        pos.shares * pos.entry_price for pos in positions
+    )
+    
+    # Create market state
+    state = MarketState(
+        market=market,
+        timestamp=_now_iso(),
+        regime=regime,
+        portfolio_value=portfolio_value,
+        cash=capital,
+        positions=position_snapshots,
+        active_signals=active_signals or [],
+        cycle_count=cycle_count,
+        total_pnl=total_pnl,
+        daily_pnl=daily_pnl,
+        open_position_count=len(positions),
+    )
+    
+    # Publish state (rate-limited to every 5 seconds)
+    publish_state(state, min_interval_seconds=5.0)

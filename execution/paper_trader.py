@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS paper_trades (
 def _conn(db_path: str) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(db_path, check_same_thread=False)
+    c.execute("PRAGMA journal_mode=WAL")
     c.execute(_CREATE_SQL)
     c.commit()
     return c

@@ -25,6 +25,13 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# Auto-refresh every 10 seconds for real-time updates
+if "refresh_count" not in st.session_state:
+    st.session_state.refresh_count = 0
+
+# Increment refresh counter
+st.session_state.refresh_count += 1
+
 # ── Sidebar navigation ─────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("AAATS")
@@ -75,6 +82,10 @@ with st.sidebar:
 
     st.caption("Paper Mode 🟡")
 
+
+# ── Real-time status bar ───────────────────────────────────────────────────────
+from components import realtime_status_bar
+realtime_status_bar.render()
 
 # ── Page routing ───────────────────────────────────────────────────────────────
 if page == "📊 Dashboard":

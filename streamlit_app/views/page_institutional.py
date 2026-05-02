@@ -11,7 +11,6 @@ import json
 import re
 import sqlite3
 import time
-from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,12 +22,13 @@ _PAPER_DB    = _ROOT / "data" / "paper_trades.db"
 _EQUITY_DB   = _ROOT / "data" / "equity_curve.db"
 _SLIPPAGE_DB = _ROOT / "data" / "slippage.db"
 _POSITIONS_DB = _ROOT / "data" / "positions.db"
+_STATUS_DB   = _ROOT / "data" / "status.db"
 _AUDIT_DB    = _ROOT / "data" / "compliance_audit.db"
 _ANOMALY_DB  = _ROOT / "data" / "anomalies.db"
 _PHASE1_CP   = _ROOT / "data" / "phase1_checkpoint.json"
 _PHASE2_CP   = _ROOT / "data" / "phase2_checkpoint.json"
 _HALT_STATE  = _ROOT / "data" / "halt_state.json"
-_LOG_FILE    = _ROOT / "logs" / "background_runner.log"
+_LOG_ROOT    = _ROOT / "logs"
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -51,31 +51,46 @@ def _query(db: Path, sql: str, params: tuple = ()) -> pd.DataFrame:
 
 
 def _tail_log(n: int = 50) -> str:
-    try:
-        text = _LOG_FILE.read_text(encoding="utf-8", errors="ignore")
-        lines = text.splitlines()
-        clean = [re.sub(r"\x1b\[[0-9;]*m", "", l) for l in lines[-n:]]
-        return "\n".join(clean)
-    except Exception:
-        return "(log not available — check logs/background_runner.log)"
+    """Collect last N log lines from all logs under logs/ directory."""
+    # Loguru writes JSON-serialized lines to logs/{market}/{module}.log
+    all_entries: list[tuple[str, str]] = []  # (timestamp, text)
+
+    log_files = sorted(_LOG_ROOT.rglob("*.log"), key=lambda f: f.stat().st_mtime, reverse=True)
+
+    for log_file in log_files[:6]:  # read at most 6 most recent files
+        try:
+            raw = log_file.read_text(encoding="utf-8", errors="ignore")
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                    # Loguru JSON: {"text": "...", "record": {"time": ..., "message": ...}}
+                    record = rec.get("record", {})
+                    ts   = str(record.get("time", {}).get("repr", ""))[:19]
+                    lvl  = str(record.get("level", {}).get("name", ""))
+                    msg  = str(record.get("message", rec.get("text", line)))[:160]
+                    mkt  = str(record.get("extra", {}).get("market", ""))
+                    mod  = str(record.get("extra", {}).get("module", ""))
+                    all_entries.append((ts, f"{ts} | {mkt:<10} | {mod:<20} | {lvl:<8} | {msg}"))
+                except Exception:
+                    clean = re.sub(r"\x1b\[[0-9;]*m", "", line)
+                    all_entries.append(("", clean))
+        except Exception:
+            continue
+
+    if not all_entries:
+        return "(no log files yet — runner will create them on next cycle)"
+
+    all_entries.sort(key=lambda x: x[0])
+    lines = [t for _, t in all_entries]
+    return "\n".join(lines[-n:])
 
 
-def _parse_regimes_from_log() -> dict[str, int]:
-    """Aggregate regime counts from all 'Regime detection complete' lines in the log."""
-    try:
-        text = _LOG_FILE.read_text(encoding="utf-8", errors="ignore")
-        matches = re.findall(r"Regime detection complete.*?(\{[^}]+\})", text)
-        totals: Counter = Counter()
-        for m in matches:
-            try:
-                # ast-safe parse: replace single quotes for json
-                parsed = json.loads(m.replace("'", '"'))
-                totals.update(parsed)
-            except Exception:
-                pass
-        return dict(totals.most_common())
-    except Exception:
-        return {}
+def _get_engine_status_rows() -> pd.DataFrame:
+    """Read live engine status from status.db (written by runners after every cycle)."""
+    return _query(_STATUS_DB, "SELECT * FROM engine_status ORDER BY market")
 
 
 def _get_total_pnl() -> float:
@@ -157,12 +172,14 @@ def render() -> None:
 
     cycles_done  = ph1.get("cycles_done", 0)
     cycles_total = ph1.get("cycles_planned", 24)
-    trades_total = ph1.get("trades_total", 0)
     errors       = ph1.get("errors", 0)
     hc_ok        = ph1.get("health_checks_ok", 0)
     hc_bad       = ph1.get("health_checks_failed", 0)
     status       = ph1.get("status", "NOT STARTED")
     total_pnl    = _get_total_pnl()
+    # Always count from actual DB — includes all real trades (not just checkpoint counter)
+    _tc_df = _query(_PAPER_DB, "SELECT COUNT(*) as n FROM paper_trades WHERE market='crypto'")
+    trades_total = int(_tc_df.iloc[0, 0]) if not _tc_df.empty else ph1.get("trades_total", 0)
 
     # ── ROW 1: Key metrics ────────────────────────────────────────────────────
     st.subheader("Phase 1 — Live Metrics")
@@ -208,35 +225,43 @@ def render() -> None:
 
     st.divider()
 
-    # ── ROW 2: Market Regimes ─────────────────────────────────────────────────
-    st.subheader("Market Regimes (from live log)")
+    # ── ROW 2: Market Regimes (from status.db — written after every cycle) ───────
+    st.subheader("Market Regimes — Live Engine Status")
 
-    regimes = _parse_regimes_from_log()
+    _regime_colors = {
+        "BULL_TREND":     "🟢",
+        "BEAR_TREND":     "🔴",
+        "RANGE_BOUND":    "🟡",
+        "HIGH_VOLATILITY":"🟠",
+        "UNKNOWN":        "⚪",
+    }
+    _status_colors = {"OK": "🟢", "RUNNING": "🔄", "HALTED": "🔴", "ERROR": "🔴",
+                      "IDLE": "⚪", "MARKET_CLOSED": "🌙"}
+    engine_rows = _get_engine_status_rows()
 
-    if regimes:
-        total_detections = sum(regimes.values())
-        regime_cols = st.columns(len(regimes))
-        colors = {
-            "BULL_TREND":     "🟢",
-            "BEAR_TREND":     "🔴",
-            "RANGE_BOUND":    "🟡",
-            "HIGH_VOLATILITY":"🟠",
-            "UNKNOWN":        "⚪",
-        }
-        for i, (regime, count) in enumerate(regimes.items()):
-            with regime_cols[i]:
-                pct = count / total_detections * 100 if total_detections else 0
+    if not engine_rows.empty:
+        eng_cols = st.columns(len(engine_rows))
+        for col, (_, row) in zip(eng_cols, engine_rows.iterrows()):
+            regime   = str(row.get("regime") or "UNKNOWN")
+            mkt_stat = str(row.get("status") or "IDLE")
+            scanned  = int(row.get("symbols_scanned") or 0)
+            t_today  = int(row.get("trades_today") or 0)
+            last_run = str(row.get("last_run") or "")
+            with col:
+                r_icon = _regime_colors.get(regime, "⚪")
+                s_icon = _status_colors.get(mkt_stat, "⚪")
                 st.metric(
-                    f"{colors.get(regime, '⚪')} {regime}",
-                    str(count),
-                    delta=f"{pct:.1f}% of bars",
+                    f"{s_icon} {str(row['market']).upper()} ({mkt_stat})",
+                    f"{r_icon} {regime}",
+                    delta=f"scanned {scanned} | trades this cycle: {t_today}",
                     delta_color="off",
                 )
-        # Progress bar visual
-        if total_detections:
-            st.caption(f"Total regime detections from log: **{total_detections:,}** bar readings")
+                if last_run:
+                    st.caption(f"Last cycle: {last_run[:19]}")
+                if row.get("error"):
+                    st.error(str(row["error"])[:120])
     else:
-        st.info("Regime data not yet available — log file is being written")
+        st.info("No engine status yet — runner has not completed a cycle")
 
     st.divider()
 

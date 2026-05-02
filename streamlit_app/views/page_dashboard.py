@@ -14,6 +14,7 @@ from data_layer import (
     get_portfolio_summary,
     get_all_trades,
     get_engine_status,
+    get_health_metrics,
 )
 
 _STATUS_ICON = {
@@ -46,10 +47,23 @@ def render() -> None:
     st.title("📊 Dashboard")
 
     # Auto-refresh every 30 s
-    st.markdown(
-        '<meta http-equiv="refresh" content="30">',
-        unsafe_allow_html=True,
-    )
+    st.html('<meta http-equiv="refresh" content="30">')
+
+    # ── Stale runner banner ───────────────────────────────────────────────────
+    try:
+        _h = get_health_metrics()
+        if not _h["runner_alive"]:
+            st.error(
+                "**Runner appears dead** — no heartbeat in >2h.  "
+                "Restart: `python scripts/phase1_runner.py`"
+            )
+        elif _h.get("last_cycle_age_s") and _h["last_cycle_age_s"] > 3900:
+            st.warning(
+                f"Runner last reported **{_h['last_cycle_age_s'] // 60}m ago** — "
+                "may be sleeping or processing a slow cycle."
+            )
+    except Exception:
+        pass
 
     summary = get_portfolio_summary()
     initial_capital = 100_000.0
