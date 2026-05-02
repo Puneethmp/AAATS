@@ -43,7 +43,8 @@ with st.sidebar:
         [
             "📊 Dashboard",
             "🏥 System Health",
-            "🏛️ Institutional Testing",
+            "� Production Readiness",
+            "�🏛️ Institutional Testing",
             "📈 Performance Analytics",
             "💡 Investment Guide",
             "🎯 Strategy Details",
@@ -96,7 +97,11 @@ elif page == "🏥 System Health":
     from views import page_health
     page_health.render()
 
-elif page == "🏛️ Institutional Testing":
+elif page == "� Production Readiness":
+    from views import page_production_readiness
+    page_production_readiness.render()
+
+elif page == "�🏛️ Institutional Testing":
     from views import page_institutional
     page_institutional.render()
 

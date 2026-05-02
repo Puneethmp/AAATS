@@ -70,6 +70,7 @@ def list_strategies() -> list[dict[str, str]]:
 
 def _register_all() -> None:
     """Auto-register all built-in strategies at import time."""
+    # Legacy strategies (keep for backward compatibility)
     from strategies.us.momentum import generate_signals as us_momentum
     from strategies.us.mean_reversion import generate_signals as us_mean_rev
     from strategies.india.momentum import generate_signals as india_momentum
@@ -81,6 +82,47 @@ def _register_all() -> None:
     _REGISTRY[("india", "momentum")] = india_momentum
     _REGISTRY[("india", "regime_shift")] = india_regime
     _REGISTRY[("crypto", "grid_trading")] = crypto_grid
+    
+    # New momentum strategies
+    from strategies.momentum import (
+        ema_crossover, volatility_adjusted, relative_strength, breakout, multi_timeframe
+    )
+    _REGISTRY[("momentum", "ema_crossover")] = ema_crossover
+    _REGISTRY[("momentum", "volatility_adjusted")] = volatility_adjusted
+    _REGISTRY[("momentum", "relative_strength")] = relative_strength
+    _REGISTRY[("momentum", "breakout")] = breakout
+    _REGISTRY[("momentum", "multi_timeframe")] = multi_timeframe
+    
+    # New mean reversion strategies
+    from strategies.mean_reversion import (
+        zscore_reversion, vwap_reversion, volatility_compression, 
+        rsi_exhaustion, statistical_pair
+    )
+    _REGISTRY[("mean_reversion", "zscore")] = zscore_reversion
+    _REGISTRY[("mean_reversion", "vwap")] = vwap_reversion
+    _REGISTRY[("mean_reversion", "volatility_compression")] = volatility_compression
+    _REGISTRY[("mean_reversion", "rsi_exhaustion")] = rsi_exhaustion
+    _REGISTRY[("mean_reversion", "statistical_pair")] = statistical_pair
+    
+    # New volatility strategies
+    from strategies.volatility import (
+        atr_breakout, expansion_detection, contraction_detection,
+        regime_switching, panic_filter
+    )
+    _REGISTRY[("volatility", "atr_breakout")] = atr_breakout
+    _REGISTRY[("volatility", "expansion")] = expansion_detection
+    _REGISTRY[("volatility", "contraction")] = contraction_detection
+    _REGISTRY[("volatility", "regime_switching")] = regime_switching
+    _REGISTRY[("volatility", "panic_filter")] = panic_filter
+    
+    # New regime strategies
+    from strategies.regime import (
+        trend_classifier, sideways_classifier, panic_detector, adaptive_switcher
+    )
+    _REGISTRY[("regime", "trend")] = trend_classifier
+    _REGISTRY[("regime", "sideways")] = sideways_classifier
+    _REGISTRY[("regime", "panic")] = panic_detector
+    _REGISTRY[("regime", "adaptive")] = adaptive_switcher
 
 
 _register_all()
