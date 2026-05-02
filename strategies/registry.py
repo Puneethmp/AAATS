@@ -123,6 +123,22 @@ def _register_all() -> None:
     _REGISTRY[("regime", "sideways")] = sideways_classifier
     _REGISTRY[("regime", "panic")] = panic_detector
     _REGISTRY[("regime", "adaptive")] = adaptive_switcher
+    
+    # Crypto-specific strategies
+    from strategies.crypto_specific import (
+        liquidation_cascade, funding_rate, crypto_rotation
+    )
+    _REGISTRY[("crypto_specific", "liquidation_cascade")] = liquidation_cascade
+    _REGISTRY[("crypto_specific", "funding_rate")] = funding_rate
+    _REGISTRY[("crypto_specific", "crypto_rotation")] = crypto_rotation
+    
+    # India-specific strategies
+    from strategies.india_specific import (
+        us_india_leadlag, india_vix_regime, rbi_event_risk
+    )
+    _REGISTRY[("india_specific", "us_india_leadlag")] = us_india_leadlag
+    _REGISTRY[("india_specific", "india_vix")] = india_vix_regime
+    _REGISTRY[("india_specific", "rbi_event")] = rbi_event_risk
 
 
 _register_all()
