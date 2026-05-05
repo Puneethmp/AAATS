@@ -30,7 +30,7 @@ class Tracer:
 
         if mode == "capture":
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self._fh = self.path.open("w", encoding="utf-8", newline="\n")
+            self._fh = self.path.open("w", encoding="utf-8", newline="\n", buffering=1)
         else:
             if not self.path.is_file():
                 raise FileNotFoundError(f"replay baseline not found: {self.path}")
@@ -76,5 +76,4 @@ class Tracer:
             "baseline_count": baseline_len,
             "mismatches": self._mismatches,
             "first_at": self._first_at,
-            "chain_hash": self.chain.hexdigest(),
-        }
+            "chain_hash": self.chain.hexdigest(

@@ -18,7 +18,11 @@ Catalogued as κ2 progresses. Each entry: what was found, its surface, the mitig
 
 ## Discovered during κ2 (filled as work proceeds)
 
-(none yet — §8.1 only delivered files, no execution)
+| # | When | Finding | Resolution |
+|---|---|---|---|
+| D-1 | §8.3 smoke | `markets.crypto.fetcher` does `import ccxt` at module level — fails in any env where ccxt is not installed. Injector's ccxt-patch is skipped gracefully; smoke-import fails hard. | Install ccxt in the replay env before running (`pip install ccxt>=4.0.0`). Documented in replay README. |
+| D-2 | §8.3→§8.4 | `replay.tracer` opened the JSONL file with default (block) buffering. A mid-run kill left a truncated final line, corrupting the baseline. | Fixed: `tracer.py` now opens with `buffering=1` (line-buffered). Each newline flushes immediately; at most one partial line can be lost on SIGKILL. |
+| D-3 | §8.4 | Golden baseline captured: 8,340 events, 29 symbols (all 1Hour), 2026-04-19T17:00Z → 2026-05-03T12:00Z. chain_sha256=`a8b109c4a87e93608ad0c747f84398f142f797c1f128682481318f2cce4391e2`. Replay round-trip verified clean (exit 0, identical hash). |
 
 ---
 
