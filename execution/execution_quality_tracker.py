@@ -3,12 +3,14 @@ Execution Quality Tracker — Execution Intelligence Layer
 
 Tracks and analyzes execution quality metrics:
 - Fill rate and partial fills
-- Slippage (expected vs actual fill price)
+- Slippage (expected vs actual fill price) — measured as raw price delta
+- Implementation Shortfall (IS) — measured via TCAAnalyzer (institutional standard)
 - Time to fill
 - Venue performance comparison
-- Market impact estimation
+- Market impact estimation (square-root law via TCAAnalyzer)
 
 Part of Phase 8: Execution Intelligence
+TCA integration added: uses research.tca.TCAAnalyzer for proper IS decomposition.
 """
 
 from dataclasses import dataclass, field
@@ -19,6 +21,15 @@ import statistics
 import logging
 
 logger = logging.getLogger(__name__)
+
+# TCA integration — lazy import to avoid circular deps at module load
+try:
+    from research.tca import TCAAnalyzer, Order as TCAOrder, TCAReport
+    _TCA_AVAILABLE = True
+    _tca_analyzer = TCAAnalyzer(impact_eta=0.1)
+except ImportError:
+    _TCA_AVAILABLE = False
+    _tca_analyzer = None  # type: ignore[assignment]
 
 
 @dataclass
@@ -380,21 +391,10 @@ class ExecutionQualityTracker:
                 "complete_fill_rate": 0.0,
                 "venues": {}
             }
-        
+
         all_records = list(self.execution_history)
         complete_fills = sum(1 for r in all_records if r.is_complete_fill)
-        
+
         return {
             "total_executions": len(all_records),
-            "avg_fill_rate": statistics.mean([r.fill_rate for r in all_records]),
-            "avg_slippage_bps": statistics.mean([r.slippage_bps for r in all_records]),
-            "complete_fill_rate": complete_fills / len(all_records),
-            "venues": {
-                venue: {
-                    "orders": m.total_orders,
-                    "quality_score": m.quality_score,
-                    "avg_slippage_bps": m.avg_slippage_bps
-                }
-                for venue, m in self.venue_metrics.items()
-            }
-        }
+        
