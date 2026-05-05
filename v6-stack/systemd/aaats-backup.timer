@@ -1,0 +1,14 @@
+[Unit]
+Description=AAATS v6 hourly backup timer
+Requires=aaats-backup.service
+
+[Timer]
+# Top of every hour, +/- 5min jitter so concurrent VPS backups don't all hit
+# Cloudflare R2 at the same second.
+OnCalendar=hourly
+RandomizedDelaySec=300
+Persistent=true
+Unit=aaats-backup.service
+
+[Install]
+WantedBy=timers.target

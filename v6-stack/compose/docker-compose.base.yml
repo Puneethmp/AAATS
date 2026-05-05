@@ -1,0 +1,171 @@
+# AAATS v6 — CP-3 base stack
+# Deploys: postgres 16, redis 7, cloudflared, grafana alloy.
+# Target: /srv/aaats/compose/docker-compose.base.yml on the VPS.
+# Secrets are mounted from /srv/aaats/secrets/*  (each file mode 0600).
+# No public ports — all services on the internal `aaats` bridge network.
+
+name: aaats-base
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 16 — durable transactional store (positions, orders, decisions)
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: aaats-postgres
+    restart: unless-stopped
+    networks: [aaats]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aaats}
+      POSTGRES_DB: ${POSTGRES_DB:-aaats}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      LANG: C.UTF-8
+      TZ: UTC
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-aaats} -d $${POSTGRES_DB:-aaats} -h 127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+
+  # ---------------------------------------------------------------------------
+  # Redis 7 — heartbeats, token buckets, rate limits, semantic cache, queues
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: aaats-redis
+    restart: unless-stopped
+    networks: [aaats]
+    entrypoint:
+      - sh
+      - -c
+      - |
+        REDIS_PASSWORD="$$(cat /run/secrets/redis_password)"
+        exec redis-server \
+          --requirepass "$$REDIS_PASSWORD" \
+          --appendonly yes \
+          --appendfsync everysec \
+          --maxmemory 512mb \
+          --maxmemory-policy noeviction \
+          --save 900 1 \
+          --save 300 10 \
+          --save 60 10000
+    secrets:
+      - redis_password
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'redis-cli -a "$$(cat /run/secrets/redis_password)" --no-auth-warning ping | grep -q PONG'
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+          cpus: "0.5"
+
+  # ---------------------------------------------------------------------------
+  # Cloudflare Tunnel — outbound-only ingress for Telegram webhook + admin
+  # cloudflared:latest is distroless (no shell), so we use env_file +
+  # TUNNEL_TOKEN env var. The env file (/srv/aaats/secrets/cloudflared.env)
+  # is mode 0600 owned by aaats — same security posture as a Docker secret.
+  # No healthcheck (no shell to run a probe); restart:unless-stopped + the
+  # Cloudflare dashboard's tunnel status panel cover the gap.
+  # ---------------------------------------------------------------------------
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: aaats-cloudflared
+    restart: unless-stopped
+    networks: [aaats]
+    env_file:
+      - ../secrets/cloudflared.env
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --metrics
+      - 0.0.0.0:2000
+      - run
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.25"
+
+  # ---------------------------------------------------------------------------
+  # Grafana Alloy — metrics + log shipper to Grafana Cloud Free
+  # alloy image lacks wget/curl, so we omit the container-side healthcheck.
+  # End-to-end check is "metrics/logs visible in Grafana Cloud" — observable
+  # upstream and tested in Phase η.
+  # ---------------------------------------------------------------------------
+  alloy:
+    image: grafana/alloy:latest
+    container_name: aaats-alloy
+    restart: unless-stopped
+    hostname: aaats-vps
+    networks: [aaats]
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy-data:/var/lib/alloy/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - /var/log:/host/var/log:ro
+      - /var/log/journal:/var/log/journal:ro
+      - /run/log/journal:/run/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
+    environment:
+      GRAFANA_PROM_URL: ${GRAFANA_PROM_URL}
+      GRAFANA_PROM_USER: ${GRAFANA_PROM_USER}
+      GRAFANA_LOKI_URL: ${GRAFANA_LOKI_URL}
+      GRAFANA_LOKI_USER: ${GRAFANA_LOKI_USER}
+    secrets:
+      - grafana_api_key
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+# -----------------------------------------------------------------------------
+volumes:
+  postgres-data:
+    name: aaats-postgres-data
+  redis-data:
+    name: aaats-redis-data
+  alloy-data:
+    name: aaats-alloy-data
+
+# -----------------------------------------------------------------------------
+networks:
+  aaats:
+    name: aaats
+    driver: bridge
+
+# -----------------------------------------------------------------------------
+secrets:
+  postgres_password:
+    file: ../secrets/postgres_password
+  redis_password:
+    file: ../secrets/redis_password
+  grafana_api_key:
+    file: ../secrets/grafana_api_key

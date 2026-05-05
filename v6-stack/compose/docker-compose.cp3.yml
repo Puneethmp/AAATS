@@ -1,0 +1,179 @@
+# AAATS v6 — CP-3 watchdog skeleton (Phase ε)
+# Use as an OVERLAY on top of docker-compose.base.yml:
+#
+#   docker compose \
+#     -f /srv/aaats/compose/docker-compose.base.yml \
+#     -f /srv/aaats/compose/docker-compose.cp3.yml \
+#     up -d
+#
+# Adds two services:
+#   - aaats-engine (dummy engine, replaced by real engine in Phase κ)
+#   - aaats-watchdog (Redis-heartbeat poller; restarts engine if stale)
+
+name: aaats-base  # SAME as base; merges into one project
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Dummy engine — placeholder for the real engine (Phase κ).
+  # Container name is "aaats-engine" so the watchdog config does not change
+  # at cutover time.
+  # ---------------------------------------------------------------------------
+  dummy-engine:
+    build:
+      context: ./dummy-engine
+    image: aaats/dummy-engine:cp3
+    container_name: aaats-engine
+    restart: unless-stopped
+    networks: [aaats]
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_HOST: aaats-redis
+      ENGINE_HB_KEY: aaats:hb:engine
+      ENGINE_HB_INTERVAL_S: "30"
+      ENGINE_HB_TTL_S: "90"
+      ENGINE_WORK_INTERVAL_S: "5"
+      METRICS_PORT: "9100"
+      HEALTHCHECKS_URL: ${HEALTHCHECKS_URL:-}
+    secrets:
+      - redis_password
+    healthcheck:
+      # /ready returns 200 once the metrics server is listening.
+      # python:3.12-slim ships urllib in stdlib — no extra binaries needed.
+      test:
+        - CMD-SHELL
+        - 'python -c "import urllib.request,sys; urllib.request.urlopen(\"http://127.0.0.1:9100/ready\", timeout=3); sys.exit(0)"'
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+
+  # ---------------------------------------------------------------------------
+  # Cloudflare quick tunnel — issues a *.trycloudflare.com hostname for the
+  # Telegram webhook. Independent of the existing aaats-cloudflared (named
+  # tunnel). When a paid domain is acquired, delete this service and add a
+  # hostname route on the named tunnel pointing to aaats-telegram-bot:8080.
+  #
+  # Caveat: trycloudflare URLs change on every cloudflared-bot restart.
+  # When that happens, re-extract the URL, update TELEGRAM_PUBLIC_URL in .env,
+  # and recreate aaats-telegram-bot. (Documented in EXECUTION_LOG.md.)
+  # ---------------------------------------------------------------------------
+  cloudflared-bot:
+    image: cloudflare/cloudflared:latest
+    container_name: aaats-cloudflared-bot
+    restart: unless-stopped
+    networks: [aaats]
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --url
+      - http://aaats-telegram-bot:8080
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.1"
+
+  # ---------------------------------------------------------------------------
+  # Telegram webhook bot — webhook mode, chat_id allowlist, alert fan-out.
+  # ---------------------------------------------------------------------------
+  telegram-bot:
+    build:
+      context: ./telegram-bot
+    image: aaats/telegram-bot:cp3
+    container_name: aaats-telegram-bot
+    restart: unless-stopped
+    networks: [aaats]
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_HOST: aaats-redis
+      TELEGRAM_PUBLIC_URL: ${TELEGRAM_PUBLIC_URL:-}
+      TELEGRAM_CHAT_ID_ALLOWLIST: ${TELEGRAM_CHAT_ID_ALLOWLIST:-}
+      TELEGRAM_ADMIN_USER_IDS: ${TELEGRAM_ADMIN_USER_IDS:-}
+      TELEGRAM_CHAT_CRITICAL: ${TELEGRAM_CHAT_CRITICAL:-}
+      TELEGRAM_CHAT_TRADES: ${TELEGRAM_CHAT_TRADES:-}
+      TELEGRAM_CHAT_SYSTEM: ${TELEGRAM_CHAT_SYSTEM:-}
+      TELEGRAM_WEBHOOK_PATH: /telegram/webhook
+      TELEGRAM_LISTEN_PORT: "8080"
+      ALERT_LIST: aaats:alerts:queue
+      HALT_REQUEST_KEY: aaats:halt:requested
+      RESTART_REQUEST_KEY: aaats:restart:requested
+      KILL_PENDING_TTL_S: "10"
+      DIGEST_UTC_HOUR: ${DIGEST_UTC_HOUR:-18}
+    secrets:
+      - redis_password
+      - telegram_bot_token
+      - telegram_webhook_secret
+      - grafana_webhook_token
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'python -c "import socket,sys; s=socket.create_connection((\"127.0.0.1\", 8080), timeout=3); s.close()"'
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+
+  # ---------------------------------------------------------------------------
+  # Watchdog — Redis heartbeat poller. Runs as non-root user (UID 10001) with
+  # supplementary group GID 988 (host docker group, per CP-1 audit) to read
+  # /var/run/docker.sock.
+  # ---------------------------------------------------------------------------
+  watchdog:
+    build:
+      context: ./watchdog
+    image: aaats/watchdog:cp3
+    container_name: aaats-watchdog
+    restart: unless-stopped
+    networks: [aaats]
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_HOST: aaats-redis
+      WATCHDOG_TARGET_CONTAINER: aaats-engine
+      WATCHDOG_HB_KEY: aaats:hb:engine
+      WATCHDOG_HB_STALE_SECONDS: "90"
+      WATCHDOG_POLL_SECONDS: "30"
+      WATCHDOG_COOLDOWN_SECONDS: "300"
+      WATCHDOG_ALERT_LIST: aaats:alerts:queue
+      WATCHDOG_RESTART_COUNTER: aaats:metrics:auto_restarts
+      WATCHDOG_OWN_HB_KEY: aaats:hb:watchdog
+      WATCHDOG_ALLOWLIST: aaats-engine,aaats-engine-us,aaats-engine-india,aaats-engine-crypto
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "988"
+    secrets:
+      - redis_password
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
+
+# -----------------------------------------------------------------------------
+# Top-level secrets defined here merge with those declared in
+# docker-compose.base.yml when the two files are combined via -f -f.
+# -----------------------------------------------------------------------------
+secrets:
+  telegram_bot_token:
+    file: ../secrets/telegram_bot_token
+  telegram_webhook_secret:
+    file: ../secrets/telegram_webhook_secret
+  grafana_webhook_token:
+    file: ../secrets/grafana_webhook_token
