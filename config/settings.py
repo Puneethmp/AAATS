@@ -110,4 +110,5 @@ class AppConfig(BaseSettings):
         env_nested_delimiter="__",
         case_sensitive=False,
         env_file_encoding="utf-8",
+        extra="ignore",
     )

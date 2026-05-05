@@ -29,7 +29,9 @@ def _make_ohlcv(n: int = 250, start_price: float = 30_000.0) -> pd.DataFrame:
     prices = start_price + rng.standard_normal(n).cumsum() * 200
     prices = prices.clip(min=100)
 
-    timestamps = pd.date_range("2024-01-01", periods=n, freq="h", tz="UTC")
+    from datetime import datetime, timezone
+    end_ts = datetime.now(timezone.utc)
+    timestamps = pd.date_range(end=end_ts, periods=n, freq="h", tz="UTC")
     df = pd.DataFrame({
         "timestamp": timestamps,
         "open":   prices * (1 - 0.001),

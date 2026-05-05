@@ -3,14 +3,12 @@ Execution Quality Tracker — Execution Intelligence Layer
 
 Tracks and analyzes execution quality metrics:
 - Fill rate and partial fills
-- Slippage (expected vs actual fill price) — measured as raw price delta
-- Implementation Shortfall (IS) — measured via TCAAnalyzer (institutional standard)
+- Slippage (expected vs actual fill price)
 - Time to fill
 - Venue performance comparison
-- Market impact estimation (square-root law via TCAAnalyzer)
+- Market impact estimation
 
 Part of Phase 8: Execution Intelligence
-TCA integration added: uses research.tca.TCAAnalyzer for proper IS decomposition.
 """
 
 from dataclasses import dataclass, field
@@ -21,15 +19,6 @@ import statistics
 import logging
 
 logger = logging.getLogger(__name__)
-
-# TCA integration — lazy import to avoid circular deps at module load
-try:
-    from research.tca import TCAAnalyzer, Order as TCAOrder, TCAReport
-    _TCA_AVAILABLE = True
-    _tca_analyzer = TCAAnalyzer(impact_eta=0.1)
-except ImportError:
-    _TCA_AVAILABLE = False
-    _tca_analyzer = None  # type: ignore[assignment]
 
 
 @dataclass
@@ -391,10 +380,105 @@ class ExecutionQualityTracker:
                 "complete_fill_rate": 0.0,
                 "venues": {}
             }
-
+        
         all_records = list(self.execution_history)
         complete_fills = sum(1 for r in all_records if r.is_complete_fill)
-
+        
         return {
             "total_executions": len(all_records),
-        
+            "avg_fill_rate": statistics.mean([r.fill_rate for r in all_records]),
+            "avg_slippage_bps": statistics.mean([r.slippage_bps for r in all_records]),
+            "complete_fill_rate": complete_fills / len(all_records),
+            "venues": {
+                venue: {
+                    "orders": m.total_orders,
+                    "quality_score": m.quality_score,
+                    "avg_slippage_bps": m.avg_slippage_bps
+                }
+                for venue, m in self.venue_metrics.items()
+            }
+        }
+
+    # ── TCA integration ───────────────────────────────────────────────────────
+
+    def analyze_tca(
+        self,
+        record: "ExecutionRecord",
+        decision_price: float,
+        adv: float,
+        sigma: float,
+        vwap: float | None = None,
+    ) -> dict:
+        """
+        Run full TCA (Implementation Shortfall) decomposition on one record.
+
+        Returns a dict with keys:
+          total_is_bps, delay_bps, market_impact_bps, timing_bps,
+          vwap_slippage_bps  (if vwap supplied)
+        """
+        try:
+            from research.tca import TCAAnalyzer, Order
+        except ImportError:
+            logger.warning("research.tca unavailable; skipping TCA")
+            return {}
+
+        order = Order(
+            symbol=record.symbol,
+            side=record.side,
+            quantity=record.quantity_requested,
+            decision_price=decision_price,
+            arrival_price=record.expected_price,
+            fill_price=record.fill_price,
+            adv=adv,
+            sigma=sigma,
+            vwap=vwap,
+        )
+        analyzer = TCAAnalyzer()
+        tca_result = analyzer.analyze(order)
+        return tca_result.to_dict() if hasattr(tca_result, "to_dict") else vars(tca_result)
+
+    def estimate_market_impact_tca(
+        self,
+        order_size_ratio: float,
+        market_volatility: float,
+        sigma_daily: float = 0.015,
+        eta: float = 0.1,
+    ) -> float:
+        """
+        Square-root market impact model (Almgren-Chriss / Kissell).
+        Replaces the legacy linear model with a theoretically grounded estimate.
+
+        I ≈ eta * sigma * sqrt(Q / ADV)
+        Returns estimate in basis points.
+        """
+        try:
+            from research.tca import TCAAnalyzer
+            analyzer = TCAAnalyzer()
+            return analyzer.estimate_market_impact_bps(
+                order_size_ratio=order_size_ratio,
+                sigma=sigma_daily,
+                eta=eta,
+            )
+        except Exception:
+            # Fallback: sqrt law inline
+            impact_pct = eta * sigma_daily * (order_size_ratio ** 0.5)
+            return impact_pct * 10_000
+
+    def get_tca_summary(self, lookback: int = 100) -> dict:
+        """
+        Aggregate TCA metrics across the most recent *lookback* executions.
+        Only records with a stored tca_result attribute are included.
+        """
+        recent = list(self.execution_history)[-lookback:]
+        tca_records = [r for r in recent if hasattr(r, "tca_result") and r.tca_result]
+        if not tca_records:
+            return {"tca_records_analyzed": 0, "note": "No TCA data on recent records."}
+
+        is_values = [r.tca_result.get("total_is_bps", 0.0) for r in tca_records]
+        impact_values = [r.tca_result.get("market_impact_bps", 0.0) for r in tca_records]
+        return {
+            "tca_records_analyzed": len(tca_records),
+            "mean_is_bps": statistics.mean(is_values),
+            "mean_market_impact_bps": statistics.mean(impact_values),
+            "max_is_bps": max(is_values),
+        }

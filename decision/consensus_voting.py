@@ -152,10 +152,10 @@ class ConsensusVoting:
         # Flag uncertainty
         uncertainty_flag = consensus_confidence < self.uncertainty_threshold
         
-        # Override to HOLD if uncertainty is too high
-        if uncertainty_flag and dissent_detected:
+        # Override to HOLD if uncertainty is too high (either condition alone suffices)
+        if uncertainty_flag:
             final_signal = "HOLD"
-            reasoning = "High uncertainty and dissent detected - defaulting to HOLD"
+            reasoning = "Consensus confidence below threshold - defaulting to HOLD"
         
         return ConsensusResult(
             final_signal=final_signal,

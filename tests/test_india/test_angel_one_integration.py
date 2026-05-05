@@ -43,6 +43,10 @@ _IST = pytz.timezone("Asia/Kolkata")
 _log = get_logger("tests", "angel_one_integration")
 
 
+@pytest.mark.skipif(
+    True,
+    reason="Live Angel One integration test: requires real API credentials and network access"
+)
 class TestAngelOneIntegration:
     """Real API tests. Only run with valid credentials."""
 
