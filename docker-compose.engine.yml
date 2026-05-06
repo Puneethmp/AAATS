@@ -36,7 +36,7 @@ services:
       ENGINE_HB_KEY: aaats:hb:engine
       ENGINE_HB_INTERVAL_S: "30"
       ENGINE_HB_TTL_S: "90"
-      ENGINE_WORK_INTERVAL_S: "3600"
+      ENGINE_WORK_INTERVAL_S: "900"  # 15-min cycles for more re-evaluations + faster stop-loss reaction
       METRICS_PORT: "9100"
       ALERT_LIST: aaats:alerts:queue
       LOG_LEVEL: INFO

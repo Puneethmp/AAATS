@@ -557,8 +557,61 @@ def vote_vwap(f: pd.DataFrame, market: str, regime: str) -> StrategyVote:
     return _vote("vwap", market, "HOLD", 0.48)
 
 
+def vote_bollinger(f: pd.DataFrame, market: str, regime: str) -> StrategyVote:
+    """
+    Bollinger %B mean-reversion — strongest in RANGE_BOUND, suppressed in trends.
+
+    bb_pct = (close - lower) / (upper - lower)
+      < 0.10  → near/below lower band → BUY (oversold)
+      > 0.90  → near/above upper band → SELL (overbought)
+    """
+    last   = f.iloc[-1]
+    bb_pct = float(last.get("bb_pct", 0.5) or 0.5)
+    w      = 0.78 if regime == "RANGE_BOUND" else 0.42
+    if bb_pct < 0.10:
+        return _vote("bollinger", market, "BUY",  w * (1.0 - bb_pct * 5))
+    if bb_pct > 0.90:
+        return _vote("bollinger", market, "SELL", w * ((bb_pct - 0.5) * 1.5))
+    return _vote("bollinger", market, "HOLD", 0.48)
+
+
+def vote_macd_hist(f: pd.DataFrame, market: str, regime: str) -> StrategyVote:
+    """
+    MACD histogram (macd - signal) — momentum acceleration.
+
+    Independent of EMA/momentum: looks at the *rate of change* of MACD itself,
+    which is the second derivative of price. Picks up turns earlier.
+    """
+    if len(f) < 2:
+        return _vote("macd_hist", market, "HOLD", 0.45)
+    last, prev = f.iloc[-1], f.iloc[-2]
+    h_now  = float(last.get("macd_hist", 0) or 0)
+    h_prev = float(prev.get("macd_hist", 0) or 0)
+    rsi    = float(last.get("rsi_14", 50) or 50)
+
+    rising  = h_now > h_prev
+    falling = h_now < h_prev
+
+    # Bullish: histogram positive AND rising → BUY confirmation
+    if h_now > 0 and rising and rsi < 70:
+        w = 0.74 if regime in ("BULL_TREND", "RANGE_BOUND") else 0.45
+        return _vote("macd_hist", market, "BUY", w)
+    # Bearish: histogram negative AND falling → SELL confirmation
+    if h_now < 0 and falling and rsi > 30:
+        w = 0.74 if regime in ("BEAR_TREND", "HIGH_VOLATILITY") else 0.45
+        return _vote("macd_hist", market, "SELL", w)
+    # Zero-line cross detection — early signal
+    if h_prev <= 0 < h_now:
+        return _vote("macd_hist", market, "BUY",  0.68)
+    if h_prev >= 0 > h_now:
+        return _vote("macd_hist", market, "SELL", 0.68)
+    return _vote("macd_hist", market, "HOLD", 0.48)
+
+
+# Lowered threshold (0.55 → 0.45) + 6 strategies (was 4) → more signals pass.
+# 6 votes × 0.45 ≈ 3 votes minimum on the dominant side to clear consensus.
 _voter = ConsensusVoting(
-    min_agreement_threshold=0.55,
+    min_agreement_threshold=0.45,
     veto_confidence_threshold=0.85,
     uncertainty_threshold=0.45,
 )
@@ -570,10 +623,12 @@ def generate_signal(symbol: str, features: pd.DataFrame,
     regime, r_conf = detect_regime(symbol, features)
 
     votes  = [
-        vote_ema(features,      market, regime),
-        vote_rsi(features,      market, regime),
-        vote_momentum(features, market, regime),
-        vote_vwap(features,     market, regime),   # 4th independent signal
+        vote_ema(features,        market, regime),
+        vote_rsi(features,        market, regime),
+        vote_momentum(features,   market, regime),
+        vote_vwap(features,       market, regime),
+        vote_bollinger(features,  market, regime),   # mean-reversion (strong in RANGE_BOUND)
+        vote_macd_hist(features,  market, regime),   # momentum-of-momentum (early turns)
     ]
     result = _voter.vote(votes)
     signal = result.final_signal
