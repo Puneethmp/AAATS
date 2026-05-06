@@ -191,7 +191,14 @@ def _run_pair(
             pnl_b = (price_b - entry_b) * shares_b
 
         total_pnl = pnl_a + pnl_b
-        mkt_port["capital"]      += alloc * 2   # return both legs' capital
+
+        # Recover the original per-leg allocation charged at entry.
+        # If state predates this fix, reconstruct from shares × entry_price.
+        entry_alloc = position.get("entry_alloc")
+        if entry_alloc is None:
+            entry_alloc = position["shares_a"] * position["entry_price_a"]
+
+        mkt_port["capital"]      += entry_alloc * 2 + total_pnl   # return alloc + credit PnL
         mkt_port["realized_pnl"] += total_pnl
         mkt_port["total_trades"] += 2
 
@@ -246,6 +253,7 @@ def _run_pair(
             "entry_price_b": price_b,
             "entry_z":       z,
             "entry_time":    datetime.now(timezone.utc).isoformat(),
+            "entry_alloc":   alloc,
         }
         mkt_port["capital"]      -= alloc * 2
         mkt_port["total_trades"] += 2

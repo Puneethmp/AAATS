@@ -116,7 +116,7 @@ CRYPTO_SYMBOLS = [
 # BTC dominance threshold: when BTC dominance > 58%, alts underperform — reduce alt exposure
 BTC_DOMINANCE_CUTOFF = 58.0   # % — above this, skip SOL/LINK/DOT/AVAX BUYs
 
-INITIAL_CAPITAL = {"india": 50_000.0, "crypto": 120.0}  # India ₹50k, Crypto ₹10k≈$120 @ 83 INR/USD
+INITIAL_CAPITAL = {"india": 25_000.0, "crypto": 120.0}  # India ₹25k, Crypto ₹10k≈$120 @ 83 INR/USD
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -1216,6 +1216,10 @@ def _check_trailing_stops(
 
 def run_india(positions: dict, portfolio: dict) -> None:
     """Run one India NSE paper-trading cycle across the full watchlist."""
+    from foundation.kill_switch import is_halted
+    if is_halted("india"):
+        log.warning("India market HALTED (kill switch) — skipping cycle")
+        return
     from execution.market_hours import require_market_open
     if not require_market_open("india"):
         return
@@ -1417,12 +1421,14 @@ def main() -> None:
         except Exception as exc:
             log.error("Crypto cycle #%d failed: %s", cycle, exc, exc_info=True)
 
-        open_pos = len(positions["india"]) + len(positions["crypto"])
+        from trading.stat_arb import get_open_stat_arb_positions
+        stat_arb_open = get_open_stat_arb_positions()
+        open_pos = len(positions["india"]) + len(positions["crypto"]) + len(stat_arb_open)
         real_pnl = (portfolio["india"]["realized_pnl"]
                     + portfolio["crypto"]["realized_pnl"])
         log.info(
-            "Cycle #%d done | open=%d | realized_pnl~%.2f | sleeping %ds",
-            cycle, open_pos, real_pnl, CYCLE_INTERVAL_SEC,
+            "Cycle #%d done | open=%d (stat_arb=%d) | realized_pnl~%.2f | sleeping %ds",
+            cycle, open_pos, len(stat_arb_open), real_pnl, CYCLE_INTERVAL_SEC,
         )
         time.sleep(CYCLE_INTERVAL_SEC)
 
