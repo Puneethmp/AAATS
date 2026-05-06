@@ -29,6 +29,7 @@ COPY risk/            /app/risk/
 COPY observability/   /app/observability/
 COPY intelligence/    /app/intelligence/
 COPY config/          /app/config/
+COPY ml/              /app/ml/
 COPY trading/         /app/trading/
 COPY engine/          /app/engine/
 
