@@ -157,12 +157,16 @@ def _read_json_safe(path: Path) -> dict:
 
 
 def _live_state_lines() -> list[str]:
-    """Read paper_portfolio.json + paper_positions.json on each scrape and emit
-    one labelled metric per market — capital, realized PnL, trade counts, win
-    rate, open position count. Cheap (small JSON files, no lock contention)."""
+    """Read paper_portfolio.json + paper_positions.json + stat_arb_state.json on
+    each scrape and emit one labelled metric per market — capital, realized PnL,
+    trade counts, win rate, open position count (includes stat-arb legs)."""
     out: list[str] = []
-    portfolio = _read_json_safe(_DATA_DIR / "paper_portfolio.json")
-    positions = _read_json_safe(_DATA_DIR / "paper_positions.json")
+    portfolio  = _read_json_safe(_DATA_DIR / "paper_portfolio.json")
+    positions  = _read_json_safe(_DATA_DIR / "paper_positions.json")
+    stat_arb   = _read_json_safe(_DATA_DIR / "stat_arb_state.json")
+    # Crypto pairs use "/" in the key (e.g. "BTC/USDT_ETH/USDT"); India pairs don't.
+    stat_arb_crypto = sum(1 for k in stat_arb if isinstance(stat_arb.get(k), dict) and "/" in k)
+    stat_arb_india  = sum(1 for k in stat_arb if isinstance(stat_arb.get(k), dict) and "/" not in k)
     for market in ("india", "crypto"):
         p = portfolio.get(market, {}) if isinstance(portfolio, dict) else {}
         cap   = float(p.get("capital", 0.0) or 0.0)
@@ -172,6 +176,10 @@ def _live_state_lines() -> list[str]:
         losses = int(p.get("losses", 0) or 0)
         win_rate = (wins / trades) if trades > 0 else 0.0
         open_count = len(positions.get(market, {})) if isinstance(positions, dict) else 0
+        if market == "crypto":
+            open_count += stat_arb_crypto
+        elif market == "india":
+            open_count += stat_arb_india
         lbl = f'{{market="{market}"}}'
         out.append(f"aaats_engine_capital{lbl} {cap}")
         out.append(f"aaats_engine_realized_pnl{lbl} {rpnl}")
