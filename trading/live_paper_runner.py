@@ -116,7 +116,7 @@ CRYPTO_SYMBOLS = [
 # BTC dominance threshold: when BTC dominance > 58%, alts underperform — reduce alt exposure
 BTC_DOMINANCE_CUTOFF = 58.0   # % — above this, skip SOL/LINK/DOT/AVAX BUYs
 
-INITIAL_CAPITAL = {"india": 25_000.0, "crypto": 120.0}  # India ₹25k, Crypto ₹10k≈$120 @ 83 INR/USD
+INITIAL_CAPITAL = {"india": 50_000.0, "crypto": 120.0}  # India ₹50k, Crypto ₹10k≈$120 @ 83 INR/USD
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -950,14 +950,55 @@ _ml_ensemble: dict | None = None
 def _init_ml_ensemble() -> dict | None:
     """
     Load or train the XGBoost ensemble.
-    Falls back gracefully — returns None if xgboost/sklearn not installed.
-    Trained on synthetic data initially; improves as paper trades accumulate.
+    Order of preference:
+      1. Load saved models from data/ml/ if present and < 7 days old (real-bar trained)
+      2. Train fresh from real history via ml.train_from_history (writes saved models)
+      3. Synthetic warm-start fallback (lets the engine still run if 1+2 fail)
+    Returns None only if xgboost itself is unavailable.
     """
+    # ── 1. Try loading saved real-bar models ──────────────────────────────────
+    try:
+        from ml.train_from_history import load_saved_models
+        saved = load_saved_models(max_age_days=7)
+        if saved:
+            import json as _json
+            from pathlib import Path as _Path
+            meta_path = _Path(DB_PATH).parent / "ml" / "training_meta.json"
+            try:
+                meta = _json.loads(meta_path.read_text())
+                trained_at = meta.get("trained_at", "?")
+                log.info(
+                    f"✅ Loaded saved XGBoost models (trained: {trained_at}) — "
+                    f"val_acc india={meta.get('val_acc_india')} crypto={meta.get('val_acc_crypto')}"
+                )
+            except Exception:
+                log.info("✅ Loaded saved XGBoost models")
+            return saved
+    except Exception as exc:
+        log.warning(f"saved-model load skipped: {exc}")
+
+    # ── 2. Train fresh from real history (writes saved models for next time) ──
+    try:
+        from ml.train_from_history import train_all_markets, load_saved_models
+        log.info("Training new XGBoost models from history (real bars)...")
+        meta = train_all_markets(min_samples=500)
+        # Reload from disk so we get the persisted version
+        saved = load_saved_models(max_age_days=7)
+        if saved:
+            log.info(
+                f"✅ Real-history training complete — "
+                f"val_acc india={meta.get('val_acc_india')} crypto={meta.get('val_acc_crypto')}"
+            )
+            return saved
+    except Exception as exc:
+        log.warning(f"real-history training failed (will fall back): {exc}")
+
+    # ── 3. Synthetic fallback (last resort) ───────────────────────────────────
     try:
         from ml.xgboost_ensemble import build_ensemble, train_all
         ensemble = build_ensemble()
         train_all(ensemble)
-        log.info("✅ XGBoost ensemble ready (synthetic-data warm start)")
+        log.info("⚠️  XGBoost ensemble ready (SYNTHETIC fallback — not predictive)")
         return ensemble
     except Exception as exc:
         log.warning(f"XGBoost ensemble unavailable (non-fatal): {exc}")
