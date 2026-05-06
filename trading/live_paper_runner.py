@@ -116,7 +116,7 @@ CRYPTO_SYMBOLS = [
 # BTC dominance threshold: when BTC dominance > 58%, alts underperform — reduce alt exposure
 BTC_DOMINANCE_CUTOFF = 58.0   # % — above this, skip SOL/LINK/DOT/AVAX BUYs
 
-INITIAL_CAPITAL = {"india": 500_000.0, "crypto": 1_000.0}
+INITIAL_CAPITAL = {"india": 25_000.0, "crypto": 120.0}  # India ₹25k, Crypto ₹10k≈$120 @ 83 INR/USD
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -869,4 +869,148 @@ def run_india(positions: dict, portfolio: dict) -> None:
     if not is_market_open("india"):
         log.info("NSE closed — skipping India cycle")
         return
-   
+    log.info("── India (Angel One) ──────────────────────────────")
+
+    # Release any T+1 settled capital before trading
+    _settle_pending_capital(portfolio, "india")
+
+    for symbol, token, exchange, sector in NSE_WATCHLIST:
+        log.info(f"  {symbol} [{sector}]")
+        df = fetch_nse_hourly(symbol, token, exchange)
+        if df is None:
+            continue
+        try:
+            features = compute_features(df)
+        except Exception as e:
+            log.error(f"  compute_features {symbol}: {e}")
+            continue
+
+        signal, regime, conf = generate_signal(symbol, features, "india")
+        last_price = float(df["close"].iloc[-1])
+        execute("india", symbol, signal, regime, conf,
+                last_price, features, positions, portfolio, sector)
+        time.sleep(0.3)
+
+    p = portfolio["india"]
+    log.info(
+        f"  India → capital: ₹{p['capital']:,.0f} | "
+        f"realized: ₹{p['realized_pnl']:+,.0f} | "
+        f"trades: {p['total_trades']} | "
+        f"wins: {p.get('wins',0)}/{p['total_trades']}"
+    )
+
+
+def _binance_healthy() -> bool:
+    """
+    Ping Binance before starting the crypto cycle.
+    Returns False (+ logs + Telegram alert) if the exchange is unreachable.
+    Binance has ~2-3 outages per year; skipping the cycle is safer than trading
+    on stale/incomplete data.
+    """
+    try:
+        ex = _get_binance()
+        ex.fetch_time()          # lightweight ping — returns server timestamp
+        return True
+    except Exception as e:
+        msg = f"⚠️ Binance unreachable — skipping crypto cycle: {e}"
+        log.warning(msg)
+        send_alert(msg, market="crypto")
+        return False
+
+
+def run_crypto(positions: dict, portfolio: dict) -> None:
+    log.info("── Crypto (Binance) ───────────────────────────────")
+
+    # Exchange health-check — abort cycle if Binance is down
+    if not _binance_healthy():
+        return
+
+    # Macro filter: BTC dominance > cutoff → suppress alt-coin BUYs
+    btc_dom = fetch_btc_dominance()
+    alt_buy_blocked = btc_dom > BTC_DOMINANCE_CUTOFF
+    if alt_buy_blocked:
+        log.info(
+            f"  ⚠️  BTC dominance {btc_dom:.1f}% > {BTC_DOMINANCE_CUTOFF}% "
+            f"— alt BUYs suppressed this cycle"
+        )
+
+    # Alt coins that get suppressed under high BTC dominance
+    _ALT_SYMBOLS = {"SOL/USDT", "LINK/USDT", "DOT/USDT", "AVAX/USDT"}
+
+    for symbol in CRYPTO_SYMBOLS:
+        log.info(f"  {symbol}")
+        df = fetch_crypto_hourly(symbol)
+        if df is None:
+            continue
+        try:
+            features = compute_features(df)
+        except Exception as e:
+            log.error(f"  compute_features {symbol}: {e}")
+            continue
+
+        signal, regime, conf = generate_signal(symbol, features, "crypto")
+        last_price = float(df["close"].iloc[-1])
+
+        # Suppress new alt BUYs when BTC is dominating; allow SELL/HOLD and BTC/ETH
+        if alt_buy_blocked and signal == "BUY" and symbol in _ALT_SYMBOLS:
+            log.info(f"    ⛔ Alt BUY suppressed (BTC.D={btc_dom:.1f}%) — {symbol}")
+            signal = "HOLD"
+
+        execute("crypto", symbol, signal, regime, conf,
+                last_price, features, positions, portfolio)
+        time.sleep(1.0)
+
+    p = portfolio["crypto"]
+    log.info(
+        f"  Crypto → capital: ${p['capital']:,.4f} | "
+        f"realized: ${p['realized_pnl']:+.4f} | "
+        f"trades: {p['total_trades']} | "
+        f"wins: {p.get('wins',0)}/{p['total_trades']}"
+    )
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    log.info(f"═══ AAATS Paper Runner v2 — {ts} ═══")
+
+    # HMM warmup (trains on daily bars — only on first run of the day)
+    try:
+        warmup_india()
+    except Exception as e:
+        log.warning(f"India warmup error (non-fatal): {e}")
+
+    try:
+        warmup_crypto()
+    except Exception as e:
+        log.warning(f"Crypto warmup error (non-fatal): {e}")
+
+    positions = load_positions()
+    portfolio = load_portfolio()
+
+    try:
+        run_india(positions, portfolio)
+    except Exception as e:
+        log.exception(f"India cycle error: {e}")
+        send_alert(f"❌ India cycle error: {e}", market="india")
+
+    try:
+        run_crypto(positions, portfolio)
+    except Exception as e:
+        log.exception(f"Crypto cycle error: {e}")
+        send_alert(f"❌ Crypto cycle error: {e}", market="crypto")
+
+    save_positions(positions)
+    save_portfolio(portfolio)
+
+    open_pos  = len(positions["india"]) + len(positions["crypto"])
+    real_pnl  = portfolio["india"]["realized_pnl"] + portfolio["crypto"]["realized_pnl"]
+    log.info(
+        f"═══ Done | open={open_pos} | "
+        f"realized PnL ≈ {real_pnl:+.2f} (mixed ccy) ═══"
+    )
+
+
+if __name__ == "__main__":
+    main()

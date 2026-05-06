@@ -1,0 +1,74 @@
+# AAATS v6 — engine overlay (replaces aaats/dummy-engine:cp3 with the real
+# trading engine that wraps trading.live_paper_runner). Apply ON TOP of:
+#
+#   docker compose \
+#     -f /srv/aaats/compose/docker-compose.base.yml \
+#     -f /srv/aaats/compose/docker-compose.cp3.yml \
+#     -f /srv/aaats/compose/docker-compose.grafana.yml \
+#     -f /srv/aaats/compose/docker-compose.engine.yml \
+#     up -d --no-deps engine dummy-engine
+#
+# The container_name `aaats-engine` is preserved so the watchdog config does
+# not change at cutover. Heartbeat key (aaats:hb:engine) and metrics port
+# (9100) are unchanged so Prometheus/Grafana keep scraping the same target.
+
+name: aaats-base
+
+services:
+
+  # Override the dummy: keep the same logical service name so compose can
+  # replace it cleanly. Build context is the engine source dir on the VPS.
+  dummy-engine:
+    build:
+      context: /srv/aaats/engine_src
+      dockerfile: engine/Dockerfile
+    image: aaats/engine:v6
+    container_name: aaats-engine
+    restart: unless-stopped
+    networks: [aaats]
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      REDIS_HOST: aaats-redis
+      ENGINE_HB_KEY: aaats:hb:engine
+      ENGINE_HB_INTERVAL_S: "30"
+      ENGINE_HB_TTL_S: "90"
+      ENGINE_WORK_INTERVAL_S: "3600"
+      METRICS_PORT: "9100"
+      ALERT_LIST: aaats:alerts:queue
+      LOG_LEVEL: INFO
+
+      # Trading credentials — passed through from /srv/aaats/compose/.env
+      INDIA__ANGEL_API_KEY:        ${INDIA__ANGEL_API_KEY:-}
+      INDIA__ANGEL_CLIENT_ID:      ${INDIA__ANGEL_CLIENT_ID:-}
+      INDIA__ANGEL_PIN:            ${INDIA__ANGEL_PIN:-}
+      INDIA__ANGEL_TOTP_SECRET:    ${INDIA__ANGEL_TOTP_SECRET:-}
+      CRYPTO__BINANCE_API_KEY:     ${CRYPTO__BINANCE_API_KEY:-}
+      CRYPTO__BINANCE_SECRET_KEY:  ${CRYPTO__BINANCE_SECRET_KEY:-}
+    secrets:
+      - redis_password
+    volumes:
+      - engine-data:/app/data
+      - engine-logs:/app/logs
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'python -c "import urllib.request,sys; urllib.request.urlopen(\"http://127.0.0.1:9100/ready\", timeout=3); sys.exit(0)"'
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+
+volumes:
+  engine-data:
+    name: aaats-engine-data
+  engine-logs:
+    name: aaats-engine-logs

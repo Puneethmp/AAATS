@@ -173,5 +173,3 @@ def require_market_open(market: MarketType) -> bool:
         _log.info(f"{market.upper()} market not open (session={session}) — skipping cycle")
         return False
     return True
-    date(2027, 8, 15),   # Independence Day
-    date(2027, 9, 6),    # 
