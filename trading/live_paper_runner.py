@@ -181,17 +181,63 @@ def save_positions(p: dict) -> None:
 def load_portfolio() -> dict:
     default = {
         m: {
-            "capital":       INITIAL_CAPITAL[m],
-            "realized_pnl":  0.0,
-            "total_trades":  0,
-            "wins":          0,
-            "losses":        0,
-            "total_win_pct": 0.0,
-            "total_loss_pct": 0.0,
+            "capital":           INITIAL_CAPITAL[m],
+            "realized_pnl":      0.0,
+            "total_trades":      0,
+            "wins":              0,
+            "losses":            0,
+            "total_win_pct":     0.0,
+            "total_loss_pct":    0.0,
+            # T+1 settlement queue: list of {"amount": float, "settles_on": "YYYY-MM-DD"}
+            "settlement_queue":  [],
         }
         for m in ("india", "crypto")
     }
     return _load_json(PORTFOLIO_FILE, default)
+
+
+# ── T+1 Settlement queue (India NSE) ─────────────────────────────────────────
+
+def _settle_pending_capital(portfolio: dict, market: str) -> None:
+    """
+    Move settled capital back into available balance.
+    NSE T+1: proceeds from a SELL settle the next trading day.
+    Call this at the start of each India cycle.
+    """
+    if market != "india":
+        return
+    p = portfolio[market]
+    queue = p.get("settlement_queue", [])
+    if not queue:
+        return
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    settled, pending = [], []
+    for item in queue:
+        if item["settles_on"] <= today:
+            settled.append(item["amount"])
+        else:
+            pending.append(item)
+    if settled:
+        released = sum(settled)
+        p["capital"] += released
+        p["settlement_queue"] = pending
+        log.info(f"  ✅ T+1 settled: ₹{released:,.0f} now available ({len(settled)} trade(s))")
+
+
+def _queue_settlement(portfolio: dict, market: str, amount: float) -> None:
+    """Lock SELL proceeds for T+1 settlement instead of releasing instantly."""
+    if market != "india":
+        return
+    from datetime import timedelta
+    # Find next trading day (skip weekends; holiday calendar in market_hours)
+    settle_date = datetime.now(timezone.utc).date() + timedelta(days=1)
+    while settle_date.weekday() >= 5:   # skip Saturday/Sunday
+        settle_date += timedelta(days=1)
+    portfolio[market].setdefault("settlement_queue", []).append({
+        "amount":      amount,
+        "settles_on":  settle_date.strftime("%Y-%m-%d"),
+    })
+    log.info(f"  🕐 T+1: ₹{amount:,.0f} queued → settles {settle_date}")
 
 
 def save_portfolio(p: dict) -> None:
@@ -580,11 +626,63 @@ def _sector_count(positions: dict, sector: str) -> int:
     )
 
 
-# ── Slippage-adjusted fill price ──────────────────────────────────────────────
+# ── Circuit-breaker guard (India NSE) ────────────────────────────────────────
 
-def _fill_price(price: float, action: str, market: str) -> float:
-    slip = SLIPPAGE.get(market, 0.001)
-    return price * (1 + slip) if action == "BUY" else price * (1 - slip)
+def _nse_circuit_tripped(features: pd.DataFrame, last_price: float) -> bool:
+    """
+    Return True if the stock is near its NSE intraday circuit-breaker band.
+    NSE freezes trading at ±10% from previous close. We skip BUYs at ±9%
+    to avoid chasing a halt and getting stuck in a position with no exit.
+    """
+    try:
+        prev_close = float(features["close"].iloc[-2])
+        if prev_close <= 0:
+            return False
+        move_pct = abs(last_price - prev_close) / prev_close
+        if move_pct >= 0.09:
+            log.info(
+                f"    ⚡ Circuit breaker guard: {move_pct:.1%} move "
+                f"(prev_close={prev_close:.2f}) — skip BUY"
+            )
+            return True
+    except (IndexError, KeyError, TypeError):
+        pass
+    return False
+
+
+# ── Slippage-adjusted fill price (with dynamic scaling for crypto) ─────────────
+
+def _fill_price(price: float, action: str, market: str,
+                features: pd.DataFrame | None = None) -> float:
+    """
+    India: fixed 0.05% (NSE market impact + brokerage).
+    Crypto: dynamic — base 0.10% scaled by 24h volatility.
+      - Low vol  (returns stddev < 1%): 0.10%
+      - Normal   (1–3%):                0.15%
+      - High vol (3–5%):                0.25%
+      - Extreme  (>5%):                 0.40% cap
+    """
+    base_slip = SLIPPAGE.get(market, 0.001)
+
+    if market == "crypto" and features is not None and len(features) >= 24:
+        try:
+            returns = features["close"].pct_change().dropna().tail(24)
+            vol = float(returns.std())          # 24-bar rolling stddev of 1h returns
+            if vol > 0.05:
+                dyn_slip = 0.004                # 0.40% cap
+            elif vol > 0.03:
+                dyn_slip = 0.0025
+            elif vol > 0.01:
+                dyn_slip = 0.0015
+            else:
+                dyn_slip = base_slip            # 0.10% base
+            if dyn_slip != base_slip:
+                log.debug(f"    Dynamic slippage: {dyn_slip:.2%} (vol={vol:.3%})")
+            base_slip = dyn_slip
+        except Exception:
+            pass
+
+    return price * (1 + base_slip) if action == "BUY" else price * (1 - base_slip)
 
 
 # ── Paper trade execution ─────────────────────────────────────────────────────
@@ -626,6 +724,10 @@ def execute(
             log.info(f"    ⛔ Sector cap reached for '{sector}' — skip BUY {symbol}")
             return
 
+        # Circuit-breaker guard (NSE only) — skip BUYs within 9% of daily band
+        if market == "india" and _nse_circuit_tripped(features, last_price):
+            return
+
         # ATR-based position sizing
         atr      = float(features.iloc[-1].get("atr_14", last_price * 0.015) or last_price * 0.015)
         win_rate, avg_win, avg_loss = _kelly_params(portfolio, market)
@@ -644,7 +746,7 @@ def execute(
             log.warning(f"    🛑 Risk gate blocked {symbol}: {gate.reason}")
             return
 
-        fill    = _fill_price(last_price, "BUY", market)
+        fill    = _fill_price(last_price, "BUY", market, features)
         value   = shares * fill
 
         record_trade(
@@ -681,7 +783,7 @@ def execute(
     elif signal == "SELL" and symbol in mkt_pos:
         pos    = mkt_pos.pop(symbol)
         sh     = pos["shares"]
-        fill   = _fill_price(last_price, "SELL", market)
+        fill   = _fill_price(last_price, "SELL", market, features)
         pnl    = (fill - pos["entry_price"]) * sh
         value  = fill * sh
 
@@ -692,7 +794,14 @@ def execute(
             pnl=pnl, note=f"Entry {pos['entry_price']:.4f}",
         )
         sizer.remove_position_heat(pos.get("risk_pct", 0.01))
-        mkt_port["capital"]       += value
+
+        # T+1 settlement: lock proceeds for next trading day (India NSE only)
+        if market == "india":
+            _queue_settlement(portfolio, market, value)
+            # realized PnL is booked now; only capital availability is deferred
+        else:
+            mkt_port["capital"] += value
+
         mkt_port["realized_pnl"]  += pnl
         mkt_port["total_trades"]  += 1
 
@@ -760,123 +869,4 @@ def run_india(positions: dict, portfolio: dict) -> None:
     if not is_market_open("india"):
         log.info("NSE closed — skipping India cycle")
         return
-    log.info("── India (Angel One) ──────────────────────────────")
-
-    for symbol, token, exchange, sector in NSE_WATCHLIST:
-        log.info(f"  {symbol} [{sector}]")
-        df = fetch_nse_hourly(symbol, token, exchange)
-        if df is None:
-            continue
-        try:
-            features = compute_features(df)
-        except Exception as e:
-            log.error(f"  compute_features {symbol}: {e}")
-            continue
-
-        signal, regime, conf = generate_signal(symbol, features, "india")
-        last_price = float(df["close"].iloc[-1])
-        execute("india", symbol, signal, regime, conf,
-                last_price, features, positions, portfolio, sector)
-        time.sleep(0.3)
-
-    p = portfolio["india"]
-    log.info(
-        f"  India → capital: ₹{p['capital']:,.0f} | "
-        f"realized: ₹{p['realized_pnl']:+,.0f} | "
-        f"trades: {p['total_trades']} | "
-        f"wins: {p.get('wins',0)}/{p['total_trades']}"
-    )
-
-
-def run_crypto(positions: dict, portfolio: dict) -> None:
-    log.info("── Crypto (Binance) ───────────────────────────────")
-
-    # Macro filter: BTC dominance > cutoff → suppress alt-coin BUYs
-    btc_dom = fetch_btc_dominance()
-    alt_buy_blocked = btc_dom > BTC_DOMINANCE_CUTOFF
-    if alt_buy_blocked:
-        log.info(
-            f"  ⚠️  BTC dominance {btc_dom:.1f}% > {BTC_DOMINANCE_CUTOFF}% "
-            f"— alt BUYs suppressed this cycle"
-        )
-
-    # Alt coins that get suppressed under high BTC dominance
-    _ALT_SYMBOLS = {"SOL/USDT", "LINK/USDT", "DOT/USDT", "AVAX/USDT"}
-
-    for symbol in CRYPTO_SYMBOLS:
-        log.info(f"  {symbol}")
-        df = fetch_crypto_hourly(symbol)
-        if df is None:
-            continue
-        try:
-            features = compute_features(df)
-        except Exception as e:
-            log.error(f"  compute_features {symbol}: {e}")
-            continue
-
-        signal, regime, conf = generate_signal(symbol, features, "crypto")
-        last_price = float(df["close"].iloc[-1])
-
-        # Suppress new alt BUYs when BTC is dominating; allow SELL/HOLD and BTC/ETH
-        if alt_buy_blocked and signal == "BUY" and symbol in _ALT_SYMBOLS:
-            log.info(f"    ⛔ Alt BUY suppressed (BTC.D={btc_dom:.1f}%) — {symbol}")
-            signal = "HOLD"
-
-        execute("crypto", symbol, signal, regime, conf,
-                last_price, features, positions, portfolio)
-        time.sleep(1.0)
-
-    p = portfolio["crypto"]
-    log.info(
-        f"  Crypto → capital: ${p['capital']:,.4f} | "
-        f"realized: ${p['realized_pnl']:+.4f} | "
-        f"trades: {p['total_trades']} | "
-        f"wins: {p.get('wins',0)}/{p['total_trades']}"
-    )
-
-
-# ── Entry point ───────────────────────────────────────────────────────────────────────────────
-
-def main() -> None:
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    log.info(f"═══ AAATS Paper Runner v2 — {ts} ═══")
-
-    # HMM warmup (trains on daily bars — only on first run of the day)
-    try:
-        warmup_india()
-    except Exception as e:
-        log.warning(f"India warmup error (non-fatal): {e}")
-
-    try:
-        warmup_crypto()
-    except Exception as e:
-        log.warning(f"Crypto warmup error (non-fatal): {e}")
-
-    positions = load_positions()
-    portfolio = load_portfolio()
-
-    try:
-        run_india(positions, portfolio)
-    except Exception as e:
-        log.exception(f"India cycle error: {e}")
-        send_alert(f"❌ India cycle error: {e}", market="india")
-
-    try:
-        run_crypto(positions, portfolio)
-    except Exception as e:
-        log.exception(f"Crypto cycle error: {e}")
-        send_alert(f"❌ Crypto cycle error: {e}", market="crypto")
-
-    save_positions(positions)
-    save_portfolio(portfolio)
-
-    open_pos  = len(positions["india"]) + len(positions["crypto"])
-    real_pnl  = portfolio["india"]["realized_pnl"] + portfolio["crypto"]["realized_pnl"]
-    log.info(
-        f"═══ Done | open={open_pos} | "
-        f"realized PnL ≈ {real_pnl:+.2f} (mixed ccy) ═══"
-    )
-
-
-if __name__ == "__main__":
-    main()
+   
