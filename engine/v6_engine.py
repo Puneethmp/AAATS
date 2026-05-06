@@ -18,6 +18,7 @@ python-telegram-bot directly (which would no-op without OS env credentials).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -25,6 +26,7 @@ import sys
 import time
 from contextlib import suppress
 from datetime import datetime, timezone
+from pathlib import Path
 
 import redis.asyncio as aioredis
 from aiohttp import web
@@ -144,14 +146,62 @@ async def work_loop(stop: asyncio.Event) -> None:
 
 # ── http server: /metrics + /ready ────────────────────────────────────────────
 
+_DATA_DIR = Path(os.environ.get("ENGINE_DATA_DIR", "/app/data"))
+
+
+def _read_json_safe(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _live_state_lines() -> list[str]:
+    """Read paper_portfolio.json + paper_positions.json on each scrape and emit
+    one labelled metric per market — capital, realized PnL, trade counts, win
+    rate, open position count. Cheap (small JSON files, no lock contention)."""
+    out: list[str] = []
+    portfolio = _read_json_safe(_DATA_DIR / "paper_portfolio.json")
+    positions = _read_json_safe(_DATA_DIR / "paper_positions.json")
+    for market in ("india", "crypto"):
+        p = portfolio.get(market, {}) if isinstance(portfolio, dict) else {}
+        cap   = float(p.get("capital", 0.0) or 0.0)
+        rpnl  = float(p.get("realized_pnl", 0.0) or 0.0)
+        trades = int(p.get("total_trades", 0) or 0)
+        wins   = int(p.get("wins", 0) or 0)
+        losses = int(p.get("losses", 0) or 0)
+        win_rate = (wins / trades) if trades > 0 else 0.0
+        open_count = len(positions.get(market, {})) if isinstance(positions, dict) else 0
+        lbl = f'{{market="{market}"}}'
+        out.append(f"aaats_engine_capital{lbl} {cap}")
+        out.append(f"aaats_engine_realized_pnl{lbl} {rpnl}")
+        out.append(f"aaats_engine_total_trades{lbl} {trades}")
+        out.append(f"aaats_engine_wins{lbl} {wins}")
+        out.append(f"aaats_engine_losses{lbl} {losses}")
+        out.append(f"aaats_engine_win_rate{lbl} {win_rate}")
+        out.append(f"aaats_engine_open_positions{lbl} {open_count}")
+    return out
+
+
 async def metrics_handler(_: web.Request) -> web.Response:
     lines = []
     for name, value in _metrics.items():
         kind = "gauge" if name in ("last_cycle_seconds", "process_start_time_seconds") else "counter"
         lines.append(f"# TYPE aaats_engine_{name} {kind}")
         lines.append(f"aaats_engine_{name} {value}")
-    # back-compat aliases — keep the dummy-engine metric names so existing
-    # dashboards / Prometheus rules continue to resolve without edits.
+
+    # Live trading state — refreshed each scrape so Grafana sees fresh values
+    lines.append("# TYPE aaats_engine_capital gauge")
+    lines.append("# TYPE aaats_engine_realized_pnl gauge")
+    lines.append("# TYPE aaats_engine_total_trades counter")
+    lines.append("# TYPE aaats_engine_wins counter")
+    lines.append("# TYPE aaats_engine_losses counter")
+    lines.append("# TYPE aaats_engine_win_rate gauge")
+    lines.append("# TYPE aaats_engine_open_positions gauge")
+    lines.extend(_live_state_lines())
+
+    # Back-compat aliases — keep dummy-engine metric names so existing
+    # dashboards / Prometheus rules resolve without edits.
     aliases = {
         "dummy_engine_cycles_total":            _metrics["cycles_total"],
         "dummy_engine_heartbeats_total":        _metrics["heartbeats_total"],
