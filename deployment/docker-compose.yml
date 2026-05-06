@@ -1,0 +1,129 @@
+version: '3.8'
+
+services:
+  # Paper trading - US markets
+  aaats-paper-us:
+    build: ..
+    container_name: aaats-paper-us
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      - SYSTEM__TRADING_MODE=paper
+      - MARKET=us
+    volumes:
+      - ../logs:/app/logs
+      - ../data:/app/data
+      - state-us:/app/data/state
+    command: python trading/paper_loop.py --market us
+    healthcheck:
+      test: ["CMD", "python", "scripts/health_check.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Paper trading - India markets
+  aaats-paper-india:
+    build: ..
+    container_name: aaats-paper-india
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      - SYSTEM__TRADING_MODE=paper
+      - MARKET=india
+    volumes:
+      - ../logs:/app/logs
+      - ../data:/app/data
+      - state-india:/app/data/state
+    command: python trading/paper_loop.py --market india
+    healthcheck:
+      test: ["CMD", "python", "scripts/health_check.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Paper trading - Crypto markets
+  aaats-paper-crypto:
+    build: ..
+    container_name: aaats-paper-crypto
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      - SYSTEM__TRADING_MODE=paper
+      - MARKET=crypto
+    volumes:
+      - ../logs:/app/logs
+      - ../data:/app/data
+      - state-crypto:/app/data/state
+    command: python trading/paper_loop.py --market crypto
+    healthcheck:
+      test: ["CMD", "python", "scripts/health_check.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Streamlit dashboard
+  aaats-dashboard:
+    build: ..
+    container_name: aaats-dashboard
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    ports:
+      - "8501:8501"
+    volumes:
+      - ../logs:/app/logs
+      - ../data:/app/data
+    command: streamlit run streamlit_app/app.py --server.port=8501 --server.address=0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+volumes:
+  state-us:
+  state-india:
+  state-crypto:
+
+networks:
+  default:
+    name: aaats-network

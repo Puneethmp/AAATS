@@ -1,0 +1,46 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Lint with ruff
+        run: ruff check .
+
+      - name: Check formatting with black
+        run: black --check .
+
+      - name: Run tests
+        run: pytest tests/ -v --cov=. --cov-report=term-missing
+        env:
+          US__ALPACA_API_KEY: test_key
+          US__ALPACA_SECRET_KEY: test_secret
+          INDIA__ANGEL_API_KEY: test_key
+          INDIA__ANGEL_CLIENT_ID: test_client
+          INDIA__ANGEL_PASSWORD: test_password
+          INDIA__ANGEL_TOTP_SECRET: test_totp
+          ALERTS__TELEGRAM_BOT_TOKEN: test_token
+          ALERTS__TELEGRAM_CHAT_ID: "123456789"

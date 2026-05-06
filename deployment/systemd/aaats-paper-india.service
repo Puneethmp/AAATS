@@ -1,0 +1,22 @@
+[Unit]
+Description=AAATS Paper Trading - India Markets
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/aaats
+ExecStart=/usr/bin/docker compose -f deployment/docker-compose.yml up aaats-paper-india
+ExecStop=/usr/bin/docker compose -f deployment/docker-compose.yml stop aaats-paper-india
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Resource limits (Oracle Free Tier optimized)
+MemoryLimit=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

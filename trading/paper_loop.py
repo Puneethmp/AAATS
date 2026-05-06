@@ -16,17 +16,11 @@ sessions with different data sources and strategies per market.
 from __future__ import annotations
 
 import sqlite3
-import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
-# Add project root to path BEFORE any local imports
-_project_root = Path(__file__).parent.parent
-if str(_project_root) not in sys.path:
-    sys.path.insert(0, str(_project_root))
 
 import pandas as pd
 
@@ -369,125 +363,3 @@ def publish_cycle_state(
     
     # Publish state (rate-limited to every 5 seconds)
     publish_state(state, min_interval_seconds=5.0)
-
-
-def main():
-    """
-    Main entry point for paper trading loop.
-    
-    Runs autonomous paper trading for the specified market.
-    """
-    import argparse
-    import os
-    import sys
-    from pathlib import Path as PathLib
-    
-    # Add project root to Python path for imports
-    project_root = PathLib(__file__).parent.parent
-    if str(project_root) not in sys.path:
-        sys.path.insert(0, str(project_root))
-    
-    parser = argparse.ArgumentParser(description="AAATS Paper Trading Loop")
-    parser.add_argument(
-        "--market",
-        type=str,
-        required=True,
-        choices=["us", "india", "crypto"],
-        help="Market to trade (us, india, crypto)"
-    )
-    parser.add_argument(
-        "--db-path",
-        type=str,
-        default="data/paper_trades.db",
-        help="Path to SQLite database for trade logging"
-    )
-    parser.add_argument(
-        "--initial-capital",
-        type=float,
-        default=100000.0,
-        help="Initial capital for paper trading"
-    )
-    parser.add_argument(
-        "--cycle-interval",
-        type=int,
-        default=60,
-        help="Seconds between trading cycles"
-    )
-    
-    args = parser.parse_args()
-    
-    _log.info(f"Starting AAATS Paper Trading Loop - Market: {args.market}")
-    _log.info(f"Database: {args.db_path}")
-    _log.info(f"Initial Capital: ${args.initial_capital:,.2f}")
-    _log.info(f"Cycle Interval: {args.cycle_interval}s")
-    
-    # Initialize database
-    db_path = Path(args.db_path)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = _init_db(str(db_path))
-    
-    # Initialize state
-    state = PaperTradingState()
-    state.capital[args.market] = args.initial_capital
-    
-    # Initialize risk engine
-    risk_engine = RiskEngine(initial_portfolio=args.initial_capital)
-    
-    _log.info(f"Paper trading loop initialized for {args.market} market")
-    _log.info("Entering main trading loop...")
-    
-    try:
-        while True:
-            state.cycle_count += 1
-            cycle_start = time.time()
-            
-            try:
-                # Emit heartbeat
-                emit_cycle_heartbeat(
-                    market=args.market,
-                    cycle_count=state.cycle_count,
-                    status="RUNNING"
-                )
-                
-                # TODO: Implement actual trading logic here
-                # For now, just log that we're running
-                _log.info(
-                    f"[{args.market.upper()}] Cycle {state.cycle_count} - "
-                    f"Capital: ${state.capital[args.market]:,.2f} - "
-                    f"Positions: {len(state.positions[args.market])}"
-                )
-                
-                # Publish state
-                publish_cycle_state(
-                    market=args.market,
-                    regime="UNKNOWN",
-                    positions=state.positions[args.market],
-                    capital=state.capital[args.market],
-                    cycle_count=state.cycle_count,
-                )
-                
-            except Exception as e:
-                _log.exception(f"Error in trading cycle {state.cycle_count}")
-                emit_cycle_heartbeat(
-                    market=args.market,
-                    cycle_count=state.cycle_count,
-                    status="ERROR",
-                    error=str(e)
-                )
-            
-            # Sleep until next cycle
-            cycle_duration = time.time() - cycle_start
-            sleep_time = max(0, args.cycle_interval - cycle_duration)
-            
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-                
-    except KeyboardInterrupt:
-        _log.info("Received shutdown signal, stopping paper trading loop...")
-    finally:
-        conn.close()
-        _log.info("Paper trading loop stopped")
-
-
-if __name__ == "__main__":
-    main()

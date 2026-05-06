@@ -753,6 +753,7 @@ def execute(
     positions: dict,
     portfolio: dict,
     sector: str = "",
+    ml_size_scale: float = 1.0,   # XGBoost confidence multiplier (0.5 or 1.0)
 ) -> None:
     mkt_pos  = positions[market]
     mkt_port = portfolio[market]
@@ -801,6 +802,11 @@ def execute(
             log.warning(f"    🛑 Risk gate blocked {symbol}: {gate.reason}")
             return
 
+        # ML confidence scaling (0.5 = half size when model is uncertain)
+        if ml_size_scale < 1.0:
+            shares *= ml_size_scale
+            log.info(f"    🤖 ML scale={ml_size_scale:.1f} → {shares:.6f} sh")
+
         fill    = _fill_price(last_price, "BUY", market, features)
         value   = shares * fill
 
@@ -808,7 +814,7 @@ def execute(
             db_path=DB_PATH, market=market, symbol=symbol,
             action="BUY", shares=shares, price=fill,
             signal=signal, regime=regime, risk_action="ALLOW",
-            note=f"atr={atr:.4f} kelly_w={win_rate:.2f}",
+            note=f"atr={atr:.4f} kelly_w={win_rate:.2f} ml_scale={ml_size_scale:.1f}",
         )
         mkt_pos[symbol] = {
             "shares":      shares,
@@ -918,43 +924,6 @@ def warmup_crypto() -> None:
         time.sleep(1.0)
 
 
-# ── Market cycles ─────────────────────────────────────────────────────────────
-
-def run_india(positions: dict, portfolio: dict) -> None:
-    if not is_market_open("india"):
-        log.info("NSE closed — skipping India cycle")
-        return
-    log.info("── India (Angel One) ──────────────────────────────")
-
-    # Release any T+1 settled capital before trading
-    _settle_pending_capital(portfolio, "india")
-
-    for symbol, token, exchange, sector in NSE_WATCHLIST:
-        log.info(f"  {symbol} [{sector}]")
-        df = fetch_nse_hourly(symbol, token, exchange)
-        if df is None:
-            continue
-        try:
-            features = compute_features(df)
-        except Exception as e:
-            log.error(f"  compute_features {symbol}: {e}")
-            continue
-
-        signal, regime, conf = generate_signal(symbol, features, "india")
-        last_price = float(df["close"].iloc[-1])
-        execute("india", symbol, signal, regime, conf,
-                last_price, features, positions, portfolio, sector)
-        time.sleep(0.3)
-
-    p = portfolio["india"]
-    log.info(
-        f"  India → capital: ₹{p['capital']:,.0f} | "
-        f"realized: ₹{p['realized_pnl']:+,.0f} | "
-        f"trades: {p['total_trades']} | "
-        f"wins: {p.get('wins',0)}/{p['total_trades']}"
-    )
-
-
 def _binance_healthy() -> bool:
     """
     Ping Binance before starting the crypto cycle.
@@ -973,98 +942,448 @@ def _binance_healthy() -> bool:
         return False
 
 
-def run_crypto(positions: dict, portfolio: dict) -> None:
-    log.info("── Crypto (Binance) ───────────────────────────────")
+# ── ML confidence scoring (XGBoost) ──────────────────────────────────────────
 
-    # Exchange health-check — abort cycle if Binance is down
-    if not _binance_healthy():
-        return
+_ml_ensemble: dict | None = None
 
-    # Macro filter: BTC dominance > cutoff → suppress alt-coin BUYs
-    btc_dom = fetch_btc_dominance()
-    alt_buy_blocked = btc_dom > BTC_DOMINANCE_CUTOFF
-    if alt_buy_blocked:
-        log.info(
-            f"  ⚠️  BTC dominance {btc_dom:.1f}% > {BTC_DOMINANCE_CUTOFF}% "
-            f"— alt BUYs suppressed this cycle"
+
+def _init_ml_ensemble() -> dict | None:
+    """
+    Load or train the XGBoost ensemble.
+    Falls back gracefully — returns None if xgboost/sklearn not installed.
+    Trained on synthetic data initially; improves as paper trades accumulate.
+    """
+    try:
+        from ml.xgboost_ensemble import build_ensemble, train_all
+        ensemble = build_ensemble()
+        train_all(ensemble)
+        log.info("✅ XGBoost ensemble ready (synthetic-data warm start)")
+        return ensemble
+    except Exception as exc:
+        log.warning(f"XGBoost ensemble unavailable (non-fatal): {exc}")
+        return None
+
+
+def _score_ml(features: pd.DataFrame, market: str) -> float:
+    """
+    Return ML confidence [0, 1] for the latest bar.
+    Maps feature names to what XGBoost was trained on.
+    Returns 0.55 (neutral pass-through) if model not available.
+    """
+    global _ml_ensemble
+    if _ml_ensemble is None:
+        return 0.55  # neutral — don't block trades when model missing
+
+    try:
+        from ml.xgboost_ensemble import score_signal
+        last = features.iloc[-1]
+
+        # Build feature row — map compute_features() names to model feature names
+        row: dict[str, float] = {}
+        col = lambda k, d=0.0: float(last.get(k, d) or d)
+
+        # Returns (compute_features uses "returns", model expects "return_Nd")
+        close_arr = features["close"].values
+        if len(close_arr) >= 2:
+            row["returns_1d"] = row["return_1d"] = float(
+                (close_arr[-1] - close_arr[-2]) / max(close_arr[-2], 1e-9)
+            )
+        if len(close_arr) >= 6:
+            row["returns_5d"] = row["return_5d"] = float(
+                (close_arr[-1] - close_arr[-6]) / max(close_arr[-6], 1e-9)
+            )
+        if len(close_arr) >= 21:
+            row["returns_20d"] = row["return_20d"] = float(
+                (close_arr[-1] - close_arr[-21]) / max(close_arr[-21], 1e-9)
+            )
+
+        row["rsi_14"]        = col("rsi_14", 50.0)
+        row["macd"]          = col("macd", 0.0)
+        row["adx_14"]        = col("adx_14", 25.0)
+        row["atr_14"]        = col("atr_14", 0.01)
+        row["atr_pct"]       = col("atr_14", 0.01) / max(float(last.get("close", 1)), 1e-9)
+        row["india_vix"]     = col("india_vix", 15.0)
+        row["vol_ratio"]     = row["vol_ratio_20"] = col("vol_ratio_20", 1.0)
+
+        # EMA spread %  = (close - ema50) / ema50
+        ema50 = col("ema_50", float(last.get("close", 1)))
+        price = col("close", 1.0)
+        row["ema_spread_pct"] = (price - ema50) / max(ema50, 1e-9)
+
+        row["hist_vol_20"] = float(
+            features["close"].pct_change().dropna().tail(20).std()
+        ) if len(features) >= 20 else 0.02
+
+        confidence = score_signal(market, row, _ml_ensemble)
+        log.debug(f"    🤖 ML confidence={confidence:.3f} (market={market})")
+        return confidence
+
+    except Exception as exc:
+        log.debug(f"    ML scoring failed (non-fatal): {exc}")
+        return 0.55
+
+
+def _ml_position_scale(confidence: float) -> float:
+    """Map ML confidence to position size multiplier (1.0 / 0.5 / 0.0)."""
+    try:
+        from ml.xgboost_ensemble import position_scale_from_confidence
+        return position_scale_from_confidence(confidence)
+    except Exception:
+        return 1.0  # pass-through if model unavailable
+
+
+# ── Sentiment: Fear & Greed index (crypto only) ───────────────────────────────
+
+_fear_greed_cache: dict = {}   # {"score": int, "ts": float}
+
+
+def fetch_fear_greed() -> int | None:
+    """
+    Fetch current Fear & Greed index from alternative.me (free, no auth).
+    Returns integer 0-100, or None on failure.
+    Cached for 30 minutes to avoid hammering the API.
+    """
+    import time as _time
+    now = _time.time()
+    if _fear_greed_cache and now - _fear_greed_cache.get("ts", 0) < 1800:
+        return _fear_greed_cache["score"]
+
+    try:
+        import urllib.request, json as _json
+        with urllib.request.urlopen(
+            "https://api.alternative.me/fng/?limit=1", timeout=5
+        ) as resp:
+            data = _json.loads(resp.read())
+            score = int(data["data"][0]["value"])
+            _fear_greed_cache.update({"score": score, "ts": now})
+            classification = data["data"][0].get("value_classification", "")
+            log.info(f"  📊 Fear & Greed: {score} ({classification})")
+            return score
+    except Exception as exc:
+        log.debug(f"  Fear & Greed fetch failed (non-fatal): {exc}")
+        return None
+
+
+def _crypto_sentiment_gate(signal: str) -> str:
+    """
+    Apply Fear & Greed filter to crypto signals.
+
+    Logic (contrarian — markets mean-revert):
+      score < 20 (Extreme Fear)   → BUY signal boosted (stays BUY)
+      score 20-30 (Fear)          → BUY signal passes unchanged
+      score 70-80 (Greed)         → BUY signal downgraded to HOLD
+      score > 80 (Extreme Greed)  → BUY blocked (market overbought)
+      score > 85 (Euphoria)       → SELL signal boosted (stays SELL)
+    """
+    score = fetch_fear_greed()
+    if score is None:
+        return signal   # no data → pass through
+
+    if signal == "BUY":
+        if score > 80:
+            log.info(f"    🟡 Fear&Greed={score} (Extreme Greed) → BUY → HOLD")
+            return "HOLD"
+        if score > 70:
+            log.info(f"    🟡 Fear&Greed={score} (Greed) → BUY downgraded → HOLD")
+            return "HOLD"
+
+    if signal == "SELL" and score < 20:
+        log.info(f"    🟡 Fear&Greed={score} (Extreme Fear) → SELL → HOLD (buy-the-fear)")
+        return "HOLD"
+
+    return signal
+
+
+# ── ATR trailing stop (all markets) ──────────────────────────────────────────
+
+def _check_trailing_stops(
+    market: str,
+    last_prices: dict[str, float],
+    features_map: dict[str, pd.DataFrame],
+    positions: dict,
+    portfolio: dict,
+) -> None:
+    """
+    Force-SELL any position that has moved 2.5× ATR against entry.
+    Runs before the main signal loop each cycle.
+    Prevents holding through regime changes or blow-up moves.
+    """
+    mkt_pos  = positions[market]
+    mkt_port = portfolio[market]
+    sizer    = _get_sizer(market, mkt_port["capital"])
+
+    to_stop: list[str] = []
+    for sym, pos in mkt_pos.items():
+        price = last_prices.get(sym)
+        if price is None:
+            continue
+        atr_entry = pos.get("atr_entry", price * 0.015)
+        entry     = pos["entry_price"]
+        stop_dist = 2.5 * atr_entry
+        loss      = entry - price   # positive if price fell below entry
+
+        if loss >= stop_dist:
+            to_stop.append(sym)
+            log.warning(
+                f"  🛑 ATR TRAILING STOP {sym} | entry={entry:.4f} "
+                f"price={price:.4f} loss={loss:.4f} > 2.5×ATR={stop_dist:.4f}"
+            )
+
+    for sym in to_stop:
+        if sym not in mkt_pos:
+            continue
+        pos   = mkt_pos.pop(sym)
+        sh    = pos["shares"]
+        price = last_prices[sym]
+        feat  = features_map.get(sym)
+        fill  = _fill_price(price, "SELL", market, feat)
+        pnl   = (fill - pos["entry_price"]) * sh
+        value = fill * sh
+
+        record_trade(
+            db_path=DB_PATH, market=market, symbol=sym,
+            action="SELL", shares=sh, price=fill,
+            signal="SELL", regime=pos.get("regime", "UNKNOWN"),
+            risk_action="ATR_STOP",
+            pnl=pnl, note=f"ATR trailing stop | entry={pos['entry_price']:.4f}",
+        )
+        sizer.remove_position_heat(pos.get("risk_pct", 0.01))
+
+        if market == "india":
+            _queue_settlement(portfolio, market, value)
+        else:
+            mkt_port["capital"] += value
+
+        mkt_port["realized_pnl"] += pnl
+        mkt_port["total_trades"] += 1
+        if pnl > 0:
+            mkt_port["wins"] += 1
+        else:
+            mkt_port["losses"] += 1
+
+        send_alert(
+            f"🛑 STOP {sym} @ {fill:.4f} | PnL={pnl:+.4f} (ATR trailing stop)",
+            market=market,
         )
 
-    # Alt coins that get suppressed under high BTC dominance
-    _ALT_SYMBOLS = {"SOL/USDT", "LINK/USDT", "DOT/USDT", "AVAX/USDT"}
 
-    for symbol in CRYPTO_SYMBOLS:
-        log.info(f"  {symbol}")
-        df = fetch_crypto_hourly(symbol)
-        if df is None:
-            continue
+# ── India NSE market runner ───────────────────────────────────────────────────
+
+
+
+# -- India NSE market runner --------------------------------------------------
+
+def run_india(positions: dict, portfolio: dict) -> None:
+    """Run one India NSE paper-trading cycle across the full watchlist."""
+    from execution.market_hours import require_market_open
+    if not require_market_open("india"):
+        return
+
+    _settle_pending_capital(portfolio, "india")
+    log.info("== NSE cycle | capital=INR %.2f ==", portfolio["india"]["capital"])
+
+    client = _get_angel_client()
+    if client is None:
+        log.error("  Angel One client unavailable -- skipping NSE cycle")
+        return
+
+    # Prefetch prices + features for ATR trailing stop
+    last_prices: dict = {}
+    features_map: dict = {}
+
+    for sym, token, exch, sector in NSE_WATCHLIST:
         try:
-            features = compute_features(df)
-        except Exception as e:
-            log.error(f"  compute_features {symbol}: {e}")
-            continue
+            hourly = fetch_nse_hourly(sym, token, exch)
+            if hourly is None or len(hourly) < 50:
+                continue
+            feat = compute_features(hourly)
+            if feat is None or feat.empty:
+                continue
+            price = float(feat["close"].iloc[-1])
+            last_prices[sym] = price
+            features_map[sym] = feat
+        except Exception as exc:
+            log.debug("  Prefetch %s: %s", sym, exc)
 
-        signal, regime, conf = generate_signal(symbol, features, "crypto")
-        last_price = float(df["close"].iloc[-1])
+    # ATR trailing stops first
+    _check_trailing_stops("india", last_prices, features_map, positions, portfolio)
 
-        # Suppress new alt BUYs when BTC is dominating; allow SELL/HOLD and BTC/ETH
-        if alt_buy_blocked and signal == "BUY" and symbol in _ALT_SYMBOLS:
-            log.info(f"    ⛔ Alt BUY suppressed (BTC.D={btc_dom:.1f}%) — {symbol}")
-            signal = "HOLD"
+    # Signal loop
+    for sym, token, exch, sector in NSE_WATCHLIST:
+        try:
+            feat = features_map.get(sym)
+            if feat is None:
+                continue
+            price = last_prices.get(sym)
+            if price is None:
+                continue
 
-        execute("crypto", symbol, signal, regime, conf,
-                last_price, features, positions, portfolio)
-        time.sleep(1.0)
+            log.info("  [%s] price=%.2f", sym, price)
+            signal, regime, conf = generate_signal(sym, feat, "india")
 
-    p = portfolio["crypto"]
-    log.info(
-        f"  Crypto → capital: ${p['capital']:,.4f} | "
-        f"realized: ${p['realized_pnl']:+.4f} | "
-        f"trades: {p['total_trades']} | "
-        f"wins: {p.get('wins',0)}/{p['total_trades']}"
-    )
+            # ML confidence gate
+            ml_conf = _score_ml(feat, "india")
+            ml_scale = _ml_position_scale(ml_conf)
+            if ml_scale == 0.0:
+                log.info("    ML gate: conf=%.3f -> SKIP %s", ml_conf, signal)
+                continue
 
+            execute(
+                market="india", symbol=sym, signal=signal,
+                regime=regime, confidence=conf,
+                last_price=price, features=feat,
+                positions=positions, portfolio=portfolio,
+                sector=sector, ml_size_scale=ml_scale,
+            )
+        except Exception as exc:
+            log.error("  NSE %s error: %s", sym, exc, exc_info=True)
 
-# ── Entry point ───────────────────────────────────────────────────────────────────────────────
-
-def main() -> None:
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    log.info(f"═══ AAATS Paper Runner v2 — {ts} ═══")
-
-    # HMM warmup (trains on daily bars — only on first run of the day)
+    # Statistical arbitrage: HDFCBANK / ICICIBANK pair
     try:
-        warmup_india()
-    except Exception as e:
-        log.warning(f"India warmup error (non-fatal): {e}")
-
-    try:
-        warmup_crypto()
-    except Exception as e:
-        log.warning(f"Crypto warmup error (non-fatal): {e}")
-
-    positions = load_positions()
-    portfolio = load_portfolio()
-
-    try:
-        run_india(positions, portfolio)
-    except Exception as e:
-        log.exception(f"India cycle error: {e}")
-        send_alert(f"❌ India cycle error: {e}", market="india")
-
-    try:
-        run_crypto(positions, portfolio)
-    except Exception as e:
-        log.exception(f"Crypto cycle error: {e}")
-        send_alert(f"❌ Crypto cycle error: {e}", market="crypto")
+        from trading.stat_arb import run_stat_arb_india
+        run_stat_arb_india(portfolio, fetch_nse_hourly)
+    except Exception as exc:
+        log.error("  NSE stat_arb error: %s", exc, exc_info=True)
 
     save_positions(positions)
     save_portfolio(portfolio)
+    log.info("== NSE cycle done | capital=INR %.2f ==", portfolio["india"]["capital"])
 
-    open_pos  = len(positions["india"]) + len(positions["crypto"])
-    real_pnl  = portfolio["india"]["realized_pnl"] + portfolio["crypto"]["realized_pnl"]
-    log.info(
-        f"═══ Done | open={open_pos} | "
-        f"realized PnL ≈ {real_pnl:+.2f} (mixed ccy) ═══"
-    )
+
+# -- Crypto market runner -----------------------------------------------------
+
+def run_crypto(positions: dict, portfolio: dict) -> None:
+    """Run one crypto paper-trading cycle across CRYPTO_SYMBOLS."""
+    log.info("== Crypto cycle | capital=USD %.2f ==", portfolio["crypto"]["capital"])
+
+    if not _binance_healthy():
+        log.warning("  Binance unreachable -- skipping crypto cycle")
+        return
+
+    btc_dom = fetch_btc_dominance()
+    alt_buy_allowed = btc_dom < BTC_DOMINANCE_CUTOFF
+    if not alt_buy_allowed:
+        log.info("  BTC dominance=%.1f%% > %.1f%% -> suppress alt BUYs",
+                 btc_dom, BTC_DOMINANCE_CUTOFF)
+
+    # Prefetch prices + features for ATR trailing stop
+    last_prices: dict = {}
+    features_map: dict = {}
+
+    for sym in CRYPTO_SYMBOLS:
+        try:
+            hourly = fetch_crypto_hourly(sym)
+            if hourly is None or len(hourly) < 50:
+                continue
+            feat = compute_features(hourly)
+            if feat is None or feat.empty:
+                continue
+            price = float(feat["close"].iloc[-1])
+            last_prices[sym] = price
+            features_map[sym] = feat
+        except Exception as exc:
+            log.debug("  Prefetch %s: %s", sym, exc)
+
+    # ATR trailing stops first
+    _check_trailing_stops("crypto", last_prices, features_map, positions, portfolio)
+
+    # Signal loop
+    for sym in CRYPTO_SYMBOLS:
+        try:
+            feat = features_map.get(sym)
+            if feat is None:
+                continue
+            price = last_prices.get(sym)
+            if price is None:
+                continue
+
+            log.info("  [%s] price=%.4f | BTC.D=%.1f%%", sym, price, btc_dom)
+
+            is_alt = sym not in ("BTC/USDT", "ETH/USDT")
+            signal, regime, conf = generate_signal(sym, feat, "crypto")
+
+            if is_alt and not alt_buy_allowed and signal == "BUY":
+                log.info("    BTC.D filter: skip BUY %s", sym)
+                continue
+
+            # Fear & Greed sentiment gate
+            signal = _crypto_sentiment_gate(signal)
+
+            # ML confidence gate
+            ml_conf = _score_ml(feat, "crypto")
+            ml_scale = _ml_position_scale(ml_conf)
+            if ml_scale == 0.0:
+                log.info("    ML gate: conf=%.3f -> SKIP %s", ml_conf, signal)
+                continue
+
+            execute(
+                market="crypto", symbol=sym, signal=signal,
+                regime=regime, confidence=conf,
+                last_price=price, features=feat,
+                positions=positions, portfolio=portfolio,
+                ml_size_scale=ml_scale,
+            )
+        except Exception as exc:
+            log.error("  Crypto %s error: %s", sym, exc, exc_info=True)
+
+    # Statistical arbitrage: BTC/ETH spread
+    try:
+        from trading.stat_arb import run_stat_arb_crypto
+        run_stat_arb_crypto(portfolio, fetch_crypto_hourly)
+    except Exception as exc:
+        log.error("  Crypto stat_arb error: %s", exc, exc_info=True)
+
+    save_positions(positions)
+    save_portfolio(portfolio)
+    log.info("== Crypto cycle done | capital=USD %.2f ==", portfolio["crypto"]["capital"])
+
+
+# -- Main scheduler -----------------------------------------------------------
+
+CYCLE_INTERVAL_SEC = 900   # 15-minute cycles
+
+
+def main() -> None:
+    global _ml_ensemble
+    log.info("=" * 60)
+    log.info("AAATS Live Paper Trader v2.1 starting")
+    log.info("  Markets  : India NSE + Crypto (Binance)")
+    log.info("  Cycle    : %d seconds (15 min)", CYCLE_INTERVAL_SEC)
+    log.info("  ML       : XGBoost confidence gating")
+    log.info("  Extras   : Fear&Greed, ATR trailing stop, BTC.D filter, stat-arb")
+    log.info("=" * 60)
+
+    _load_env()
+    positions = load_positions()
+    portfolio = load_portfolio()
+
+    # Non-blocking ML init
+    _ml_ensemble = _init_ml_ensemble()
+
+    cycle = 0
+    while True:
+        cycle += 1
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        log.info("\n%s\nCycle #%d | %s", "-" * 60, cycle, ts)
+
+        try:
+            run_india(positions, portfolio)
+        except Exception as exc:
+            log.error("India cycle #%d failed: %s", cycle, exc, exc_info=True)
+
+        try:
+            run_crypto(positions, portfolio)
+        except Exception as exc:
+            log.error("Crypto cycle #%d failed: %s", cycle, exc, exc_info=True)
+
+        open_pos = len(positions["india"]) + len(positions["crypto"])
+        real_pnl = (portfolio["india"]["realized_pnl"]
+                    + portfolio["crypto"]["realized_pnl"])
+        log.info(
+            "Cycle #%d done | open=%d | realized_pnl~%.2f | sleeping %ds",
+            cycle, open_pos, real_pnl, CYCLE_INTERVAL_SEC,
+        )
+        time.sleep(CYCLE_INTERVAL_SEC)
 
 
 if __name__ == "__main__":

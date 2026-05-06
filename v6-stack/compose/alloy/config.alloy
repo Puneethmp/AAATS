@@ -1,0 +1,248 @@
+// AAATS v6 — Grafana Alloy
+// Adapted from Grafana Cloud's Linux Server integration onboarding output.
+// Deltas from the generated version:
+//   1. Inline basic_auth password → password_file = "/run/secrets/grafana_api_key"
+//   2. Inline url/username → sys.env(...)  (actual values in /srv/aaats/compose/.env)
+//   3. prometheus.exporter.unix uses procfs/sysfs/rootfs paths for containerized deploy
+//   4. Added Docker container log discovery (AAATS-specific)
+//   5. file_match path rewritten to /host/var/log/... (host /var/log bind-mounted)
+
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+// =============================================================================
+// Self check (alloy itself)
+// =============================================================================
+
+prometheus.exporter.self "alloy_check" {}
+
+discovery.relabel "alloy_check" {
+  targets = prometheus.exporter.self.alloy_check.targets
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+  rule {
+    target_label = "alloy_hostname"
+    replacement  = constants.hostname
+  }
+  rule {
+    target_label = "job"
+    replacement  = "integrations/alloy-check"
+  }
+}
+
+prometheus.scrape "alloy_check" {
+  targets         = discovery.relabel.alloy_check.output
+  forward_to      = [prometheus.relabel.alloy_check.receiver]
+  scrape_interval = "60s"
+}
+
+prometheus.relabel "alloy_check" {
+  forward_to = [prometheus.remote_write.metrics_service.receiver]
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "(prometheus_target_sync_length_seconds_sum|prometheus_target_scrapes_.*|prometheus_target_interval.*|prometheus_sd_discovered_targets|alloy_build.*|prometheus_remote_write_wal_samples_appended_total|process_start_time_seconds)"
+    action        = "keep"
+  }
+}
+
+// =============================================================================
+// Grafana Cloud writers (URL + user from env, password from secret file)
+// =============================================================================
+
+prometheus.remote_write "metrics_service" {
+  endpoint {
+    url = sys.env("GRAFANA_PROM_URL")
+    basic_auth {
+      username      = sys.env("GRAFANA_PROM_USER")
+      password_file = "/run/secrets/grafana_api_key"
+    }
+  }
+}
+
+loki.write "grafana_cloud_loki" {
+  endpoint {
+    url = sys.env("GRAFANA_LOKI_URL")
+    basic_auth {
+      username      = sys.env("GRAFANA_LOKI_USER")
+      password_file = "/run/secrets/grafana_api_key"
+    }
+  }
+}
+
+// =============================================================================
+// Linux Server integration — host metrics
+// =============================================================================
+
+prometheus.exporter.unix "integrations_node_exporter" {
+  disable_collectors = ["ipvs", "btrfs", "infiniband", "xfs", "zfs"]
+
+  // Containerized: read host paths through bind mounts.
+  procfs_path = "/host/proc"
+  sysfs_path  = "/host/sys"
+  rootfs_path = "/rootfs"
+
+  filesystem {
+    fs_types_exclude     = "^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|tmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$"
+    mount_points_exclude = "^/(dev|proc|run/credentials/.+|sys|var/lib/docker/.+)($|/)"
+    mount_timeout        = "5s"
+  }
+
+  netclass {
+    ignored_devices = "^(veth.*|cali.*|[a-f0-9]{15})$"
+  }
+
+  netdev {
+    device_exclude = "^(veth.*|cali.*|[a-f0-9]{15})$"
+  }
+}
+
+discovery.relabel "integrations_node_exporter" {
+  targets = prometheus.exporter.unix.integrations_node_exporter.targets
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+  rule {
+    target_label = "job"
+    replacement  = "integrations/node_exporter"
+  }
+}
+
+prometheus.scrape "integrations_node_exporter" {
+  targets    = discovery.relabel.integrations_node_exporter.output
+  forward_to = [prometheus.relabel.integrations_node_exporter.receiver]
+}
+
+prometheus.relabel "integrations_node_exporter" {
+  forward_to = [prometheus.remote_write.metrics_service.receiver]
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "node_scrape_collector_.+"
+    action        = "drop"
+  }
+}
+
+// =============================================================================
+// AAATS application metrics — bot + (eventually) engine
+// =============================================================================
+
+prometheus.scrape "aaats_bot" {
+  targets = [
+    {
+      "__address__" = "aaats-telegram-bot:8080",
+      "instance"    = constants.hostname,
+      "job"         = "aaats/telegram-bot",
+    },
+  ]
+  forward_to      = [prometheus.remote_write.metrics_service.receiver]
+  scrape_interval = "30s"
+  metrics_path    = "/metrics"
+}
+
+prometheus.scrape "aaats_engine" {
+  targets = [
+    {
+      "__address__" = "aaats-engine:9100",
+      "instance"    = constants.hostname,
+      "job"         = "aaats/engine",
+    },
+  ]
+  forward_to      = [prometheus.remote_write.metrics_service.receiver]
+  scrape_interval = "30s"
+  metrics_path    = "/metrics"
+}
+
+// =============================================================================
+// Logs — systemd journal
+// =============================================================================
+
+discovery.relabel "logs_integrations_node_exporter_journal_scrape" {
+  targets = []
+
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+  rule {
+    source_labels = ["__journal__boot_id"]
+    target_label  = "boot_id"
+  }
+  rule {
+    source_labels = ["__journal__transport"]
+    target_label  = "transport"
+  }
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "level"
+  }
+}
+
+loki.source.journal "integrations_node_exporter_journal_scrape" {
+  max_age       = "24h0m0s"
+  relabel_rules = discovery.relabel.logs_integrations_node_exporter_journal_scrape.rules
+  forward_to    = [loki.write.grafana_cloud_loki.receiver]
+}
+
+// =============================================================================
+// Logs — /var/log files (host /var/log bind-mounted at /host/var/log)
+// =============================================================================
+
+local.file_match "logs_integrations_node_exporter_direct_scrape" {
+  path_targets = [{
+    __address__ = "localhost",
+    __path__    = "/host/var/log/{syslog,messages,*.log}",
+    instance    = constants.hostname,
+    job         = "integrations/node_exporter",
+  }]
+}
+
+loki.source.file "logs_integrations_node_exporter_direct_scrape" {
+  targets    = local.file_match.logs_integrations_node_exporter_direct_scrape.targets
+  forward_to = [loki.write.grafana_cloud_loki.receiver]
+}
+
+// =============================================================================
+// Docker container logs (AAATS-specific)
+// =============================================================================
+
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "30s"
+}
+
+discovery.relabel "container_meta" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_log_stream"]
+    target_label  = "stream"
+  }
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+  rule {
+    target_label = "job"
+    replacement  = "aaats/docker"
+  }
+}
+
+loki.source.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.container_meta.output
+  forward_to       = [loki.write.grafana_cloud_loki.receiver]
+  refresh_interval = "30s"
+}
