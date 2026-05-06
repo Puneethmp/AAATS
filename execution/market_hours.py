@@ -80,4 +80,98 @@ _NSE_HOLIDAYS: frozenset[date] = frozenset({
     date(2027, 3, 26),   # Good Friday
     date(2027, 4, 14),   # Dr. Baba Saheb Ambedkar Jayanti
     date(2027, 5, 1),    # Maharashtra Day
-    
+    date(2027, 8, 15),   # Independence Day
+    date(2027, 9, 6),    # Ganesh Chaturthi
+    date(2027, 10, 2),   # Gandhi Jayanti
+    date(2027, 10, 27),  # Diwali (Laxmi Pujan)
+    date(2027, 11, 13),  # Gurunanak Jayanti
+    date(2027, 12, 25),  # Christmas
+})
+
+
+def is_nse_holiday(d: date | None = None) -> bool:
+    """Return True if the given date (default=today IST) is an NSE holiday."""
+    if d is None:
+        d = datetime.now(_IST).date()
+    return d in _NSE_HOLIDAYS
+
+
+def is_market_open(market: MarketType) -> bool:
+    """Return True if the given market is open right now."""
+    if market == "crypto":
+        return True
+
+    if market == "india":
+        now = datetime.now(_IST)
+        if now.weekday() >= 5:
+            _log.debug(f"NSE closed: weekend ({now.strftime('%A')})")
+            return False
+        if is_nse_holiday(now.date()):
+            _log.info(f"NSE closed: public holiday ({now.date()})")
+            return False
+        t = now.time()
+        result = _NSE_OPEN <= t <= _NSE_CLOSE
+        if not result:
+            _log.debug(f"NSE closed: current time {now.strftime('%H:%M IST')}")
+        return result
+
+    if market == "us":
+        now = datetime.now(_ET)
+        if now.weekday() >= 5:
+            return False
+        t = now.time()
+        result = _US_OPEN <= t <= _US_CLOSE
+        if not result:
+            _log.debug(f"US market closed: current time {now.strftime('%H:%M ET')}")
+        return result
+
+    return False
+
+
+def get_market_session(market: MarketType) -> str:
+    """Return 'OPEN', 'PRE_MARKET', 'AFTER_HOURS', or 'CLOSED'."""
+    if market == "crypto":
+        return "OPEN"
+
+    if market == "india":
+        now = datetime.now(_IST)
+        if now.weekday() >= 5:
+            return "CLOSED"
+        t = now.time()
+        if t < dtime(9, 0):
+            return "PRE_MARKET"
+        if _NSE_OPEN <= t <= _NSE_CLOSE:
+            return "OPEN"
+        if t <= dtime(16, 0):
+            return "AFTER_HOURS"
+        return "CLOSED"
+
+    if market == "us":
+        now = datetime.now(_ET)
+        if now.weekday() >= 5:
+            return "CLOSED"
+        t = now.time()
+        if t < dtime(4, 0):
+            return "CLOSED"
+        if t < _US_OPEN:
+            return "PRE_MARKET"
+        if _US_OPEN <= t <= _US_CLOSE:
+            return "OPEN"
+        if t <= dtime(20, 0):
+            return "AFTER_HOURS"
+        return "CLOSED"
+
+    return "CLOSED"
+
+
+def require_market_open(market: MarketType) -> bool:
+    """
+    Log and return False if market is closed. Use as a guard at top of run_once().
+    """
+    if not is_market_open(market):
+        session = get_market_session(market)
+        _log.info(f"{market.upper()} market not open (session={session}) — skipping cycle")
+        return False
+    return True
+    date(2027, 8, 15),   # Independence Day
+    date(2027, 9, 6),    # 
