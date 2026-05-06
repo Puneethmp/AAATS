@@ -1,53 +1,3 @@
-12:59:51 | decision     | consensus_voting     | INFO     | Initialized consensus voting: agreement_threshold=0.45, veto_threshold=0.85
-2026-05-06 12:59:51,702 [INFO] v6 engine starting: redis=aaats-redis:6379 hb_key=aaats:hb:engine work_interval_s=900 metrics_port=9100
-2026-05-06 12:59:51,714 [INFO] ═══ AAATS Paper Runner v2 — 2026-05-06 12:59 UTC ═══
-2026-05-06 12:59:51,715 [INFO] ── India HMM warmup ────────────────────────────────
-2026-05-06 12:59:51,718 [INFO] http server on :9100 (/metrics, /ready)
-2026-05-06 12:59:54,815 [INFO] 127.0.0.1 [06/May/2026:12:59:54 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
-2026-05-06 12:59:56,031 [INFO] ── Crypto HMM warmup ───────────────────────────────
-2026-05-06 12:59:56,895 [INFO] 172.18.0.10 [06/May/2026:12:59:56 +0000] "GET /metrics HTTP/1.1" 200 991 "-" "Prometheus/2.55.1"
-2026-05-06 13:00:08,634 [INFO] NSE closed — skipping India cycle
-2026-05-06 13:00:08,635 [INFO] ── Crypto (Binance) ───────────────────────────────
-13:00:08 | execution    | market_hours         | DEBUG    | NSE closed: current time 18:30 IST
-2026-05-06 13:00:09,515 [INFO]   BTC dominance proxy: 48.3%
-2026-05-06 13:00:09,515 [INFO]   BTC/USDT
-2026-05-06 13:00:09,675 [INFO]     regime=BEAR_TREND(0.80) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
-13:00:09 | risk         | engine               | DEBUG    | Portfolio drawdown 0.0% — within limits
-2026-05-06 13:00:09,677 [INFO]   ⏸  HOLD BTC/USDT @ 82190.1400
-2026-05-06 13:00:10,678 [INFO]   ETH/USDT
-2026-05-06 13:00:10,703 [INFO] 127.0.0.1 [06/May/2026:13:00:10 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
-2026-05-06 13:00:10,814 [INFO]     regime=RANGE_BOUND(0.60) votes={'BUY': 1, 'SELL': 0, 'HOLD': 5} → HOLD (agree=0.83 conf=0.50)
-2026-05-06 13:00:10,816 [INFO]   ⏸  HOLD ETH/USDT @ 2403.0700 (open PnL=-0.37%)
-13:00:10 | risk         | engine               | DEBUG    | Portfolio drawdown 0.0% — within limits
-2026-05-06 13:00:11,817 [INFO]   SOL/USDT
-2026-05-06 13:00:11,893 [INFO] 172.18.0.10 [06/May/2026:13:00:11 +0000] "GET /metrics HTTP/1.1" 200 991 "-" "Prometheus/2.55.1"
-2026-05-06 13:00:11,948 [INFO]     regime=BEAR_TREND(0.95) votes={'BUY': 1, 'SELL': 1, 'HOLD': 4} → HOLD (agree=0.67 conf=0.50)
-13:00:11 | risk         | engine               | DEBUG    | Portfolio drawdown 0.0% — within limits
-2026-05-06 13:00:11,950 [INFO]   ⏸  HOLD SOL/USDT @ 89.5700
-2026-05-06 13:00:12,951 [INFO]   LINK/USDT
-2026-05-06 13:00:13,169 [INFO]     regime=BEAR_TREND(0.94) votes={'BUY': 1, 'SELL': 1, 'HOLD': 4} → HOLD (agree=0.67 conf=0.50)
-13:00:13 | risk         | engine               | DEBUG    | Portfolio drawdown 0.0% — within limits
-2026-05-06 13:00:13,173 [INFO]   ⏸  HOLD LINK/USDT @ 10.1600
-2026-05-06 13:00:14,174 [INFO]   DOT/USDT
-2026-05-06 13:00:14,300 [INFO]     regime=BEAR_TREND(0.95) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
-2026-05-06 13:00:14,302 [INFO]   ⏸  HOLD DOT/USDT @ 1.3190
-13:00:14 | risk         | engine               | DEBUG    | Portfolio drawdown 0.0% — within limits
-2026-05-06 13:00:15,302 [INFO]   AVAX/USDT
-2026-05-06 13:00:15,445 [INFO]     regime=BEAR_TREND(0.95) votes={'BUY': 0, 'SELL': 1, 'HOLD': 5} → HOLD (agree=0.83 conf=0.49)
-2026-05-06 13:00:15,446 [INFO]   ⏸  HOLD AVAX/USDT @ 9.7400
-13:00:15 | risk         | engine               | DEBUG    | Portfolio drawdown 0.0% — within limits
-2026-05-06 13:00:16,448 [INFO]   Crypto → capital: $110.3904 | realized: $+0.0000 | trades: 1 | wins: 0/1
-2026-05-06 13:00:16,449 [INFO] ═══ Done | open=1 | realized PnL ≈ +0.00 (mixed ccy) ═══
-2026-05-06 13:00:18,858 [INFO] 172.18.0.5 [06/May/2026:13:00:18 +0000] "GET /metrics HTTP/1.1" 200 1006 "-" "Alloy/v1.16.0 (linux; docker)"
-2026-05-06 13:00:26,339 [INFO] 127.0.0.1 [06/May/2026:13:00:26 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
-2026-05-06 13:00:26,893 [INFO] 172.18.0.10 [06/May/2026:13:00:26 +0000] "GET /metrics HTTP/1.1" 200 1006 "-" "Prometheus/2.55.1"
-2026-05-06 13:00:41,896 [INFO] 172.18.0.10 [06/May/2026:13:00:41 +0000] "GET /metrics HTTP/1.1" 200 1006 "-" "Prometheus/2.55.1"
-2026-05-06 13:00:42,235 [INFO] 127.0.0.1 [06/May/2026:13:00:42 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
-2026-05-06 13:00:48,832 [INFO] 172.18.0.5 [06/May/2026:13:00:48 +0000] "GET /metrics HTTP/1.1" 200 1006 "-" "Alloy/v1.16.0 (linux; docker)"
-2026-05-06 13:00:56,892 [INFO] 172.18.0.10 [06/May/2026:13:00:56 +0000] "GET /metrics HTTP/1.1" 200 1006 "-" "Prometheus/2.55.1"
-2026-05-06 13:00:57,796 [INFO] 127.0.0.1 [06/May/2026:13:00:57 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
-2026-05-06 13:01:11,893 [INFO] 172.18.0.10 [06/May/2026:13:01:11 +0000] "GET /metrics HTTP/1.1" 200 1006 "-" "Prometheus/2.55.1"
-2026-05-06 13:01:13,434 [INFO] 127.0.0.1 [06/May/2026:13:01:13 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
 2026-05-06 13:01:18,831 [INFO] 172.18.0.5 [06/May/2026:13:01:18 +0000] "GET /metrics HTTP/1.1" 200 1006 "-" "Alloy/v1.16.0 (linux; docker)"
 2026-05-06 13:01:26,893 [INFO] 172.18.0.10 [06/May/2026:13:01:26 +0000] "GET /metrics HTTP/1.1" 200 1006 "-" "Prometheus/2.55.1"
 2026-05-06 13:01:28,976 [INFO] 127.0.0.1 [06/May/2026:13:01:28 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
@@ -364,3 +314,187 @@
 2026-05-06 13:29:48,832 [INFO] 172.18.0.5 [06/May/2026:13:29:48 +0000] "GET /metrics HTTP/1.1" 200 1008 "-" "Alloy/v1.16.0 (linux; docker)"
 2026-05-06 13:29:54,762 [INFO] 127.0.0.1 [06/May/2026:13:29:54 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
 2026-05-06 13:29:56,892 [INFO] 172.18.0.10 [06/May/2026:13:29:56 +0000] "GET /metrics HTTP/1.1" 200 1008 "-" "Prometheus/2.55.1"
+2026-05-06 13:30:10,285 [INFO] 127.0.0.1 [06/May/2026:13:30:10 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:30:11,892 [INFO] 172.18.0.10 [06/May/2026:13:30:11 +0000] "GET /metrics HTTP/1.1" 200 1008 "-" "Prometheus/2.55.1"
+2026-05-06 13:30:18,832 [INFO] 172.18.0.5 [06/May/2026:13:30:18 +0000] "GET /metrics HTTP/1.1" 200 1008 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:30:25,997 [INFO] 127.0.0.1 [06/May/2026:13:30:25 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:30:26,892 [INFO] 172.18.0.10 [06/May/2026:13:30:26 +0000] "GET /metrics HTTP/1.1" 200 1008 "-" "Prometheus/2.55.1"
+2026-05-06 13:30:35,964 [INFO] ═══ AAATS Paper Runner v2 — 2026-05-06 13:30 UTC ═══
+2026-05-06 13:30:35,964 [INFO] ── India HMM warmup ────────────────────────────────
+2026-05-06 13:30:40,031 [INFO] ── Crypto HMM warmup ───────────────────────────────
+2026-05-06 13:30:41,892 [INFO] 172.18.0.10 [06/May/2026:13:30:41 +0000] "GET /metrics HTTP/1.1" 200 1008 "-" "Prometheus/2.55.1"
+2026-05-06 13:30:41,956 [INFO] 127.0.0.1 [06/May/2026:13:30:41 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+13:30:46 | execution    | market_hours         | DEBUG    | NSE closed: current time 19:00 IST
+2026-05-06 13:30:46,829 [INFO] NSE closed — skipping India cycle
+2026-05-06 13:30:46,830 [INFO] ── Crypto (Binance) ───────────────────────────────
+2026-05-06 13:30:47,709 [INFO]   BTC dominance proxy: 47.4%
+2026-05-06 13:30:47,709 [INFO]   BTC/USDT
+2026-05-06 13:30:47,866 [INFO]     regime=BEAR_TREND(0.79) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
+13:30:47 | risk         | engine               | DEBUG    | Portfolio drawdown 0.0% — within limits
+2026-05-06 13:30:47,870 [INFO]   ⏸  HOLD BTC/USDT @ 81846.2900
+2026-05-06 13:30:48,832 [INFO] 172.18.0.5 [06/May/2026:13:30:48 +0000] "GET /metrics HTTP/1.1" 200 1008 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:30:48,870 [INFO]   ETH/USDT
+2026-05-06 13:30:49,008 [INFO]     regime=RANGE_BOUND(0.60) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
+13:30:49 | risk         | engine               | DEBUG    | Portfolio drawdown 0.0% — within limits
+2026-05-06 13:30:49,018 [INFO]   🛑 STOP-LOSS ETH/USDT: -1.38% < -1.31%
+13:30:49 | risk         | engine               | DEBUG    | Portfolio drawdown 0.0% — within limits
+2026-05-06 13:30:49,039 [INFO]   🔴 SELL ETH/USDT @ 2376.3113 | PnL=-0.1419 (-1.48%)
+13:30:49 | execution    | paper_trader         | INFO     | PAPER SELL ETH/USDT @ 2376.3113 x0.003984196022444304 | SELL | RANGE_BOUND
+2026-05-06 13:30:50,050 [INFO]   SOL/USDT
+2026-05-06 13:30:50,180 [INFO]     regime=BEAR_TREND(0.95) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
+13:30:50 | risk         | engine               | DEBUG    | Portfolio drawdown 0.0% — within limits
+2026-05-06 13:30:50,182 [INFO]   ⏸  HOLD SOL/USDT @ 88.4000
+2026-05-06 13:30:51,185 [INFO]   LINK/USDT
+2026-05-06 13:30:51,341 [INFO]     regime=BEAR_TREND(0.92) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
+2026-05-06 13:30:51,343 [INFO]   ⏸  HOLD LINK/USDT @ 10.0200
+13:30:51 | risk         | engine               | DEBUG    | Portfolio drawdown 0.0% — within limits
+2026-05-06 13:30:52,343 [INFO]   DOT/USDT
+2026-05-06 13:30:52,475 [INFO]     regime=BEAR_TREND(0.95) votes={'BUY': 0, 'SELL': 3, 'HOLD': 3} → SELL (agree=0.50 conf=0.66)
+13:30:52 | risk         | engine               | DEBUG    | Portfolio drawdown 0.0% — within limits
+2026-05-06 13:30:52,477 [INFO]   ⏸  HOLD DOT/USDT @ 1.3060
+2026-05-06 13:30:53,478 [INFO]   AVAX/USDT
+2026-05-06 13:30:53,622 [INFO]     regime=BEAR_TREND(0.95) votes={'BUY': 0, 'SELL': 1, 'HOLD': 5} → HOLD (agree=0.83 conf=0.50)
+2026-05-06 13:30:53,624 [INFO]   ⏸  HOLD AVAX/USDT @ 9.6100
+13:30:53 | risk         | engine               | DEBUG    | Portfolio drawdown 0.0% — within limits
+2026-05-06 13:30:54,625 [INFO]   Crypto → capital: $119.8581 | realized: $-0.1419 | trades: 2 | wins: 0/2
+2026-05-06 13:30:54,627 [INFO] ═══ Done | open=0 | realized PnL ≈ -0.14 (mixed ccy) ═══
+2026-05-06 13:30:56,895 [INFO] 172.18.0.10 [06/May/2026:13:30:56 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:30:57,606 [INFO] 127.0.0.1 [06/May/2026:13:30:57 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:31:11,895 [INFO] 172.18.0.10 [06/May/2026:13:31:11 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:31:13,242 [INFO] 127.0.0.1 [06/May/2026:13:31:13 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:31:18,831 [INFO] 172.18.0.5 [06/May/2026:13:31:18 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:31:26,896 [INFO] 172.18.0.10 [06/May/2026:13:31:26 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:31:29,233 [INFO] 127.0.0.1 [06/May/2026:13:31:29 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:31:41,897 [INFO] 172.18.0.10 [06/May/2026:13:31:41 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:31:44,961 [INFO] 127.0.0.1 [06/May/2026:13:31:44 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:31:48,833 [INFO] 172.18.0.5 [06/May/2026:13:31:48 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:31:56,897 [INFO] 172.18.0.10 [06/May/2026:13:31:56 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:32:00,736 [INFO] 127.0.0.1 [06/May/2026:13:32:00 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:32:11,896 [INFO] 172.18.0.10 [06/May/2026:13:32:11 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:32:16,308 [INFO] 127.0.0.1 [06/May/2026:13:32:16 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:32:18,832 [INFO] 172.18.0.5 [06/May/2026:13:32:18 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:32:26,910 [INFO] 172.18.0.10 [06/May/2026:13:32:26 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:32:31,890 [INFO] 127.0.0.1 [06/May/2026:13:32:31 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:32:41,893 [INFO] 172.18.0.10 [06/May/2026:13:32:41 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:32:47,424 [INFO] 127.0.0.1 [06/May/2026:13:32:47 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:32:48,831 [INFO] 172.18.0.5 [06/May/2026:13:32:48 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:32:56,893 [INFO] 172.18.0.10 [06/May/2026:13:32:56 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:33:03,052 [INFO] 127.0.0.1 [06/May/2026:13:33:03 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:33:11,892 [INFO] 172.18.0.10 [06/May/2026:13:33:11 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:33:18,677 [INFO] 127.0.0.1 [06/May/2026:13:33:18 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:33:18,830 [INFO] 172.18.0.5 [06/May/2026:13:33:18 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:33:26,894 [INFO] 172.18.0.10 [06/May/2026:13:33:26 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:33:34,161 [INFO] 127.0.0.1 [06/May/2026:13:33:34 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:33:41,891 [INFO] 172.18.0.10 [06/May/2026:13:33:41 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:33:48,830 [INFO] 172.18.0.5 [06/May/2026:13:33:48 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:33:49,647 [INFO] 127.0.0.1 [06/May/2026:13:33:49 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:33:56,892 [INFO] 172.18.0.10 [06/May/2026:13:33:56 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:34:05,182 [INFO] 127.0.0.1 [06/May/2026:13:34:05 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:34:11,892 [INFO] 172.18.0.10 [06/May/2026:13:34:11 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:34:18,832 [INFO] 172.18.0.5 [06/May/2026:13:34:18 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:34:20,698 [INFO] 127.0.0.1 [06/May/2026:13:34:20 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:34:26,893 [INFO] 172.18.0.10 [06/May/2026:13:34:26 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:34:36,260 [INFO] 127.0.0.1 [06/May/2026:13:34:36 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:34:41,892 [INFO] 172.18.0.10 [06/May/2026:13:34:41 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:34:48,830 [INFO] 172.18.0.5 [06/May/2026:13:34:48 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:34:51,812 [INFO] 127.0.0.1 [06/May/2026:13:34:51 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:34:56,893 [INFO] 172.18.0.10 [06/May/2026:13:34:56 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:35:07,462 [INFO] 127.0.0.1 [06/May/2026:13:35:07 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:35:11,894 [INFO] 172.18.0.10 [06/May/2026:13:35:11 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:35:18,831 [INFO] 172.18.0.5 [06/May/2026:13:35:18 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:35:23,039 [INFO] 127.0.0.1 [06/May/2026:13:35:23 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:35:26,892 [INFO] 172.18.0.10 [06/May/2026:13:35:26 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:35:38,559 [INFO] 127.0.0.1 [06/May/2026:13:35:38 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:35:41,893 [INFO] 172.18.0.10 [06/May/2026:13:35:41 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:35:48,832 [INFO] 172.18.0.5 [06/May/2026:13:35:48 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:35:54,209 [INFO] 127.0.0.1 [06/May/2026:13:35:54 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:35:56,893 [INFO] 172.18.0.10 [06/May/2026:13:35:56 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:36:09,801 [INFO] 127.0.0.1 [06/May/2026:13:36:09 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:36:11,892 [INFO] 172.18.0.10 [06/May/2026:13:36:11 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:36:18,830 [INFO] 172.18.0.5 [06/May/2026:13:36:18 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:36:25,421 [INFO] 127.0.0.1 [06/May/2026:13:36:25 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:36:26,892 [INFO] 172.18.0.10 [06/May/2026:13:36:26 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:36:41,005 [INFO] 127.0.0.1 [06/May/2026:13:36:41 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:36:41,893 [INFO] 172.18.0.10 [06/May/2026:13:36:41 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:36:48,830 [INFO] 172.18.0.5 [06/May/2026:13:36:48 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:36:56,567 [INFO] 127.0.0.1 [06/May/2026:13:36:56 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:36:56,893 [INFO] 172.18.0.10 [06/May/2026:13:36:56 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:37:11,892 [INFO] 172.18.0.10 [06/May/2026:13:37:11 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:37:12,057 [INFO] 127.0.0.1 [06/May/2026:13:37:12 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:37:18,831 [INFO] 172.18.0.5 [06/May/2026:13:37:18 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:37:26,892 [INFO] 172.18.0.10 [06/May/2026:13:37:26 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:37:27,697 [INFO] 127.0.0.1 [06/May/2026:13:37:27 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:37:41,892 [INFO] 172.18.0.10 [06/May/2026:13:37:41 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:37:43,333 [INFO] 127.0.0.1 [06/May/2026:13:37:43 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:37:48,832 [INFO] 172.18.0.5 [06/May/2026:13:37:48 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:37:56,893 [INFO] 172.18.0.10 [06/May/2026:13:37:56 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:37:58,977 [INFO] 127.0.0.1 [06/May/2026:13:37:58 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:38:11,892 [INFO] 172.18.0.10 [06/May/2026:13:38:11 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:38:14,619 [INFO] 127.0.0.1 [06/May/2026:13:38:14 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:38:18,832 [INFO] 172.18.0.5 [06/May/2026:13:38:18 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:38:26,895 [INFO] 172.18.0.10 [06/May/2026:13:38:26 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:38:30,327 [INFO] 127.0.0.1 [06/May/2026:13:38:30 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:38:41,894 [INFO] 172.18.0.10 [06/May/2026:13:38:41 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:38:46,137 [INFO] 127.0.0.1 [06/May/2026:13:38:46 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:38:48,830 [INFO] 172.18.0.5 [06/May/2026:13:38:48 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:38:56,893 [INFO] 172.18.0.10 [06/May/2026:13:38:56 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:39:02,146 [INFO] 127.0.0.1 [06/May/2026:13:39:02 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:39:11,893 [INFO] 172.18.0.10 [06/May/2026:13:39:11 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:39:17,789 [INFO] 127.0.0.1 [06/May/2026:13:39:17 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:39:18,836 [INFO] 172.18.0.5 [06/May/2026:13:39:18 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:39:26,892 [INFO] 172.18.0.10 [06/May/2026:13:39:26 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:39:33,510 [INFO] 127.0.0.1 [06/May/2026:13:39:33 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:39:41,893 [INFO] 172.18.0.10 [06/May/2026:13:39:41 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:39:48,830 [INFO] 172.18.0.5 [06/May/2026:13:39:48 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:39:49,168 [INFO] 127.0.0.1 [06/May/2026:13:39:49 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:39:56,892 [INFO] 172.18.0.10 [06/May/2026:13:39:56 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:40:04,888 [INFO] 127.0.0.1 [06/May/2026:13:40:04 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:40:11,892 [INFO] 172.18.0.10 [06/May/2026:13:40:11 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:40:18,831 [INFO] 172.18.0.5 [06/May/2026:13:40:18 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:40:20,648 [INFO] 127.0.0.1 [06/May/2026:13:40:20 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:40:26,892 [INFO] 172.18.0.10 [06/May/2026:13:40:26 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:40:36,298 [INFO] 127.0.0.1 [06/May/2026:13:40:36 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:40:41,895 [INFO] 172.18.0.10 [06/May/2026:13:40:41 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:40:48,830 [INFO] 172.18.0.5 [06/May/2026:13:40:48 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:40:51,867 [INFO] 127.0.0.1 [06/May/2026:13:40:51 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:40:56,893 [INFO] 172.18.0.10 [06/May/2026:13:40:56 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:41:07,595 [INFO] 127.0.0.1 [06/May/2026:13:41:07 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:41:11,894 [INFO] 172.18.0.10 [06/May/2026:13:41:11 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:41:18,833 [INFO] 172.18.0.5 [06/May/2026:13:41:18 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:41:23,201 [INFO] 127.0.0.1 [06/May/2026:13:41:23 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:41:26,892 [INFO] 172.18.0.10 [06/May/2026:13:41:26 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:41:38,962 [INFO] 127.0.0.1 [06/May/2026:13:41:38 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:41:41,892 [INFO] 172.18.0.10 [06/May/2026:13:41:41 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:41:48,830 [INFO] 172.18.0.5 [06/May/2026:13:41:48 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:41:54,534 [INFO] 127.0.0.1 [06/May/2026:13:41:54 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:41:56,891 [INFO] 172.18.0.10 [06/May/2026:13:41:56 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:42:10,187 [INFO] 127.0.0.1 [06/May/2026:13:42:10 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:42:11,892 [INFO] 172.18.0.10 [06/May/2026:13:42:11 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:42:18,829 [INFO] 172.18.0.5 [06/May/2026:13:42:18 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:42:25,990 [INFO] 127.0.0.1 [06/May/2026:13:42:25 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:42:26,892 [INFO] 172.18.0.10 [06/May/2026:13:42:26 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:42:41,642 [INFO] 127.0.0.1 [06/May/2026:13:42:41 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:42:41,892 [INFO] 172.18.0.10 [06/May/2026:13:42:41 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:42:48,832 [INFO] 172.18.0.5 [06/May/2026:13:42:48 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:42:56,892 [INFO] 172.18.0.10 [06/May/2026:13:42:56 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:42:57,217 [INFO] 127.0.0.1 [06/May/2026:13:42:57 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:43:11,894 [INFO] 172.18.0.10 [06/May/2026:13:43:11 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:43:12,927 [INFO] 127.0.0.1 [06/May/2026:13:43:12 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:43:18,835 [INFO] 172.18.0.5 [06/May/2026:13:43:18 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:43:26,892 [INFO] 172.18.0.10 [06/May/2026:13:43:26 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:43:28,633 [INFO] 127.0.0.1 [06/May/2026:13:43:28 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:43:41,891 [INFO] 172.18.0.10 [06/May/2026:13:43:41 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:43:44,249 [INFO] 127.0.0.1 [06/May/2026:13:43:44 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:43:48,830 [INFO] 172.18.0.5 [06/May/2026:13:43:48 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:43:56,891 [INFO] 172.18.0.10 [06/May/2026:13:43:56 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:43:59,811 [INFO] 127.0.0.1 [06/May/2026:13:43:59 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:44:11,899 [INFO] 172.18.0.10 [06/May/2026:13:44:11 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:44:15,602 [INFO] 127.0.0.1 [06/May/2026:13:44:15 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:44:18,832 [INFO] 172.18.0.5 [06/May/2026:13:44:18 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:44:26,892 [INFO] 172.18.0.10 [06/May/2026:13:44:26 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:44:31,226 [INFO] 127.0.0.1 [06/May/2026:13:44:31 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:44:41,892 [INFO] 172.18.0.10 [06/May/2026:13:44:41 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:44:46,821 [INFO] 127.0.0.1 [06/May/2026:13:44:46 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
+2026-05-06 13:44:48,831 [INFO] 172.18.0.5 [06/May/2026:13:44:48 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Alloy/v1.16.0 (linux; docker)"
+2026-05-06 13:44:56,898 [INFO] 172.18.0.10 [06/May/2026:13:44:56 +0000] "GET /metrics HTTP/1.1" 200 1007 "-" "Prometheus/2.55.1"
+2026-05-06 13:45:02,823 [INFO] 127.0.0.1 [06/May/2026:13:45:02 +0000] "GET /ready HTTP/1.1" 200 178 "-" "Python-urllib/3.12"
