@@ -1216,10 +1216,13 @@ def _check_trailing_stops(
 
 def run_india(positions: dict, portfolio: dict) -> None:
     """Run one India NSE paper-trading cycle across the full watchlist."""
-    from foundation.kill_switch import is_halted
-    if is_halted("india"):
-        log.warning("India market HALTED (kill switch) — skipping cycle")
-        return
+    try:
+        from foundation.kill_switch import is_halted as _is_halted
+        if _is_halted("india"):
+            log.warning("India market HALTED (kill switch) — skipping cycle")
+            return
+    except ImportError:
+        pass
     from execution.market_hours import require_market_open
     if not require_market_open("india"):
         return
