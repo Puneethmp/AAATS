@@ -38,6 +38,28 @@ _legacy_alerts.send_alert = _redis_alerts.send_alert      # redirect to redis
 # ── now safe to import the runner ─────────────────────────────────────────────
 from trading import live_paper_runner                     # noqa: E402
 
+
+# Pin cycle count off the runner's own "Cycle #N done" log line so the wrapper's
+# /metrics output stays accurate now that main() self-loops inside its thread
+# (the previous "increment after main() returns" never fires).
+class _CycleCounter(logging.Handler):
+    _prev_monotonic: float | None = None
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = record.getMessage()
+            if "Cycle #" in msg and "done" in msg:
+                _metrics["cycles_total"] += 1
+                now = time.monotonic()
+                if self._prev_monotonic is not None:
+                    _metrics["last_cycle_seconds"] = now - self._prev_monotonic
+                self._prev_monotonic = now
+        except Exception:  # noqa: BLE001
+            pass
+
+
+logging.getLogger("paper_runner").addHandler(_CycleCounter())
+
 # ── config ────────────────────────────────────────────────────────────────────
 LOG = logging.getLogger("v6_engine")
 logging.basicConfig(
