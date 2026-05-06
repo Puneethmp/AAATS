@@ -61,6 +61,13 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    # Cap docker-driver logs to prevent unbounded growth (engine emits ~17k
+    # lines/day; without rotation this would reach GBs over months).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:
