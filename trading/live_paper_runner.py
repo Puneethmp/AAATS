@@ -102,13 +102,19 @@ NSE_WATCHLIST = [
     ("DRREDDY",    "881",   "NSE", "pharma"),
 ]
 
-# Crypto: tier-1 large cap + mid-cap with lower beta correlation
+# Crypto: diversified 6-symbol universe with lower intra-bucket correlation
+# BTC dominance (BTC.D) fetched separately as a macro regime filter.
 CRYPTO_SYMBOLS = [
-    "BTC/USDT",    # anchor
-    "ETH/USDT",    # smart-contract
-    "SOL/USDT",    # alt L1 — lower BTC correlation (~0.7)
-    "LINK/USDT",   # oracle — lower crypto-beta (~0.65)
+    "BTC/USDT",    # anchor / store-of-value bucket
+    "ETH/USDT",    # smart-contract platform bucket
+    "SOL/USDT",    # alt L1 — BTC correlation ~0.70
+    "LINK/USDT",   # oracle / DeFi infra — BTC beta ~0.65
+    "DOT/USDT",    # cross-chain / parachain — lower DeFi correlation
+    "AVAX/USDT",   # alt L1 — partially uncorrelated with SOL
 ]
+
+# BTC dominance threshold: when BTC dominance > 58%, alts underperform — reduce alt exposure
+BTC_DOMINANCE_CUTOFF = 58.0   # % — above this, skip SOL/LINK/DOT/AVAX BUYs
 
 INITIAL_CAPITAL = {"india": 500_000.0, "crypto": 1_000.0}
 
@@ -375,6 +381,34 @@ def fetch_crypto_daily(symbol: str) -> pd.DataFrame | None:
     except Exception as e:
         log.debug(f"  {symbol} daily fetch: {e}")
         return None
+
+
+def fetch_btc_dominance() -> float:
+    """
+    Fetch approximate BTC dominance from Binance total market cap proxy.
+    Falls back to 50.0 if unavailable (neutral — no suppression).
+
+    Method: BTC/USDT 24h volume vs top-10 combined volume as a dominance proxy.
+    Not a perfect replica of CoinMarketCap BTC.D, but directionally accurate
+    and avoids external API dependencies.
+    """
+    try:
+        ex = _get_binance()
+        tickers = ex.fetch_tickers([
+            "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
+            "DOGE/USDT", "ADA/USDT", "AVAX/USDT", "LINK/USDT", "DOT/USDT",
+        ])
+        total_vol = sum(
+            (t.get("quoteVolume") or 0.0) for t in tickers.values()
+        )
+        btc_vol = (tickers.get("BTC/USDT") or {}).get("quoteVolume") or 0.0
+        if total_vol > 0:
+            dom = (btc_vol / total_vol) * 100.0
+            log.info(f"  BTC dominance proxy: {dom:.1f}%")
+            return dom
+    except Exception as e:
+        log.warning(f"  BTC dominance fetch failed (using 50.0): {e}")
+    return 50.0
 
 
 def fetch_crypto_hourly(symbol: str) -> pd.DataFrame | None:
@@ -756,6 +790,19 @@ def run_india(positions: dict, portfolio: dict) -> None:
 
 def run_crypto(positions: dict, portfolio: dict) -> None:
     log.info("── Crypto (Binance) ───────────────────────────────")
+
+    # Macro filter: BTC dominance > cutoff → suppress alt-coin BUYs
+    btc_dom = fetch_btc_dominance()
+    alt_buy_blocked = btc_dom > BTC_DOMINANCE_CUTOFF
+    if alt_buy_blocked:
+        log.info(
+            f"  ⚠️  BTC dominance {btc_dom:.1f}% > {BTC_DOMINANCE_CUTOFF}% "
+            f"— alt BUYs suppressed this cycle"
+        )
+
+    # Alt coins that get suppressed under high BTC dominance
+    _ALT_SYMBOLS = {"SOL/USDT", "LINK/USDT", "DOT/USDT", "AVAX/USDT"}
+
     for symbol in CRYPTO_SYMBOLS:
         log.info(f"  {symbol}")
         df = fetch_crypto_hourly(symbol)
@@ -769,6 +816,12 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
 
         signal, regime, conf = generate_signal(symbol, features, "crypto")
         last_price = float(df["close"].iloc[-1])
+
+        # Suppress new alt BUYs when BTC is dominating; allow SELL/HOLD and BTC/ETH
+        if alt_buy_blocked and signal == "BUY" and symbol in _ALT_SYMBOLS:
+            log.info(f"    ⛔ Alt BUY suppressed (BTC.D={btc_dom:.1f}%) — {symbol}")
+            signal = "HOLD"
+
         execute("crypto", symbol, signal, regime, conf,
                 last_price, features, positions, portfolio)
         time.sleep(1.0)
@@ -782,7 +835,7 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
     )
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# ── Entry point ───────────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
