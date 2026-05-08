@@ -1,19 +1,17 @@
 """
-AAATS Statistical Arbitrage — Pairs Trading Engine
-====================================================
+AAATS Statistical Arbitrage — Enhanced Pairs Trading Engine (C1)
+================================================================
 Market-neutral mean-reversion on cointegrated pairs.
 
-Strategy logic (Engle-Granger simplified):
-  1. Track the log price ratio (spread) of a pair.
-  2. Compute rolling 20-bar z-score of the spread.
-  3. Entry:  |z| > 2.0 → bet on mean reversion
-  4. Exit:   |z| < 0.5 → spread has converged, close both legs
-
-Pairs traded:
-  Crypto  : BTC/USDT ↔ ETH/USDT  (most liquid, tightest bid-ask)
-  NSE     : HDFCBANK  ↔ ICICIBANK  (cointegrated Indian bank pair)
+C1 Enhanced (2026-05-07):
+  - 30-bar z-score (was 20), entry |z|>1.8 (was 2.0), exit |z|<0.35 (was 0.5)
+  - Time stop: 48H max hold (crypto), 5H (India intraday)
+  - Hard stop: z reaches +-2.8 (spread blowing out, cut losses)
+  - Pre-entry health gate: weekly Engle-Granger + 14-day rolling correlation
+  - Pair health cache: _HEALTH_FILE, refreshed weekly (not every cycle)
 
 State persists in data/stat_arb_state.json.
+Health cache in data/stat_arb_health.json.
 
 Usage (called from live_paper_runner.py):
     from trading.stat_arb import run_stat_arb_crypto, run_stat_arb_india
@@ -23,37 +21,45 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
 
-_ROOT = Path(__file__).resolve().parent.parent
-_STATE_FILE = _ROOT / "data" / "stat_arb_state.json"
-_DB_PATH = str(_ROOT / "data" / "paper_trades.db")
+_ROOT        = Path(__file__).resolve().parent.parent
+_STATE_FILE  = _ROOT / "data" / "stat_arb_state.json"
+_HEALTH_FILE = _ROOT / "data" / "stat_arb_health.json"
+_DB_PATH     = str(_ROOT / "data" / "paper_trades.db")
 
 log = logging.getLogger("trading.stat_arb")
 
-# ── Pair definitions ───────────────────────────────────────────────────────────
+
+# == Pair definitions ==========================================================
 
 class Pair(NamedTuple):
-    long_sym:  str    # symbol to BUY when spread is low
-    short_sym: str    # symbol to SELL when spread is low
-    market:    str    # "crypto" or "india"
-    window:    int    # rolling z-score window (bars)
-    entry_z:   float  # open position when |z| > this
-    exit_z:    float  # close position when |z| < this
-    alloc_pct: float  # fraction of market capital per leg
+    long_sym:            str    # symbol to BUY when spread is low
+    short_sym:           str    # symbol to SELL when spread is low
+    market:              str    # "crypto" or "india"
+    window:              int    # rolling z-score window (bars)
+    entry_z:             float  # open position when |z| > this
+    exit_z:              float  # close position when |z| < this
+    alloc_pct:           float  # fraction of market capital per leg
+    time_stop_hours:     int    # max hours to hold before forced exit
+    hard_stop_z:         float  # force exit if |z| reaches this (spread blowout)
+    min_correlation_14d: float  # skip entry if 14-day rolling corr < this
+    cointegration_p_max: float  # skip entry if Engle-Granger p-value > this
+
 
 PAIRS = [
-    Pair("BTC/USDT", "ETH/USDT", "crypto", 20, 2.0, 0.5, 0.04),
-    Pair("HDFCBANK",  "ICICIBANK", "india", 20, 2.0, 0.5, 0.03),
+    Pair("BTC/USDT", "ETH/USDT", "crypto", 30, 1.8, 0.35, 0.08, 48, 2.8, 0.80, 0.05),
+    # India dormant until week 7+ (NSE module not live yet)
+    Pair("HDFCBANK", "ICICIBANK", "india",  40, 1.7, 0.30, 0.05,  5, 2.8, 0.70, 0.05),
 ]
 
 
-# ── State management ──────────────────────────────────────────────────────────
+# == State management ==========================================================
 
 def _load_state() -> dict:
     if _STATE_FILE.exists():
@@ -69,29 +75,90 @@ def _save_state(state: dict) -> None:
     _STATE_FILE.write_text(json.dumps(state, indent=2))
 
 
-# ── Spread computation ────────────────────────────────────────────────────────
+# == Pair health cache (weekly Engle-Granger cadence) ==========================
+
+def _load_pair_health() -> dict:
+    """Load cached pair health checks. Returns {} if missing or corrupt."""
+    if _HEALTH_FILE.exists():
+        try:
+            return json.loads(_HEALTH_FILE.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def _save_pair_health(health: dict) -> None:
+    """Persist pair health cache to disk."""
+    _HEALTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _HEALTH_FILE.write_text(json.dumps(health, indent=2, default=str))
+
+
+def _is_health_stale(health_entry: dict, max_age_days: int = 7) -> bool:
+    """Return True if health entry is older than max_age_days."""
+    checked_at = health_entry.get("checked_at")
+    if not checked_at:
+        return True
+    try:
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(checked_at)
+        return age > timedelta(days=max_age_days)
+    except Exception:
+        return True
+
+
+# == Statistical helpers ========================================================
+
+def _engle_granger_pvalue(a: pd.Series, b: pd.Series) -> float:
+    """
+    Run Engle-Granger cointegration test on series a and b.
+    Returns p-value (lower = stronger cointegration evidence).
+    Falls back to 0.0 (always pass) if statsmodels is not installed.
+    """
+    try:
+        from statsmodels.tsa.stattools import coint
+        _, pvalue, _ = coint(a.dropna().values, b.dropna().values)
+        return float(pvalue)
+    except ImportError:
+        log.warning("statsmodels not installed -- cointegration check bypassed (p=0.0 assumed)")
+        return 0.0
+    except Exception as exc:
+        log.warning(f"Engle-Granger test failed: {exc} -- assuming p=0.0")
+        return 0.0
+
+
+def _rolling_correlation(a: pd.Series, b: pd.Series, n: int) -> float:
+    """
+    Pearson correlation of the last n bars of series a and b.
+    Returns 0.0 if insufficient data or NaN.
+    """
+    combined = pd.DataFrame({"a": a, "b": b}).dropna()
+    if len(combined) < n:
+        return 0.0
+    corr = combined.tail(n)["a"].corr(combined.tail(n)["b"])
+    return float(corr) if not np.isnan(corr) else 0.0
+
+
+# == Spread computation =========================================================
 
 def _compute_spread_zscore(
     prices_a: pd.Series, prices_b: pd.Series, window: int
 ) -> tuple[float, float]:
     """
-    Compute log spread and its z-score over the last `window` bars.
+    Compute log spread and its rolling z-score.
 
     spread = log(price_a) - log(price_b)
-    z      = (spread_now - mean(spread)) / std(spread)
+    z      = (spread_now - mean(spread[-window:])) / std(spread[-window:])
 
     Returns (spread, z_score).
     """
     if len(prices_a) < window + 5 or len(prices_b) < window + 5:
         return 0.0, 0.0
 
-    # Align on common index
     combined = pd.DataFrame({"a": prices_a, "b": prices_b}).dropna()
     if len(combined) < window + 2:
         return 0.0, 0.0
 
-    log_a = np.log(combined["a"].clip(lower=1e-9))
-    log_b = np.log(combined["b"].clip(lower=1e-9))
+    log_a  = np.log(combined["a"].clip(lower=1e-9))
+    log_b  = np.log(combined["b"].clip(lower=1e-9))
     spread = log_a - log_b
 
     rolling_mean = spread.rolling(window).mean()
@@ -105,20 +172,30 @@ def _compute_spread_zscore(
     return spread_now, z
 
 
-# ── Execution helpers (mirrored from live_paper_runner but self-contained) ────
+# == Execution helpers ==========================================================
 
 def _record_stat_arb_trade(
     market: str, symbol: str, action: str, shares: float,
     price: float, pnl: float = 0.0, note: str = "",
+    confidence: float = 0.0, exit_reason: str = "",
+    entry_time: str | None = None, exit_time: str | None = None,
 ) -> None:
     """Write a stat-arb trade to the main paper_trades.db."""
     try:
         from execution.paper_trader import record_trade
+        size_usd = round(shares * price, 4)
+        pnl_pct  = round(pnl / size_usd * 100, 4) if size_usd and action == "SELL" else None
+        notes_d  = {"confidence": confidence}
+        if exit_reason:
+            notes_d["exit_reason"] = exit_reason
         record_trade(
             db_path=_DB_PATH, market=market, symbol=symbol,
             action=action, shares=shares, price=price,
             signal="STAT_ARB", regime="PAIRS", risk_action="ALLOW",
-            pnl=pnl if pnl != 0.0 else None, note=note,
+            pnl=pnl if pnl != 0.0 else 0.0, note=note,
+            strategy="C1_stat_arb",
+            entry_time=entry_time, exit_time=exit_time,
+            pnl_pct=pnl_pct, notes=notes_d, size_usd=size_usd,
         )
     except Exception as exc:
         log.warning(f"  stat_arb record_trade failed: {exc}")
@@ -132,7 +209,65 @@ def _send(msg: str, market: str) -> None:
         pass
 
 
-# ── Core pair runner ──────────────────────────────────────────────────────────
+# == Close helper (shared by converge / hard-stop / time-stop exits) ===========
+
+def _close_position(
+    pair: Pair,
+    key: str,
+    z: float,
+    price_a: float,
+    price_b: float,
+    position: dict,
+    mkt_port: dict,
+    state: dict,
+    health: dict,
+    reason: str = "CONVERGE",
+) -> tuple[dict, dict]:
+    """Unified exit logic for all three exit conditions."""
+    side     = position["side"]
+    shares_a = position["shares_a"]
+    shares_b = position["shares_b"]
+    entry_a  = position["entry_price_a"]
+    entry_b  = position["entry_price_b"]
+    entry_z  = position["entry_z"]
+
+    if side == "LONG_A":
+        pnl_a = (price_a - entry_a) * shares_a
+        pnl_b = (entry_b - price_b) * shares_b
+    else:
+        pnl_a = (entry_a - price_a) * shares_a
+        pnl_b = (price_b - entry_b) * shares_b
+
+    total_pnl   = pnl_a + pnl_b
+    entry_alloc = position.get("entry_alloc") or (shares_a * entry_a)
+
+    mkt_port["capital"]      += entry_alloc * 2 + total_pnl
+    mkt_port["realized_pnl"] += total_pnl
+    mkt_port["total_trades"] += 2
+    if total_pnl >= 0:
+        mkt_port["wins"]   += 1
+    else:
+        mkt_port["losses"] += 1
+
+    note = f"stat_arb EXIT {reason} {side} | z={z:.3f} | entry_z={entry_z:.3f}"
+    _record_stat_arb_trade(pair.market, pair.long_sym, "SELL", shares_a, price_a, pnl=pnl_a, note=note)
+    _record_stat_arb_trade(pair.market, pair.short_sym, "BUY",  shares_b, price_b, pnl=pnl_b, note=note)
+
+    icon = "GREEN" if total_pnl >= 0 else "RED"
+    log.info(
+        f"  [{icon}] STAT_ARB EXIT {key} | reason={reason} "
+        f"side={side} pnl={total_pnl:+.4f} z={z:.3f}"
+    )
+    _send(
+        f"STAT_ARB EXIT {key} | {reason} | PnL={total_pnl:+.4f} | z={z:.2f}",
+        pair.market,
+    )
+
+    state.pop(key, None)
+    return state, health
+
+
+# == Core pair runner ===========================================================
 
 def _run_pair(
     pair: Pair,
@@ -140,22 +275,16 @@ def _run_pair(
     prices_b: pd.Series,
     portfolio: dict,
     state: dict,
-) -> dict:
+    health: dict,
+) -> tuple[dict, dict]:
     """
-    Evaluate one pair and update positions.
+    Evaluate one pair: update health cache, check exits, check entry.
 
-    Position encoding in state:
-        state[key] = {
-            "side":        "LONG_A" | "SHORT_A",
-            "shares_a":    float,
-            "shares_b":    float,
-            "entry_price_a": float,
-            "entry_price_b": float,
-            "entry_z":     float,
-            "entry_time":  ISO string,
-        }
+    Position encoding in state[key]:
+        side, shares_a, shares_b, entry_price_a, entry_price_b,
+        entry_z, entry_time, entry_alloc
     """
-    key = f"{pair.long_sym}_{pair.short_sym}"
+    key      = f"{pair.long_sym}_{pair.short_sym}"
     mkt_port = portfolio[pair.market]
     capital  = mkt_port["capital"]
 
@@ -170,80 +299,67 @@ def _run_pair(
     )
 
     position = state.get(key)
-    alloc    = capital * pair.alloc_pct  # dollar allocation per leg
+    alloc    = capital * pair.alloc_pct
 
-    # ── EXIT: position open and spread has converged ──────────────────────
-    if position and abs(z) < pair.exit_z:
-        side      = position["side"]
-        shares_a  = position["shares_a"]
-        shares_b  = position["shares_b"]
-        entry_a   = position["entry_price_a"]
-        entry_b   = position["entry_price_b"]
-        entry_z   = position["entry_z"]
-
-        if side == "LONG_A":
-            # We were long A, short B
-            pnl_a = (price_a - entry_a) * shares_a
-            pnl_b = (entry_b - price_b) * shares_b   # short B profit
-        else:
-            # We were short A, long B
-            pnl_a = (entry_a - price_a) * shares_a
-            pnl_b = (price_b - entry_b) * shares_b
-
-        total_pnl = pnl_a + pnl_b
-
-        # Recover the original per-leg allocation charged at entry.
-        # If state predates this fix, reconstruct from shares × entry_price.
-        entry_alloc = position.get("entry_alloc")
-        if entry_alloc is None:
-            entry_alloc = position["shares_a"] * position["entry_price_a"]
-
-        mkt_port["capital"]      += entry_alloc * 2 + total_pnl   # return alloc + credit PnL
-        mkt_port["realized_pnl"] += total_pnl
-        mkt_port["total_trades"] += 2
-
-        if total_pnl >= 0:
-            mkt_port["wins"] += 1
-        else:
-            mkt_port["losses"] += 1
-
-        _record_stat_arb_trade(
-            pair.market, pair.long_sym, "SELL", shares_a, price_a,
-            pnl=pnl_a, note=f"stat_arb EXIT {side} | z={z:.3f} | entry_z={entry_z:.3f}",
-        )
-        _record_stat_arb_trade(
-            pair.market, pair.short_sym, "BUY", shares_b, price_b,
-            pnl=pnl_b, note=f"stat_arb EXIT {side} | z={z:.3f} | entry_z={entry_z:.3f}",
-        )
-
-        icon = "🟢" if total_pnl >= 0 else "🔴"
+    # -- HEALTH GATE: refresh weekly Engle-Granger + correlation cache --------
+    health_entry = health.get(key, {})
+    if _is_health_stale(health_entry):
+        # crypto: 14 days * 24 hours; india: 14 daily bars
+        n_corr = 14 * 24 if pair.market == "crypto" else 14
+        eg_p   = _engle_granger_pvalue(prices_a, prices_b)
+        corr14 = _rolling_correlation(prices_a, prices_b, n_corr)
+        healthy = eg_p < pair.cointegration_p_max and corr14 >= pair.min_correlation_14d
+        health[key] = {
+            "eg_pvalue":    eg_p,
+            "corr_14d":     corr14,
+            "checked_at":   datetime.now(timezone.utc).isoformat(),
+            "pair_healthy": healthy,
+        }
         log.info(
-            f"  {icon} STAT_ARB EXIT {key} | side={side} "
-            f"pnl={total_pnl:+.4f} | z={z:.3f}"
+            f"  [{key}] health updated: eg_p={eg_p:.4f} "
+            f"corr14d={corr14:.3f} healthy={healthy}"
         )
-        _send(
-            f"{icon} STAT_ARB EXIT {key} | PnL={total_pnl:+.4f} | z_exit={z:.2f}",
-            pair.market,
-        )
+        health_entry = health[key]
 
-        state.pop(key, None)
+    pair_healthy  = health_entry.get("pair_healthy", True)
+    cached_eg_p   = health_entry.get("eg_pvalue", 0.0)
+    cached_corr14 = health_entry.get("corr_14d", 1.0)
 
-    # ── ENTRY: no position and spread is stretched ────────────────────────
-    elif not position and abs(z) > pair.entry_z:
-        # Check we have enough capital for both legs
+    # -- EXIT: spread converged -----------------------------------------------
+    if position and abs(z) < pair.exit_z:
+        return _close_position(pair, key, z, price_a, price_b, position, mkt_port, state, health, reason="CONVERGE")
+
+    # -- EXIT: hard stop (spread blowing out) ---------------------------------
+    if position and abs(z) >= pair.hard_stop_z:
+        log.warning(f"  HARD_STOP {key}: |z|={abs(z):.3f} >= {pair.hard_stop_z}")
+        return _close_position(pair, key, z, price_a, price_b, position, mkt_port, state, health, reason="HARD_STOP")
+
+    # -- EXIT: time stop (max hold exceeded) ----------------------------------
+    if position:
+        entry_time = datetime.fromisoformat(position["entry_time"])
+        age_hours  = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
+        if age_hours >= pair.time_stop_hours:
+            log.warning(
+                f"  TIME_STOP {key}: held {age_hours:.1f}H >= {pair.time_stop_hours}H"
+            )
+            return _close_position(pair, key, z, price_a, price_b, position, mkt_port, state, health, reason="TIME_STOP")
+
+    # -- ENTRY: no position, spread stretched, health gate passes -------------
+    if not position and abs(z) > pair.entry_z:
+        if not pair_healthy:
+            log.info(
+                f"  SKIP ENTRY {key}: health gate failed "
+                f"(eg_p={cached_eg_p:.4f} corr14d={cached_corr14:.3f})"
+            )
+            return state, health
+
         if alloc * 2 > capital:
-            log.info(f"  ⚠️  Insufficient capital for stat_arb {key} — skip")
-            return state
+            log.info(f"  Insufficient capital for stat_arb {key} -- skip")
+            return state, health
 
         shares_a = alloc / max(price_a, 1e-9)
         shares_b = alloc / max(price_b, 1e-9)
-
-        if z > 0:
-            # spread too wide → A expensive relative to B → LONG B, SHORT A
-            side = "SHORT_A"
-        else:
-            # spread too narrow → A cheap relative to B → LONG A, SHORT B
-            side = "LONG_A"
+        side     = "SHORT_A" if z > 0 else "LONG_A"
 
         state[key] = {
             "side":          side,
@@ -272,73 +388,78 @@ def _run_pair(
         )
 
         log.info(
-            f"  📐 STAT_ARB ENTRY {key} | side={side} "
-            f"z={z:.3f} | alloc={alloc:.2f}×2"
+            f"  STAT_ARB ENTRY {key} | side={side} z={z:.3f} "
+            f"alloc={alloc:.2f}x2 | eg_p={cached_eg_p:.4f} corr14d={cached_corr14:.3f}"
         )
         _send(
-            f"📐 STAT_ARB ENTRY {key} | {side} | z={z:.2f} | alloc={alloc:.2f}×2",
+            f"STAT_ARB ENTRY {key} | {side} | z={z:.2f} | alloc={alloc:.2f}x2",
             pair.market,
         )
 
     else:
         status = f"OPEN z={z:.3f}" if position else "no entry"
-        log.debug(f"  [{key}] {status} — no action")
+        log.debug(f"  [{key}] {status} -- no action")
 
-    return state
+    return state, health
 
 
-# ── Public runners ────────────────────────────────────────────────────────────
+# == Public runners =============================================================
 
 def run_stat_arb_crypto(
     portfolio: dict,
-    fetch_hourly_fn,   # callable(symbol) → pd.DataFrame | None
+    fetch_hourly_fn,
 ) -> None:
     """
     Run crypto pairs stat-arb. Call once per cycle from run_crypto().
 
     Args:
-        portfolio:      The live portfolio dict (mutated in-place).
-        fetch_hourly_fn: Function that fetches hourly OHLCV DataFrame.
+        portfolio:       The live portfolio dict (mutated in-place).
+        fetch_hourly_fn: Callable(symbol) -> pd.DataFrame | None
     """
-    state = _load_state()
+    state        = _load_state()
+    health       = _load_pair_health()
     crypto_pairs = [p for p in PAIRS if p.market == "crypto"]
 
     for pair in crypto_pairs:
         try:
             df_a = fetch_hourly_fn(pair.long_sym)
             df_b = fetch_hourly_fn(pair.short_sym)
-            if df_a is None or df_b is None or len(df_a) < 25 or len(df_b) < 25:
-                log.debug(f"  Insufficient data for {pair.long_sym}/{pair.short_sym}")
+            if df_a is None or df_b is None:
+                log.debug(f"  No data for {pair.long_sym}/{pair.short_sym}")
+                continue
+            if len(df_a) < pair.window + 5 or len(df_b) < pair.window + 5:
+                log.debug(f"  Insufficient bars for {pair.long_sym}/{pair.short_sym}")
                 continue
 
             prices_a = df_a.set_index("timestamp")["close"] if "timestamp" in df_a.columns else df_a["close"]
             prices_b = df_b.set_index("timestamp")["close"] if "timestamp" in df_b.columns else df_b["close"]
 
-            state = _run_pair(pair, prices_a, prices_b, portfolio, state)
+            state, health = _run_pair(pair, prices_a, prices_b, portfolio, state, health)
         except Exception as exc:
             log.error(f"  Stat-arb crypto {pair.long_sym}/{pair.short_sym}: {exc}", exc_info=True)
 
     _save_state(state)
+    _save_pair_health(health)
 
 
 def run_stat_arb_india(
     portfolio: dict,
-    fetch_hourly_fn,   # callable(symbol, token, exchange) → pd.DataFrame | None
+    fetch_hourly_fn,
 ) -> None:
     """
     Run NSE pairs stat-arb. Call once per cycle from run_india().
 
     Args:
         portfolio:       The live portfolio dict (mutated in-place).
-        fetch_hourly_fn: Function that fetches NSE hourly OHLCV DataFrame.
+        fetch_hourly_fn: Callable(symbol, token, exchange) -> pd.DataFrame | None
     """
-    # Angel One token mapping for the NSE pairs
     _TOKEN_MAP = {
         "HDFCBANK":  ("1333", "NSE"),
         "ICICIBANK": ("4963", "NSE"),
     }
 
-    state = _load_state()
+    state       = _load_state()
+    health      = _load_pair_health()
     india_pairs = [p for p in PAIRS if p.market == "india"]
 
     for pair in india_pairs:
@@ -353,19 +474,25 @@ def run_stat_arb_india(
             df_a = fetch_hourly_fn(pair.long_sym,  token_a, exch_a)
             df_b = fetch_hourly_fn(pair.short_sym, token_b, exch_b)
 
-            if df_a is None or df_b is None or len(df_a) < 25 or len(df_b) < 25:
-                log.debug(f"  Insufficient data for {pair.long_sym}/{pair.short_sym}")
+            if df_a is None or df_b is None:
+                log.debug(f"  No data for {pair.long_sym}/{pair.short_sym}")
+                continue
+            if len(df_a) < pair.window + 5 or len(df_b) < pair.window + 5:
+                log.debug(f"  Insufficient bars for {pair.long_sym}/{pair.short_sym}")
                 continue
 
             prices_a = df_a["close"] if "close" in df_a.columns else df_a.iloc[:, 4]
             prices_b = df_b["close"] if "close" in df_b.columns else df_b.iloc[:, 4]
 
-            state = _run_pair(pair, prices_a, prices_b, portfolio, state)
+            state, health = _run_pair(pair, prices_a, prices_b, portfolio, state, health)
         except Exception as exc:
             log.error(f"  Stat-arb India {pair.long_sym}/{pair.short_sym}: {exc}", exc_info=True)
 
     _save_state(state)
+    _save_pair_health(health)
 
+
+# == Reporting ==================================================================
 
 def get_open_stat_arb_positions() -> dict:
     """Return current open stat-arb positions for reporting."""
@@ -373,19 +500,23 @@ def get_open_stat_arb_positions() -> dict:
 
 
 def get_stat_arb_summary(portfolio: dict) -> dict:
-    """Return unrealized P&L and position count for the dashboard."""
-    state = _load_state()
+    """Return position count, unrealized P&L, and health metadata for dashboard."""
+    state  = _load_state()
+    health = _load_pair_health()
     summary = {
-        "open_pairs":      len(state),
-        "unrealized_pnl":  0.0,
-        "positions":       [],
+        "open_pairs":     len(state),
+        "unrealized_pnl": 0.0,
+        "positions":      [],
     }
-    # We don't track current prices here — just report what's open
     for key, pos in state.items():
+        h = health.get(key, {})
         summary["positions"].append({
             "pair":       key,
             "side":       pos.get("side"),
             "entry_z":    pos.get("entry_z"),
             "entry_time": pos.get("entry_time"),
+            "eg_pvalue":  h.get("eg_pvalue"),
+            "corr_14d":   h.get("corr_14d"),
+            "pair_healthy": h.get("pair_healthy"),
         })
     return summary

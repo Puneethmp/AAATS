@@ -315,28 +315,39 @@ def _get_binance():
     return _binance
 
 
-# ── Regime pipeline cache (fitted daily) ─────────────────────────────────────
+# ── Regime pipeline cache (fitted on hourly bars, refreshed every 4H) ────────
 
-_regime_pipes: dict[str, object] = {}   # symbol → fitted RegimePipeline
+_regime_pipes: dict[str, object] = {}        # symbol → fitted RegimePipeline
+_regime_fit_ts: dict[str, datetime] = {}     # symbol → last fit timestamp
+_REGIME_REFIT_HOURS = 4                      # refit HMM every 4 hours
 
 
-def _fit_regime(symbol: str, daily_df: pd.DataFrame) -> None:
-    """Fit HMM regime pipeline on daily bars and cache it."""
+def _fit_regime(symbol: str, hourly_df: pd.DataFrame) -> None:
+    """Fit HMM regime pipeline on hourly bars and cache it with timestamp."""
     try:
         from intelligence.regime.regime_pipeline import RegimePipeline
-        feats = compute_features(daily_df)
-        pipe  = RegimePipeline()
-        pipe.fit(feats)
+        pipe = RegimePipeline()
+        pipe.fit(hourly_df)                  # fits directly on hourly OHLCV
         _regime_pipes[symbol] = pipe
-        log.debug(f"  HMM fitted for {symbol} ({len(daily_df)} daily bars)")
+        _regime_fit_ts[symbol] = datetime.now(timezone.utc)
+        log.debug(f"  HMM fitted for {symbol} ({len(hourly_df)} hourly bars)")
     except Exception as e:
         log.debug(f"  HMM fit skipped for {symbol}: {e}")
 
 
+def _regime_is_stale(symbol: str) -> bool:
+    """Return True if HMM was never fit or was fit more than 4H ago."""
+    ts = _regime_fit_ts.get(symbol)
+    if ts is None:
+        return True
+    age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600.0
+    return age_h >= _REGIME_REFIT_HOURS
+
+
 def detect_regime(symbol: str, hourly_features: pd.DataFrame) -> tuple[str, float]:
-    """Use cached HMM pipeline if available, else rule-based fallback."""
+    """Use cached HMM pipeline if fresh, else rule-based fallback."""
     pipe = _regime_pipes.get(symbol)
-    if pipe:
+    if pipe and not _regime_is_stale(symbol):
         try:
             sig = pipe.detect(hourly_features)
             return sig.label, sig.confidence
@@ -754,6 +765,7 @@ def execute(
     portfolio: dict,
     sector: str = "",
     ml_size_scale: float = 1.0,   # XGBoost confidence multiplier (0.5 or 1.0)
+    strategy: str = "",           # AAATS strategy ID for observability
 ) -> None:
     mkt_pos  = positions[market]
     mkt_port = portfolio[market]
@@ -810,11 +822,16 @@ def execute(
         fill    = _fill_price(last_price, "BUY", market, features)
         value   = shares * fill
 
+        _entry_ts = datetime.now(timezone.utc).isoformat()
         record_trade(
             db_path=DB_PATH, market=market, symbol=symbol,
             action="BUY", shares=shares, price=fill,
             signal=signal, regime=regime, risk_action="ALLOW",
             note=f"atr={atr:.4f} kelly_w={win_rate:.2f} ml_scale={ml_size_scale:.1f}",
+            strategy=strategy or f"{market}_directional",
+            entry_time=_entry_ts, size_usd=round(value, 4),
+            notes={"confidence": round(confidence, 4), "ml_scale": ml_size_scale,
+                   "atr_entry": round(atr, 6), "risk_pct": round(size_res.risk_pct, 4)},
         )
         mkt_pos[symbol] = {
             "shares":      shares,
@@ -848,11 +865,18 @@ def execute(
         pnl    = (fill - pos["entry_price"]) * sh
         value  = fill * sh
 
+        _exit_ts  = datetime.now(timezone.utc).isoformat()
+        _pnl_pct  = round(pnl / max(pos["entry_price"] * sh, 1e-9) * 100, 4)
         record_trade(
             db_path=DB_PATH, market=market, symbol=symbol,
             action="SELL", shares=sh, price=fill,
             signal=signal, regime=regime, risk_action="ALLOW",
             pnl=pnl, note=f"Entry {pos['entry_price']:.4f}",
+            strategy=strategy or f"{market}_directional",
+            entry_time=pos.get("entry_time"), exit_time=_exit_ts,
+            pnl_pct=_pnl_pct, size_usd=round(sh * pos["entry_price"], 4),
+            notes={"confidence": round(confidence, 4), "exit_reason": "signal",
+                   "r_multiple": round(_pnl_pct / max(pos.get("risk_pct", 0.01)*100, 0.01), 2)},
         )
         sizer.remove_position_heat(pos.get("risk_pct", 0.01))
 
@@ -915,12 +939,12 @@ def warmup_india() -> None:
 
 
 def warmup_crypto() -> None:
-    """Fetch daily bars and fit HMM for each crypto symbol at startup."""
+    """Fetch hourly bars and fit HMM for each crypto symbol at startup."""
     log.info("── Crypto HMM warmup ───────────────────────────────")
     for symbol in CRYPTO_SYMBOLS:
-        daily = fetch_crypto_daily(symbol)
-        if daily is not None:
-            _fit_regime(symbol, daily)
+        hourly = fetch_crypto_hourly(symbol)
+        if hourly is not None:
+            _fit_regime(symbol, hourly)
         time.sleep(1.0)
 
 
@@ -1181,12 +1205,19 @@ def _check_trailing_stops(
         pnl   = (fill - pos["entry_price"]) * sh
         value = fill * sh
 
+        _atr_exit_ts = datetime.now(timezone.utc).isoformat()
+        _atr_pnl_pct = round(pnl / max(pos["entry_price"] * sh, 1e-9) * 100, 4)
         record_trade(
             db_path=DB_PATH, market=market, symbol=sym,
             action="SELL", shares=sh, price=fill,
             signal="SELL", regime=pos.get("regime", "UNKNOWN"),
             risk_action="ATR_STOP",
             pnl=pnl, note=f"ATR trailing stop | entry={pos['entry_price']:.4f}",
+            strategy=f"{market}_directional",
+            entry_time=pos.get("entry_time"), exit_time=_atr_exit_ts,
+            pnl_pct=_atr_pnl_pct, size_usd=round(sh * pos["entry_price"], 4),
+            notes={"exit_reason": "atr_trailing_stop", "confidence": 0.0,
+                   "r_multiple": round(_atr_pnl_pct / max(pos.get("risk_pct", 0.01)*100, 0.01), 2)},
         )
         sizer.remove_position_heat(pos.get("risk_pct", 0.01))
 
@@ -1250,6 +1281,21 @@ def run_india(positions: dict, portfolio: dict) -> None:
             price = float(feat["close"].iloc[-1])
             last_prices[sym] = price
             features_map[sym] = feat
+            # Write price cache for Grafana volatility radar
+            try:
+                import json as _json
+                cache_key = sym.replace("/", "_")
+                cache_path = _ROOT / "data" / f"{cache_key}_price_cache.json"
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                _bars = hourly.tail(200)
+                cache_path.write_text(_json.dumps({
+                    "closes": [float(x) for x in _bars["close"].tolist()],
+                    "highs":  [float(x) for x in _bars["high"].tolist()],
+                    "lows":   [float(x) for x in _bars["low"].tolist()],
+                    "symbol": sym,
+                }, separators=(",", ":")), encoding="utf-8")
+            except Exception as _ce:
+                log.debug("  Price cache write %s: %s", sym, _ce)
         except Exception as exc:
             log.debug("  Prefetch %s: %s", sym, exc)
 
@@ -1332,6 +1378,12 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
         except Exception as exc:
             log.debug("  Prefetch %s: %s", sym, exc)
 
+    # Refit stale HMMs using already-fetched hourly data (free — data is in hand)
+    for sym, hourly in {s: fetch_crypto_hourly(s) for s in CRYPTO_SYMBOLS
+                        if _regime_is_stale(s)}.items():
+        if hourly is not None:
+            _fit_regime(sym, hourly)
+
     # ATR trailing stops first
     _check_trailing_stops("crypto", last_prices, features_map, positions, portfolio)
 
@@ -1381,6 +1433,27 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
     except Exception as exc:
         log.error("  Crypto stat_arb error: %s", exc, exc_info=True)
 
+    # Funding rate arbitrage: BTC/ETH delta-neutral (C5b)
+    try:
+        from trading.funding_arb import run_funding_arb_crypto
+        run_funding_arb_crypto(portfolio["crypto"])
+    except Exception as exc:
+        log.error("  Funding arb error: %s", exc, exc_info=True)
+
+    # 4H Momentum Breakout: BTC/ETH only (C2)
+    try:
+        from trading.momentum_breakout import run_momentum_breakout_crypto
+        run_momentum_breakout_crypto(portfolio["crypto"], fetch_crypto_hourly)
+    except Exception as exc:
+        log.error("  Momentum breakout error: %s", exc, exc_info=True)
+
+    # Altcoin Beta Mean Reversion: SOL/LINK/AVAX vs BTC (C3)
+    try:
+        from trading.altcoin_reversion import run_altcoin_reversion_crypto
+        run_altcoin_reversion_crypto(portfolio["crypto"], fetch_crypto_hourly)
+    except Exception as exc:
+        log.error("  Altcoin reversion error: %s", exc, exc_info=True)
+
     save_positions(positions)
     save_portfolio(portfolio)
     log.info("== Crypto cycle done | capital=USD %.2f ==", portfolio["crypto"]["capital"])
@@ -1391,50 +1464,77 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
 CYCLE_INTERVAL_SEC = 900   # 15-minute cycles
 
 
-def main() -> None:
+def main(market: str = "crypto") -> None:
+    """
+    Main paper-trading scheduler.
+
+    Args:
+        market: "crypto" | "india" | "both"
+                Passed from paper_loop.py --market flag.
+    """
     global _ml_ensemble
     log.info("=" * 60)
-    log.info("AAATS Live Paper Trader v2.1 starting")
-    log.info("  Markets  : India NSE + Crypto (Binance)")
+    log.info("AAATS Live Paper Trader v2.1 starting  [market=%s]", market)
     log.info("  Cycle    : %d seconds (15 min)", CYCLE_INTERVAL_SEC)
     log.info("  ML       : XGBoost confidence gating")
-    log.info("  Extras   : Fear&Greed, ATR trailing stop, BTC.D filter, stat-arb")
-    log.info("=" * 60)
+    log.info("  Strategies: C1 stat-arb, C2 momentum, C3 alt-reversion, C5b funding-arb")
 
-    _load_env()
+    # Load persistent state
     positions = load_positions()
-    portfolio = load_portfolio()
+    portfolio  = load_portfolio()
+    log.info("  Portfolio: crypto=USD%.2f  india=INR%.2f",
+             portfolio["crypto"]["capital"], portfolio["india"]["capital"])
 
-    # Non-blocking ML init
-    _ml_ensemble = _init_ml_ensemble()
+    # Warm up HMM regime models
+    if market in ("crypto", "both"):
+        try:
+            warmup_crypto()
+        except Exception as exc:
+            log.warning("Crypto warmup error: %s", exc)
 
+    if market in ("india", "both"):
+        try:
+            warmup_india()
+        except Exception as exc:
+            log.warning("India warmup error: %s", exc)
+
+    # Load ML ensemble once at startup
+    try:
+        _ml_ensemble = _init_ml_ensemble()
+        log.info("  ML ensemble loaded OK")
+    except Exception as exc:
+        log.warning("  ML ensemble unavailable: %s", exc)
+
+    log.info("Starting main loop...")
     cycle = 0
     while True:
         cycle += 1
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        log.info("\n%s\nCycle #%d | %s", "-" * 60, cycle, ts)
+        cycle_start = time.time()
+        log.info("── Cycle %d ─────────────────────────────────────", cycle)
 
-        try:
-            run_india(positions, portfolio)
-        except Exception as exc:
-            log.error("India cycle #%d failed: %s", cycle, exc, exc_info=True)
+        if market in ("crypto", "both"):
+            try:
+                run_crypto(positions, portfolio)
+            except Exception as exc:
+                log.error("run_crypto error: %s", exc, exc_info=True)
 
-        try:
-            run_crypto(positions, portfolio)
-        except Exception as exc:
-            log.error("Crypto cycle #%d failed: %s", cycle, exc, exc_info=True)
+        if market in ("india", "both"):
+            try:
+                run_india(positions, portfolio)
+            except Exception as exc:
+                log.error("run_india error: %s", exc, exc_info=True)
 
-        from trading.stat_arb import get_open_stat_arb_positions
-        stat_arb_open = get_open_stat_arb_positions()
-        open_pos = len(positions["india"]) + len(positions["crypto"]) + len(stat_arb_open)
-        real_pnl = (portfolio["india"]["realized_pnl"]
-                    + portfolio["crypto"]["realized_pnl"])
-        log.info(
-            "Cycle #%d done | open=%d (stat_arb=%d) | realized_pnl~%.2f | sleeping %ds",
-            cycle, open_pos, len(stat_arb_open), real_pnl, CYCLE_INTERVAL_SEC,
-        )
-        time.sleep(CYCLE_INTERVAL_SEC)
+        elapsed = time.time() - cycle_start
+        sleep_sec = max(0, CYCLE_INTERVAL_SEC - elapsed)
+        log.info("  Cycle %d done in %.1fs — sleeping %.0fs", cycle, elapsed, sleep_sec)
+        time.sleep(sleep_sec)
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    ap = argparse.ArgumentParser(description="AAATS paper trading runner")
+    ap.add_argument("--market", default="crypto",
+                    choices=["crypto", "india", "both"],
+                    help="Market(s) to run (default: crypto)")
+    args = ap.parse_args()
+    main(market=args.market)

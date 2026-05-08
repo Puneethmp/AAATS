@@ -86,9 +86,10 @@ NSE_SYMBOLS = [
 
 # ── Fetchers ───────────────────────────────────────────────────────────────────
 
-def fetch_binance_history(symbol: str, n_bars: int = 2000) -> pd.DataFrame | None:
+def fetch_binance_history(symbol: str, n_bars: int = 4500) -> pd.DataFrame | None:
     """Fetch up to n_bars hourly OHLCV from Binance — chunked because Binance
-    caps each call at 1000 bars."""
+    caps each call at 1000 bars. Default 4500 = ~6 months hourly, sufficient
+    for 5-fold walk-forward CV with meaningful sample sizes per fold."""
     import ccxt
     ex = ccxt.binance({"enableRateLimit": True})
     out: list[list] = []
@@ -260,6 +261,13 @@ def train_market(market: str, symbols_data: dict[str, pd.DataFrame],
     with open(scaler_path, "wb") as f:
         pickle.dump(mm.scaler, f)
     log.info(f"[{market}] saved {model_path.name} + {scaler_path.name}")
+    calibrator_path = ML_DIR / f"calibrator_{market}.pkl"
+    if mm.calibrator is not None:
+        with open(calibrator_path, "wb") as f:
+            pickle.dump(mm.calibrator, f)
+        log.info(f"[{market}] calibrator saved → {calibrator_path.name}")
+    else:
+        log.warning(f"[{market}] calibrator is None — not saved (will use raw XGBoost probs)")
 
     return {
         "market":   market,
@@ -280,7 +288,7 @@ def train_all_markets(min_samples: int = 500) -> dict:
     crypto_data: dict[str, pd.DataFrame] = {}
     for sym in CRYPTO_SYMBOLS:
         log.info(f"  fetching {sym}...")
-        df = fetch_binance_history(sym, n_bars=2000)
+        df = fetch_binance_history(sym, n_bars=4500)  # ~6mo hourly for walk-forward
         if df is not None:
             log.info(f"  {sym}: {len(df)} bars")
             crypto_data[sym] = df
@@ -352,7 +360,13 @@ def load_saved_models(max_age_days: int = 7) -> dict | None:
         model_path  = ML_DIR / f"model_{market}.json"
         scaler_path = ML_DIR / f"scaler_{market}.pkl"
         if not (model_path.exists() and scaler_path.exists()):
-            log.info(f"saved {market} model missing — will retrain")
+            # Skip markets that were intentionally not trained (e.g. India with no credentials)
+            # rather than aborting the whole load — crypto should still work.
+            skipped = meta.get(f"skipped_{market}", False)
+            if skipped:
+                log.info(f"  [{market}] skipped at training time — omitting from ensemble")
+                continue
+            log.info(f"saved {market} model missing and not marked skipped — will retrain")
             return None
         try:
             clf = XGBClassifier()
@@ -362,11 +376,21 @@ def load_saved_models(max_age_days: int = 7) -> dict | None:
             mm = MarketModel(market=market, features=features, model=clf)
             mm.scaler = scaler
             mm.is_trained = True
+            calibrator_path = ML_DIR / f"calibrator_{market}.pkl"
+            if calibrator_path.exists():
+                with open(calibrator_path, "rb") as f:
+                    mm.calibrator = pickle.load(f)
+                log.info(f"  [{market}] Platt calibrator loaded from {calibrator_path.name}")
+            else:
+                log.warning(f"  [{market}] calibrator_{market}.pkl missing — using raw XGBoost probs")
             ensemble[market] = mm
         except Exception as e:  # noqa: BLE001
             log.warning(f"load {market} failed: {e}")
             return None
-    log.info(f"Loaded saved XGBoost models (trained: {meta.get('trained_at')})")
+    if not ensemble:
+        log.warning("No models loaded — all markets skipped or missing")
+        return None
+    log.info(f"Loaded saved XGBoost models (trained: {meta.get('trained_at')}) markets={list(ensemble.keys())}")
     return ensemble
 
 

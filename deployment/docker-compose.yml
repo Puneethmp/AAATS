@@ -1,9 +1,9 @@
-version: '3.8'
-
 services:
   # Paper trading - US markets
   aaats-paper-us:
-    build: ..
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
     container_name: aaats-paper-us
     restart: unless-stopped
     env_file:
@@ -11,6 +11,7 @@ services:
     environment:
       - SYSTEM__TRADING_MODE=paper
       - MARKET=us
+      - PYTHONPATH=/app
     volumes:
       - ../logs:/app/logs
       - ../data:/app/data
@@ -33,7 +34,9 @@ services:
 
   # Paper trading - India markets
   aaats-paper-india:
-    build: ..
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
     container_name: aaats-paper-india
     restart: unless-stopped
     env_file:
@@ -41,6 +44,7 @@ services:
     environment:
       - SYSTEM__TRADING_MODE=paper
       - MARKET=india
+      - PYTHONPATH=/app
     volumes:
       - ../logs:/app/logs
       - ../data:/app/data
@@ -63,7 +67,9 @@ services:
 
   # Paper trading - Crypto markets
   aaats-paper-crypto:
-    build: ..
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
     container_name: aaats-paper-crypto
     restart: unless-stopped
     env_file:
@@ -71,13 +77,14 @@ services:
     environment:
       - SYSTEM__TRADING_MODE=paper
       - MARKET=crypto
+      - PYTHONPATH=/app
     volumes:
       - ../logs:/app/logs
       - ../data:/app/data
       - state-crypto:/app/data/state
     command: python trading/paper_loop.py --market crypto
     healthcheck:
-      test: ["CMD", "python", "scripts/health_check.py"]
+      test: ["CMD", "python3", "-c", "import os,sys; sys.exit(0 if os.path.exists('/app/data/paper_trades.db') else 1)"]
       interval: 60s
       timeout: 10s
       retries: 3
@@ -93,7 +100,9 @@ services:
 
   # Streamlit dashboard
   aaats-dashboard:
-    build: ..
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
     container_name: aaats-dashboard
     restart: unless-stopped
     env_file:
@@ -103,6 +112,8 @@ services:
     volumes:
       - ../logs:/app/logs
       - ../data:/app/data
+    environment:
+      - PYTHONPATH=/app
     command: streamlit run streamlit_app/app.py --server.port=8501 --server.address=0.0.0.0
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
@@ -119,10 +130,108 @@ services:
           cpus: '0.25'
           memory: 256M
 
+  # ── Observability stack ───────────────────────────────────────────────────
+
+  # Prometheus metrics exporter — reads AAATS data files, exposes on :9091
+  aaats-metrics:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    container_name: aaats-metrics
+    restart: unless-stopped
+    ports:
+      - "9091:9091"
+    volumes:
+      - ../logs:/app/logs
+      - ../data:/app/data
+    environment:
+      - PYTHONPATH=/app
+    command: python monitoring/metrics_exporter.py
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:9091/metrics', timeout=3); sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+
+  # Prometheus — scrapes aaats-metrics every 30s
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: aaats-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+
+  # Grafana — hedge-fund command center on :3000
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: aaats-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=aaats
+      - GF_SECURITY_ADMIN_PASSWORD=aaats2026
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/dashboards/aaats_command_center.json
+      - GF_USERS_DEFAULT_THEME=dark
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # ── Telegram command bot ──────────────────────────────────────────────────
+  aaats-telegram-bot:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    container_name: aaats-telegram-bot
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ../logs:/app/logs
+      - ../data:/app/data
+    command: python monitoring/telegram_bot.py
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 128M
+
 volumes:
   state-us:
   state-india:
   state-crypto:
+  prometheus-data:
+  grafana-data:
 
 networks:
   default:

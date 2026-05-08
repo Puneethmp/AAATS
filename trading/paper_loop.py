@@ -363,3 +363,31 @@ def publish_cycle_state(
     
     # Publish state (rate-limited to every 5 seconds)
     publish_state(state, min_interval_seconds=5.0)
+
+
+# ── Docker / CLI entry point ───────────────────────────────────────────────────
+# docker-compose calls: python trading/paper_loop.py --market crypto
+# This delegates directly to live_paper_runner.main() which owns the loop logic.
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser(
+        description="AAATS paper trading entry point (delegates to live_paper_runner)"
+    )
+    ap.add_argument(
+        "--market",
+        default="crypto",
+        choices=["crypto", "india", "both"],
+        help="Market(s) to run  [default: crypto]",
+    )
+    args = ap.parse_args()
+
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-7s  %(name)s  %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%SZ",
+    )
+
+    from trading.live_paper_runner import main as _runner_main
+    _runner_main(market=args.market)
