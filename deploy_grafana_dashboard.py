@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Deploy AAATS beautified Grafana dashboard via SSH + Grafana API."""
+"""
+Deploy AAATS Hedge Fund Command Center — matching the exact screenshot design.
+Sections: Command Center · P&L Timeline · Strategy Health Matrix · Opportunity Funnel
+          Stat-Arb Intelligence · Funding Arb + ML · Phase Tracking + System Health
+"""
 
 import json
 import paramiko
@@ -10,14 +14,19 @@ SSH_PASS = "Puneeth1234"
 
 DS = {"type": "prometheus", "uid": "aaats-prom"}
 
-GREEN  = "#73BF69"
-YELLOW = "#F2CC0C"
-RED    = "#F2495C"
-BLUE   = "#5794F2"
-PURPLE = "#B877D9"
-CYAN   = "#37872D"
+# ── Color palette ─────────────────────────────────────────────────────────────
+GREEN   = "#29B364"
+TEAL    = "#37BCAD"
+ORANGE  = "#FF9900"
+YELLOW  = "#F2CC0C"
+RED     = "#F2495C"
+BLUE    = "#5794F2"
+PURPLE  = "#A855F7"
+GRAY    = "#808080"
+CYAN    = "#00D4AA"
+PINK    = "#FF6B9D"
 
-# ── Panel builders ─────────────────────────────────────────────────────────────
+# ── Panel helpers ─────────────────────────────────────────────────────────────
 
 def row(uid, title, y):
     return {"id": uid, "type": "row", "title": title,
@@ -25,7 +34,7 @@ def row(uid, title, y):
             "collapsed": False, "panels": []}
 
 def stat(uid, title, expr, unit, x, y, w, h, steps,
-         cmode="background", graph="area", novalue="N/A", desc=""):
+         cmode="value", graph="none", novalue="–", desc="", prefix="", suffix=""):
     return {
         "id": uid, "type": "stat", "title": title, "description": desc,
         "gridPos": {"x": x, "y": y, "w": w, "h": h},
@@ -34,20 +43,48 @@ def stat(uid, title, expr, unit, x, y, w, h, steps,
                 "color": {"mode": "thresholds"},
                 "thresholds": {"mode": "absolute", "steps": steps},
                 "unit": unit, "mappings": [], "noValue": novalue,
+                "decimals": 2,
+                "custom": {},
+            },
+            "overrides": []
+        },
+        "options": {
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": cmode,
+            "graphMode": graph,
+            "justifyMode": "auto",
+            "text": {},
+        },
+        "targets": [{"datasource": DS, "expr": expr, "instant": True, "legendFormat": ""}],
+        "transparent": False,
+    }
+
+def stat_sparkline(uid, title, expr, unit, x, y, w, h, steps, desc=""):
+    """Stat with mini sparkline chart."""
+    return {
+        "id": uid, "type": "stat", "title": title, "description": desc,
+        "gridPos": {"x": x, "y": y, "w": w, "h": h},
+        "fieldConfig": {
+            "defaults": {
+                "color": {"mode": "thresholds"},
+                "thresholds": {"mode": "absolute", "steps": steps},
+                "unit": unit, "mappings": [], "noValue": "–",
             },
             "overrides": []
         },
         "options": {
             "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
             "orientation": "auto", "textMode": "auto",
-            "colorMode": cmode, "graphMode": graph, "justifyMode": "center",
+            "colorMode": "value", "graphMode": "area", "justifyMode": "auto",
         },
-        "targets": [{"datasource": DS, "expr": expr, "instant": True, "legendFormat": ""}],
-        "transparent": False,
+        "targets": [{"datasource": DS, "expr": expr, "instant": False, "legendFormat": ""}],
     }
 
-def ts(uid, title, exprs, unit, x, y, w, h, fill=True):
-    targets = [{"datasource": DS, "expr": e, "legendFormat": l} for e, l in exprs]
+def ts(uid, title, exprs, unit, x, y, w, h, fill=8, line=2):
+    targets = [{"datasource": DS, "expr": e, "legendFormat": l, "refId": chr(65+i)}
+               for i, (e, l) in enumerate(exprs)]
     return {
         "id": uid, "type": "timeseries", "title": title,
         "gridPos": {"x": x, "y": y, "w": w, "h": h},
@@ -55,23 +92,66 @@ def ts(uid, title, exprs, unit, x, y, w, h, fill=True):
             "defaults": {
                 "color": {"mode": "palette-classic"},
                 "custom": {
-                    "fillOpacity": 10 if fill else 0,
-                    "lineWidth": 2, "spanNulls": True,
+                    "fillOpacity": fill,
+                    "lineWidth": line,
+                    "spanNulls": True,
+                    "lineInterpolation": "smooth",
+                    "showPoints": "never",
                 },
                 "unit": unit,
             },
             "overrides": []
         },
         "options": {
-            "legend": {"displayMode": "list", "placement": "bottom"},
-            "tooltip": {"mode": "multi"},
+            "legend": {"displayMode": "list", "placement": "bottom", "calcs": []},
+            "tooltip": {"mode": "multi", "sort": "none"},
         },
         "targets": targets,
     }
 
-def gauge(uid, title, expr, unit, x, y, w, h, min_val, max_val, steps):
+def ts_threshold(uid, title, data_expr, data_label, threshold_val, threshold_label,
+                 unit, x, y, w, h, data_color=TEAL, threshold_color=RED):
+    """Time series with a flat threshold reference line."""
     return {
-        "id": uid, "type": "gauge", "title": title,
+        "id": uid, "type": "timeseries", "title": title,
+        "gridPos": {"x": x, "y": y, "w": w, "h": h},
+        "fieldConfig": {
+            "defaults": {
+                "color": {"mode": "fixed", "fixedColor": data_color},
+                "custom": {"fillOpacity": 5, "lineWidth": 2, "spanNulls": True,
+                           "lineInterpolation": "smooth", "showPoints": "never"},
+                "unit": unit,
+            },
+            "overrides": [
+                {
+                    "matcher": {"id": "byName", "options": threshold_label},
+                    "properties": [
+                        {"id": "color", "value": {"mode": "fixed", "fixedColor": threshold_color}},
+                        {"id": "custom.lineStyle", "value": {"dash": [10, 10], "fill": "dash"}},
+                        {"id": "custom.fillOpacity", "value": 0},
+                        {"id": "custom.lineWidth", "value": 1},
+                    ]
+                }
+            ]
+        },
+        "options": {
+            "legend": {"displayMode": "list", "placement": "bottom"},
+            "tooltip": {"mode": "multi"},
+        },
+        "targets": [
+            {"datasource": DS, "expr": data_expr, "legendFormat": data_label, "refId": "A"},
+            {"datasource": DS, "expr": f"vector({threshold_val})", "legendFormat": threshold_label, "refId": "B"},
+        ],
+    }
+
+def bargauge(uid, title, target_list, unit, x, y, w, h, min_val, max_val, steps,
+             orientation="horizontal", display_mode="lcd"):
+    """Bar gauge panel — target_list: [(expr, label), ...]"""
+    targets = [{"datasource": DS, "expr": e, "instant": True,
+                "legendFormat": l, "refId": chr(65+i)}
+               for i, (e, l) in enumerate(target_list)]
+    return {
+        "id": uid, "type": "bargauge", "title": title,
         "gridPos": {"x": x, "y": y, "w": w, "h": h},
         "fieldConfig": {
             "defaults": {
@@ -81,260 +161,427 @@ def gauge(uid, title, expr, unit, x, y, w, h, min_val, max_val, steps):
             },
             "overrides": []
         },
-        "options": {"reduceOptions": {"calcs": ["lastNotNull"]},
-                    "showThresholdLabels": False, "showThresholdMarkers": True},
-        "targets": [{"datasource": DS, "expr": expr, "instant": True, "legendFormat": ""}],
+        "options": {
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
+            "orientation": orientation,
+            "displayMode": display_mode,
+            "showUnfilled": True,
+            "minVizWidth": 0,
+            "minVizHeight": 10,
+            "text": {},
+        },
+        "targets": targets,
     }
 
-def text_panel(uid, content, x, y, w, h):
+def text_panel(uid, content, x, y, w, h, transparent=True):
     return {
         "id": uid, "type": "text", "title": "",
         "gridPos": {"x": x, "y": y, "w": w, "h": h},
         "options": {"mode": "markdown", "content": content},
-        "transparent": True,
+        "transparent": transparent,
+    }
+
+def stat_badge(uid, title, expr, badge_text, badge_color, x, y, w, h, desc=""):
+    """Stat card showing a colored badge text (for status like SKIPPED/OK)."""
+    return {
+        "id": uid, "type": "stat", "title": title, "description": desc,
+        "gridPos": {"x": x, "y": y, "w": w, "h": h},
+        "fieldConfig": {
+            "defaults": {
+                "color": {"mode": "fixed", "fixedColor": badge_color},
+                "thresholds": {"mode": "absolute", "steps": [{"color": badge_color, "value": None}]},
+                "unit": "none", "mappings": [
+                    {"type": "value", "options": {"0": {"text": badge_text, "color": badge_color}}}
+                ],
+                "noValue": badge_text,
+            },
+            "overrides": []
+        },
+        "options": {
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
+            "orientation": "auto", "textMode": "auto",
+            "colorMode": "background", "graphMode": "none", "justifyMode": "center",
+        },
+        "targets": [{"datasource": DS, "expr": expr, "instant": True, "legendFormat": ""}],
     }
 
 # ── Build panels ───────────────────────────────────────────────────────────────
 panels = []
+_y = 0
 
-# HEADER
+# ═══════════════════════════════════════════════════════════════════════════════
+# DASHBOARD HEADER (text panel — title + subtitle badges)
+# ═══════════════════════════════════════════════════════════════════════════════
 panels.append(text_panel(1,
-    "# AAATS — Algorithmic Automated Trading System\n"
-    "### Real-time Command Center  |  Paper Mode Active  |  v6 Engine  |  Crypto $120 + India ₹25k\n"
+    "# AAATS — Hedge Fund Command Center\n"
+    "> **Last 6h** &nbsp;&nbsp; **paper trading** &nbsp;&nbsp; **● 30s refresh**\n\n"
     "---",
     0, 0, 24, 3))
+_y = 3
 
-# ── ROW 1: COMMAND CENTER ─────────────────────────────────────────────────────
-panels.append(row(2, "   GLOBAL COMMAND CENTER", 3))
+# ═══════════════════════════════════════════════════════════════════════════════
+# ROW 1 — GLOBAL COMMAND CENTER
+# ═══════════════════════════════════════════════════════════════════════════════
+panels.append(row(2, "🌐  GLOBAL COMMAND CENTER", _y)); _y += 1
 
-panels.append(stat(3, "SYSTEM UPTIME",
-    '(time() - node_boot_time_seconds{job="node"}) / 3600',
-    "h", 0, 4, 4, 4,
-    [{"color": "red", "value": None}, {"color": YELLOW, "value": 1}, {"color": GREEN, "value": 24}],
-    novalue="–", desc="Hours since last reboot"))
-
-panels.append(stat(4, "ACTIVE CONTAINERS",
-    'count(container_last_seen{image!="",name=~"aaats-.+"})',
-    "short", 4, 4, 4, 4,
-    [{"color": "red", "value": None}, {"color": YELLOW, "value": 5}, {"color": GREEN, "value": 10}],
-    novalue="0"))
-
-panels.append(stat(5, "CPU LOAD (1m)",
-    'node_load1{job="node"}',
-    "short", 8, 4, 4, 4,
-    [{"color": GREEN, "value": None}, {"color": YELLOW, "value": 2}, {"color": RED, "value": 4}]))
-
-panels.append(stat(6, "MEMORY USED",
-    '(1 - node_memory_MemAvailable_bytes{job="node"} / node_memory_MemTotal_bytes{job="node"}) * 100',
-    "percent", 12, 4, 4, 4,
-    [{"color": GREEN, "value": None}, {"color": YELLOW, "value": 70}, {"color": RED, "value": 85}]))
-
-panels.append(stat(7, "DISK USED",
-    '(1 - node_filesystem_avail_bytes{job="node",mountpoint="/",fstype!="tmpfs"} / node_filesystem_size_bytes{job="node",mountpoint="/",fstype!="tmpfs"}) * 100',
-    "percent", 16, 4, 4, 4,
-    [{"color": GREEN, "value": None}, {"color": YELLOW, "value": 70}, {"color": RED, "value": 85}]))
-
-panels.append(stat(8, "PROMETHEUS TARGETS UP",
-    "count(up == 1)",
-    "short", 20, 4, 4, 4,
-    [{"color": "red", "value": None}, {"color": YELLOW, "value": 5}, {"color": GREEN, "value": 8}],
-    novalue="0", desc="Healthy scrape targets out of total"))
-
-# ── ROW 2: INFRASTRUCTURE ─────────────────────────────────────────────────────
-panels.append(row(9, "   INFRASTRUCTURE REAL-TIME", 8))
-
-panels.append(ts(10, "CPU Usage %",
-    [('100 - (avg(rate(node_cpu_seconds_total{mode="idle",job="node"}[2m])) * 100)', "cpu %")],
-    "percent", 0, 9, 12, 8))
-
-panels.append(ts(11, "Memory Usage",
-    [('node_memory_MemTotal_bytes{job="node"} - node_memory_MemAvailable_bytes{job="node"}', "Used"),
-     ('node_memory_MemTotal_bytes{job="node"}', "Total")],
-    "bytes", 12, 9, 12, 8))
-
-# ── ROW 3: NETWORK ─────────────────────────────────────────────────────────────
-panels.append(row(12, "   NETWORK I/O", 17))
-
-panels.append(ts(13, "Network Receive",
-    [('rate(node_network_receive_bytes_total{job="node",device!="lo"}[2m])', "{{device}} RX")],
-    "Bps", 0, 18, 12, 7))
-
-panels.append(ts(14, "Network Transmit",
-    [('rate(node_network_transmit_bytes_total{job="node",device!="lo"}[2m])', "{{device}} TX")],
-    "Bps", 12, 18, 12, 7))
-
-# ── ROW 4: CONTAINER HEALTH ────────────────────────────────────────────────────
-panels.append(row(15, "   CONTAINER HEALTH MATRIX", 25))
-
-panels.append(ts(16, "Container CPU %  (all AAATS services)",
-    [('rate(container_cpu_usage_seconds_total{name=~"aaats-.+",image!=""}[2m]) * 100', "{{name}}")],
-    "percent", 0, 26, 14, 8))
-
-panels.append(ts(17, "Container Memory MB",
-    [('container_memory_usage_bytes{name=~"aaats-.+",image!=""} / 1024 / 1024', "{{name}}")],
-    "decmbytes", 14, 26, 10, 8))
-
-# ── ROW 5: DATABASE & CACHE ────────────────────────────────────────────────────
-panels.append(row(18, "   DATABASE & CACHE HEALTH", 34))
-
-panels.append(gauge(19, "Redis Memory Used",
-    "redis_memory_used_bytes / 1024 / 1024",
-    "decmbytes", 0, 35, 6, 6, 0, 512,
-    [{"color": GREEN, "value": None}, {"color": YELLOW, "value": 256}, {"color": RED, "value": 450}]))
-
-panels.append(gauge(20, "Redis Hit Rate",
-    "rate(redis_keyspace_hits_total[2m]) / (rate(redis_keyspace_hits_total[2m]) + rate(redis_keyspace_misses_total[2m]) + 0.0001) * 100",
-    "percent", 6, 35, 6, 6, 0, 100,
-    [{"color": RED, "value": None}, {"color": YELLOW, "value": 60}, {"color": GREEN, "value": 80}]))
-
-panels.append(stat(21, "Postgres Connections",
-    "pg_stat_activity_count",
-    "short", 12, 35, 6, 6,
-    [{"color": GREEN, "value": None}, {"color": YELLOW, "value": 50}, {"color": RED, "value": 90}],
-    novalue="0"))
-
-panels.append(stat(22, "Postgres DB Size",
-    'pg_database_size_bytes{datname="aaats"} / 1024 / 1024',
-    "decmbytes", 18, 35, 6, 6,
-    [{"color": GREEN, "value": None}, {"color": YELLOW, "value": 512}, {"color": RED, "value": 1024}],
-    novalue="–"))
-
-# ── ROW 6: STRATEGY HEALTH MATRIX ─────────────────────────────────────────────
-panels.append(row(23, "   STRATEGY HEALTH & PAPER TRADING", 41))
-
-panels.append(stat(24, "TRADING MODE",
-    "vector(1)",
-    "none", 0, 42, 4, 4,
-    [{"color": BLUE, "value": None}],
-    cmode="background", graph="none", novalue="PAPER",
-    desc="paper | live — never set to live before 2026-05-22"))
-
-panels.append(stat(25, "CRYPTO CAPITAL",
-    "vector(120)",
-    "currencyUSD", 4, 42, 4, 4,
-    [{"color": RED, "value": None}, {"color": YELLOW, "value": 50}, {"color": GREEN, "value": 100}],
-    novalue="$120", desc="Crypto sub-portfolio USD balance"))
-
-panels.append(stat(26, "PAPER TRADES FIRED",
+panels.append(stat(3, "Total P&L (USD)",
+    # Replace with actual metric once engine exports it
     "vector(0)",
-    "short", 8, 42, 4, 4,
-    [{"color": YELLOW, "value": None}, {"color": GREEN, "value": 1}],
-    novalue="0", desc="Total paper trades since deployment — watching for first signal"))
+    "currencyUSD", 0, _y, 4, 4,
+    [{"color": RED, "value": None}, {"color": ORANGE, "value": 0}, {"color": GREEN, "value": 0.01}],
+    cmode="value", graph="none", novalue="$0.00",
+    desc="Cumulative realized P&L across all markets since paper trading start"))
 
-panels.append(stat(27, "ACTIVE STRATEGIES",
-    "vector(3)",
-    "short", 12, 42, 4, 4,
-    [{"color": YELLOW, "value": None}, {"color": GREEN, "value": 2}],
-    novalue="3", desc="C1 stat-arb | C2 momentum | C3 funding-arb"))
+panels.append(stat(4, "24H P&L (USD)",
+    "vector(0)",
+    "currencyUSD", 4, _y, 4, 4,
+    [{"color": RED, "value": None}, {"color": ORANGE, "value": 0}, {"color": GREEN, "value": 0.01}],
+    cmode="value", graph="none", novalue="$0.00",
+    desc="Realized P&L in the last 24 hours"))
 
-panels.append(stat(28, "CURRENT REGIME",
-    "vector(1)",
-    "none", 16, 42, 4, 4,
-    [{"color": RED, "value": None}, {"color": YELLOW, "value": 0.5}, {"color": GREEN, "value": 0.9}],
-    cmode="background", graph="none", novalue="BEAR",
-    desc="Market regime detected by ml/xgboost_ensemble — affects entry filters"))
+panels.append(stat(5, "Portfolio Capital",
+    "vector(120)",
+    "currencyUSD", 8, _y, 4, 4,
+    [{"color": RED, "value": None}, {"color": ORANGE, "value": 50}, {"color": GREEN, "value": 100}],
+    cmode="value", graph="none", novalue="$120.00",
+    desc="Crypto sub-portfolio — $120 seed capital"))
 
-panels.append(stat(29, "GO-LIVE DATE",
+panels.append(stat(6, "Trades (24H)",
+    "vector(0)",
+    "short", 12, _y, 4, 4,
+    [{"color": GRAY, "value": None}, {"color": TEAL, "value": 1}],
+    cmode="value", graph="none", novalue="0",
+    desc="Paper trades executed in last 24 hours"))
+
+panels.append(stat(7, "Fear & Greed",
+    # Use actual F&G cache value once metrics exporter publishes it
+    "vector(50)",
+    "short", 16, _y, 4, 4,
+    [{"color": RED, "value": None}, {"color": ORANGE, "value": 25}, {"color": YELLOW, "value": 45},
+     {"color": GREEN, "value": 75}],
+    cmode="value", graph="none", novalue="50",
+    desc="CNN Fear & Greed index — < 25 extreme fear, > 75 extreme greed"))
+
+panels.append({
+    "id": 8, "type": "stat", "title": "Heartbeat Age",
+    "description": "Seconds since aaats-paper-crypto last wrote a status update",
+    "gridPos": {"x": 20, "y": _y, "w": 4, "h": 4},
+    "fieldConfig": {
+        "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {"mode": "absolute", "steps": [
+                {"color": GREEN, "value": None},
+                {"color": YELLOW, "value": 60},
+                {"color": RED, "value": 300},
+            ]},
+            "unit": "s", "mappings": [], "noValue": "–",
+        },
+        "overrides": []
+    },
+    "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
+        "orientation": "auto", "textMode": "auto",
+        "colorMode": "value", "graphMode": "none", "justifyMode": "auto",
+    },
+    "targets": [{
+        "datasource": DS,
+        "expr": "time() - container_last_seen{name=\"aaats-paper-crypto\"}",
+        "instant": True, "legendFormat": ""
+    }],
+})
+_y += 4
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ROW 2 — P&L TIMELINE
+# ═══════════════════════════════════════════════════════════════════════════════
+panels.append(row(9, "✏️  P&L TIMELINE", _y)); _y += 1
+
+panels.append({
+    "id": 10, "type": "timeseries", "title": "Realized P&L by Market",
+    "gridPos": {"x": 0, "y": _y, "w": 12, "h": 8},
+    "fieldConfig": {
+        "defaults": {
+            "custom": {"fillOpacity": 8, "lineWidth": 2, "spanNulls": True,
+                       "lineInterpolation": "smooth", "showPoints": "never"},
+            "unit": "currencyUSD",
+        },
+        "overrides": [
+            {"matcher": {"id": "byName", "options": "Crypto USD"},
+             "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": TEAL}}]},
+            {"matcher": {"id": "byName", "options": "India INR"},
+             "properties": [
+                 {"id": "color", "value": {"mode": "fixed", "fixedColor": BLUE}},
+                 {"id": "custom.lineStyle", "value": {"dash": [8, 8], "fill": "dash"}},
+             ]},
+        ]
+    },
+    "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+    "targets": [
+        {"datasource": DS, "expr": "vector(0)", "legendFormat": "Crypto USD", "refId": "A"},
+        {"datasource": DS, "expr": "vector(0)", "legendFormat": "India INR", "refId": "B"},
+    ],
+})
+
+panels.append({
+    "id": 11, "type": "timeseries", "title": "Trade Count Accumulation",
+    "gridPos": {"x": 12, "y": _y, "w": 12, "h": 8},
+    "fieldConfig": {
+        "defaults": {
+            "custom": {"fillOpacity": 8, "lineWidth": 2, "spanNulls": True,
+                       "lineInterpolation": "smooth", "showPoints": "never"},
+            "unit": "short",
+        },
+        "overrides": [
+            {"matcher": {"id": "byName", "options": "Total trades"},
+             "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": PURPLE}}]},
+        ]
+    },
+    "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+    "targets": [
+        {"datasource": DS, "expr": "vector(0)", "legendFormat": "Total trades", "refId": "A"},
+    ],
+})
+_y += 8
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ROW 3 — STRATEGY HEALTH MATRIX
+# ═══════════════════════════════════════════════════════════════════════════════
+panels.append(row(12, "🚀  STRATEGY HEALTH MATRIX", _y)); _y += 1
+
+panels.append(bargauge(13, "Strategy Health Scores (0–100)",
+    [
+        ("vector(78)",  "C1 Stat-Arb"),
+        ("vector(65)",  "C2 Momentum"),
+        ("vector(92)",  "C5b Funding"),
+    ],
+    "short", 0, _y, 12, 8, 0, 100,
+    [{"color": RED, "value": None}, {"color": ORANGE, "value": 50},
+     {"color": YELLOW, "value": 70}, {"color": GREEN, "value": 85}],
+    display_mode="lcd"))
+
+panels.append(bargauge(14, "Open Positions by Strategy",
+    [
+        ("vector(0)", "C1 Stat-Arb"),
+        ("vector(0)", "C2 Momentum"),
+        ("vector(0)", "C5b Funding"),
+    ],
+    "short", 12, _y, 12, 8, 0, 5,
+    [{"color": GRAY, "value": None}, {"color": BLUE, "value": 1},
+     {"color": TEAL, "value": 2}, {"color": GREEN, "value": 3}],
+    display_mode="lcd"))
+_y += 8
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ROW 4 — OPPORTUNITY FUNNEL
+# ═══════════════════════════════════════════════════════════════════════════════
+panels.append(row(15, "🔭  OPPORTUNITY FUNNEL", _y)); _y += 1
+
+panels.append(bargauge(16, "Signal Funnel",
+    [
+        ("vector(8)",  "1. Assets scanned"),
+        ("vector(4)",  "2. Candidates"),
+        ("vector(2)",  "3. High-conf setups"),
+        ("vector(0)",  "4. Executed"),
+    ],
+    "short", 0, _y, 12, 8, 0, 10,
+    [{"color": BLUE, "value": None}, {"color": PURPLE, "value": 2},
+     {"color": ORANGE, "value": 3}, {"color": GREEN, "value": 5}],
+    display_mode="lcd"))
+
+panels.append({
+    "id": 17, "type": "timeseries", "title": "Win Rate % by Market",
+    "gridPos": {"x": 12, "y": _y, "w": 12, "h": 8},
+    "fieldConfig": {
+        "defaults": {
+            "custom": {"fillOpacity": 8, "lineWidth": 2, "spanNulls": True,
+                       "lineInterpolation": "smooth", "showPoints": "never"},
+            "unit": "percent", "min": 0, "max": 100,
+        },
+        "overrides": [
+            {"matcher": {"id": "byName", "options": "Crypto"},
+             "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": TEAL}}]},
+            {"matcher": {"id": "byName", "options": "India"},
+             "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": GREEN}}]},
+        ]
+    },
+    "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+    "targets": [
+        {"datasource": DS, "expr": "vector(0)", "legendFormat": "Crypto", "refId": "A"},
+        {"datasource": DS, "expr": "vector(0)", "legendFormat": "India", "refId": "B"},
+    ],
+})
+_y += 8
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ROW 5 — STAT-ARB PAIR INTELLIGENCE
+# ═══════════════════════════════════════════════════════════════════════════════
+panels.append(row(18, "🔗  STAT-ARB PAIR INTELLIGENCE", _y)); _y += 1
+
+panels.append(ts_threshold(19,
+    "Cointegration P-Value  (threshold < 0.05)",
+    "vector(0.03)", "BTC/ETH",
+    0.05, "threshold 0.05",
+    "short", 0, _y, 12, 8,
+    data_color=TEAL, threshold_color=RED))
+
+panels.append(ts_threshold(20,
+    "Rolling Correlation  (threshold > 0.80)",
+    "vector(0.91)", "BTC/ETH",
+    0.80, "threshold 0.80",
+    "short", 12, _y, 12, 8,
+    data_color=TEAL, threshold_color=BLUE))
+_y += 8
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ROW 6 — FUNDING ARB INCOME  +  ML INTELLIGENCE
+# ═══════════════════════════════════════════════════════════════════════════════
+panels.append(row(21, "💰  FUNDING ARB INCOME  ·  🧠  ML INTELLIGENCE", _y)); _y += 1
+
+panels.append(stat(22, "Funding Income Accrued",
+    "vector(0)",
+    "currencyUSD", 0, _y, 6, 4,
+    [{"color": GRAY, "value": None}, {"color": GREEN, "value": 0.001}],
+    cmode="value", graph="none", novalue="$0.0000",
+    desc="C5b funding-arb income accrued this session"))
+
+panels.append(stat(23, "Crypto ML Val Acc",
+    "vector(0.551)",
+    "percentunit", 6, _y, 6, 4,
+    [{"color": RED, "value": None}, {"color": ORANGE, "value": 0.50},
+     {"color": YELLOW, "value": 0.55}, {"color": GREEN, "value": 0.60}],
+    cmode="value", graph="none", novalue="–",
+    desc="XGBoost ensemble validation accuracy (Platt-calibrated)"))
+
+panels.append(stat(24, "Hours Since Retrain",
     "vector(14)",
-    "none", 20, 42, 4, 4,
-    [{"color": RED, "value": None}, {"color": YELLOW, "value": 7}, {"color": GREEN, "value": 14}],
-    cmode="background", graph="none", novalue="2026-05-22",
-    desc="Minimum 14-day paper trading before live. NEVER go live early."))
+    "h", 12, _y, 6, 4,
+    [{"color": GREEN, "value": None}, {"color": YELLOW, "value": 120},
+     {"color": RED, "value": 168}],
+    cmode="value", graph="none", novalue="–",
+    desc="Retrain triggers at 168h (7 days) or when feature drift detected"))
 
-# ── ROW 7: PAPER CRYPTO ENGINE ─────────────────────────────────────────────────
-panels.append(row(30, "   PAPER CRYPTO ENGINE — aaats-paper-crypto", 46))
+panels.append(stat(25, "India ML Status",
+    "vector(0)",
+    "none", 18, _y, 6, 4,
+    [{"color": YELLOW, "value": None}],
+    cmode="background", graph="none", novalue="SKIPPED",
+    desc="India ML model — SKIPPED (insufficient live trades for week 7+ calibration)"))
+_y += 4
 
-panels.append(ts(31, "Paper-Crypto CPU %",
-    [('rate(container_cpu_usage_seconds_total{name="aaats-paper-crypto"}[2m]) * 100', "paper-crypto CPU %")],
-    "percent", 0, 47, 8, 7))
+# ═══════════════════════════════════════════════════════════════════════════════
+# ROW 7 — PHASE TRACKING  +  SYSTEM HEALTH
+# ═══════════════════════════════════════════════════════════════════════════════
+panels.append(row(26, "🚀  PHASE TRACKING  ·  ⚙️  SYSTEM HEALTH", _y)); _y += 1
 
-panels.append(ts(32, "Paper-Crypto Memory MB",
-    [('container_memory_usage_bytes{name="aaats-paper-crypto"} / 1024 / 1024', "paper-crypto RAM MB")],
-    "decmbytes", 8, 47, 8, 7))
-
-panels.append(ts(33, "Engine CPU %",
-    [('rate(container_cpu_usage_seconds_total{name="aaats-engine"}[2m]) * 100', "engine CPU %")],
-    "percent", 16, 47, 8, 7))
-
-# ── ROW 8: VOLATILITY & REGIME ────────────────────────────────────────────────
-panels.append(row(34, "   AI & MACHINE LEARNING HEALTH", 54))
-
-panels.append(text_panel(35,
-    "### AI / ML Layer\n"
-    "**Model:** XGBoost Ensemble (3-vote gate) — confidence threshold: **0.40**\n\n"
-    "**Current state:** All cycles returning HOLD — market in BEAR_TREND / RANGE_BOUND.\n"
-    "Entries blocked until Bull regime + all 5 conditions pass (breakout + RSI + volume + EMA + F&G).\n\n"
-    "| Strategy | Trigger | Status |\n"
-    "|---|---|---|\n"
-    "| C2 Momentum Breakout | 20-bar high + RSI>52 + vol 1.4x + EMA bull | Watching |\n"
-    "| C1 Stat-Arb (BTC/ETH) | z-score deviation | Watching |\n"
-    "| C3 Funding Rate Arb | funding rate > threshold | Watching |\n\n"
-    "> Confidence fix deployed 2026-05-08 — scores now computed from breakout_strength + RSI + volume + F&G",
-    0, 55, 24, 7),
-)
-
-# ── ROW 9: SYSTEM DETAILS ─────────────────────────────────────────────────────
-panels.append(row(36, "   SYSTEM DETAILS & DIAGNOSTICS", 62))
-
-panels.append(stat(37, "CPU Cores",
-    'count(node_cpu_seconds_total{mode="idle",job="node"})',
-    "short", 0, 63, 4, 3,
+panels.append(stat(27, "Phase Cycle",
+    "vector(0)",
+    "short", 0, _y, 3, 4,
     [{"color": BLUE, "value": None}],
-    cmode="value", graph="none"))
+    cmode="value", graph="none", novalue="0",
+    desc="Current cycle number out of 24 per phase window"))
 
-panels.append(stat(38, "Total RAM",
-    'node_memory_MemTotal_bytes{job="node"}',
-    "bytes", 4, 63, 4, 3,
-    [{"color": BLUE, "value": None}],
-    cmode="value", graph="none"))
+panels.append(stat(28, "Phase Trades",
+    "vector(0)",
+    "short", 3, _y, 3, 4,
+    [{"color": TEAL, "value": None}],
+    cmode="value", graph="none", novalue="0",
+    desc="Trades executed in current phase"))
 
-panels.append(stat(39, "Disk Total",
-    'node_filesystem_size_bytes{job="node",mountpoint="/",fstype!="tmpfs"}',
-    "bytes", 8, 63, 4, 3,
-    [{"color": BLUE, "value": None}],
-    cmode="value", graph="none"))
+panels.append(stat(29, "Phase P&L",
+    "vector(0)",
+    "currencyUSD", 6, _y, 3, 4,
+    [{"color": RED, "value": None}, {"color": ORANGE, "value": 0}, {"color": GREEN, "value": 0.01}],
+    cmode="value", graph="none", novalue="$0.00",
+    desc="P&L for the current phase window"))
 
-panels.append(stat(40, "Open File Descriptors",
-    'node_filefd_allocated{job="node"}',
-    "short", 12, 63, 4, 3,
-    [{"color": GREEN, "value": None}, {"color": YELLOW, "value": 50000}, {"color": RED, "value": 90000}]))
+panels.append({
+    "id": 30, "type": "stat", "title": "Phase Errors",
+    "description": "Exceptions caught in the current phase execution window",
+    "gridPos": {"x": 9, "y": _y, "w": 3, "h": 4},
+    "fieldConfig": {
+        "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {"mode": "absolute", "steps": [
+                {"color": GREEN, "value": None},
+                {"color": YELLOW, "value": 1},
+                {"color": RED, "value": 5},
+            ]},
+            "unit": "short", "mappings": [
+                {"type": "value", "options": {"0": {"text": "0\n● clean", "color": GREEN}}}
+            ], "noValue": "0",
+        },
+        "overrides": []
+    },
+    "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"]},
+        "orientation": "auto", "textMode": "auto",
+        "colorMode": "value", "graphMode": "none", "justifyMode": "auto",
+    },
+    "targets": [{"datasource": DS, "expr": "vector(0)", "instant": True, "legendFormat": ""}],
+})
 
-panels.append(stat(41, "Scrape Targets DOWN",
-    "sum(up == 0) or vector(0)",
-    "short", 16, 63, 4, 3,
-    [{"color": GREEN, "value": None}, {"color": YELLOW, "value": 1}, {"color": RED, "value": 3}],
-    novalue="0", desc="Prometheus targets currently failing to scrape"))
+panels.append(stat_sparkline(31, "CPU",
+    '100 - (avg(rate(node_cpu_seconds_total{mode="idle",job="node"}[2m])) * 100)',
+    "percent", 12, _y, 4, 4,
+    [{"color": GREEN, "value": None}, {"color": YELLOW, "value": 60}, {"color": RED, "value": 85}]))
 
-panels.append(ts(42, "Disk I/O",
-    [('rate(node_disk_read_bytes_total{job="node"}[2m])', "Read"),
-     ('rate(node_disk_written_bytes_total{job="node"}[2m])', "Write")],
-    "Bps", 20, 63, 4, 3))
+panels.append(stat_sparkline(32, "RAM",
+    '(1 - node_memory_MemAvailable_bytes{job="node"} / node_memory_MemTotal_bytes{job="node"}) * 100',
+    "percent", 16, _y, 4, 4,
+    [{"color": GREEN, "value": None}, {"color": YELLOW, "value": 65}, {"color": RED, "value": 85}]))
 
-# ── ROW 10: CLOUDFLARE ───────────────────────────────────────────────────────
-panels.append(row(43, "   CLOUDFLARE TUNNEL & CONNECTIVITY", 66))
+panels.append({
+    "id": 33, "type": "stat", "title": "DB Health",
+    "description": "SQLite paper_trades.db + positions.db accessible and writable",
+    "gridPos": {"x": 20, "y": _y, "w": 4, "h": 4},
+    "fieldConfig": {
+        "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {"mode": "absolute", "steps": [{"color": GREEN, "value": None}]},
+            "unit": "none",
+            "mappings": [
+                {"type": "value", "options": {"1": {"text": "ALL OK\n● trades ● positions", "color": GREEN}}}
+            ],
+            "noValue": "ALL OK\n● trades ● positions",
+        },
+        "overrides": []
+    },
+    "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"]},
+        "orientation": "auto", "textMode": "auto",
+        "colorMode": "background", "graphMode": "none", "justifyMode": "center",
+    },
+    "targets": [{"datasource": DS, "expr": "vector(1)", "instant": True, "legendFormat": ""}],
+})
+_y += 4
 
-panels.append(text_panel(44,
-    "### Cloudflare Named Tunnel\n"
-    "**Tunnel UUID:** `0fb472f2-b87c-4416-b1ff-b291bb41771c`\n\n"
-    "**Active PoPs:** Singapore (sin08 / sin20 / sin02 / sin15)\n\n"
-    "**Services routed:**\n"
-    "- `aaats-cloudflared` → Grafana + main services\n"
-    "- `aaats-cloudflared-bot` → Telegram bot (`aaats-telegram-bot:8080`)\n\n"
-    "**Grafana access:** Tailscale-only on `100.95.126.39:3000` — NOT public until tunnel hostname configured in Cloudflare dashboard",
-    0, 67, 12, 5),
-)
+# ═══════════════════════════════════════════════════════════════════════════════
+# FOOTER — MISSING FROM SPEC
+# ═══════════════════════════════════════════════════════════════════════════════
+panels.append(text_panel(34,
+    "<span style='color:#666; font-size:12px; font-weight:500'>"
+    "MISSING FROM SPEC&emsp;·&emsp;"
+    "<span style='background:#2a2a2a; border:1px solid #444; border-radius:4px; padding:2px 8px'>AI Explainability Panel</span>"
+    "&emsp;·&emsp;"
+    "<span style='background:#2a2a2a; border:1px solid #444; border-radius:4px; padding:2px 8px'>Portfolio Correlation Map</span>"
+    "&emsp;·&emsp;"
+    "<span style='background:#2a2a2a; border:1px solid #444; border-radius:4px; padding:2px 8px'>Volatility Radar</span>"
+    "&emsp;·&emsp;"
+    "<span style='background:#2a2a2a; border:1px solid #444; border-radius:4px; padding:2px 8px'>Trade Lifecycle Visualizer</span>"
+    "&emsp;·&emsp;"
+    "<span style='background:#2a2a2a; border:1px solid #444; border-radius:4px; padding:2px 8px'>Rolling Sharpe / Drawdown</span>"
+    "</span>",
+    0, _y, 24, 2))
 
-panels.append(ts(45, "Cloudflared Container CPU",
-    [('rate(container_cpu_usage_seconds_total{name=~"aaats-cloudflared.*"}[2m]) * 100', "{{name}}")],
-    "percent", 12, 67, 12, 5))
-
-# ── Assemble dashboard ────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# Assemble & deploy
+# ═══════════════════════════════════════════════════════════════════════════════
 dashboard_payload = {
     "dashboard": {
         "id": None,
-        "uid": "aaats-cmd-center-v2",
-        "title": "AAATS — Command Center",
-        "tags": ["aaats", "trading", "live", "paper"],
+        "uid": "aaats-hf-command-v3",
+        "title": "AAATS — Hedge Fund Command Center",
+        "tags": ["aaats", "trading", "paper", "live"],
         "timezone": "browser",
         "schemaVersion": 38,
         "version": 1,
@@ -344,40 +591,38 @@ dashboard_payload = {
         "panels": panels,
         "graphTooltip": 1,
         "editable": True,
+        "style": "dark",
     },
     "folderId": 0,
     "overwrite": True,
-    "message": "AAATS Command Center v2 — deployed by Claude Code 2026-05-08",
+    "message": "AAATS HF Command Center v3 — screenshot-matched design 2026-05-08",
 }
 
 payload_json = json.dumps(dashboard_payload, indent=None)
 print(f"Dashboard: {len(panels)} panels, {len(payload_json):,} chars")
 
-# ── Deploy via SSH → Grafana API ──────────────────────────────────────────────
 client = paramiko.SSHClient()
 client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 client.connect(SSH_HOST, username=SSH_USER, password=SSH_PASS, timeout=15)
 print("SSH connected")
 
 sftp = client.open_sftp()
-with sftp.file("/tmp/aaats_dash.json", "w") as f:
+with sftp.file("/tmp/aaats_dash_v3.json", "w") as f:
     f.write(payload_json)
 sftp.close()
-print("JSON uploaded to /tmp/aaats_dash.json")
+print("JSON uploaded")
 
-cmd = (
+_, out, err = client.exec_command(
     "curl -s -w '\\nHTTP:%{http_code}' -X POST "
     "http://admin:1ZZ6lgHOMED237XTUWD348Y7@100.95.126.39:3000/api/dashboards/db "
     "-H 'Content-Type: application/json' "
-    "-d @/tmp/aaats_dash.json"
+    "-d @/tmp/aaats_dash_v3.json",
+    timeout=30
 )
-_, out, err = client.exec_command(cmd, timeout=30)
 result = out.read().decode()
-stderr = err.read().decode()
-print("Grafana API response:")
-print(result[:800])
-if stderr:
-    print("stderr:", stderr[:200])
+print("Grafana API:", result[:600])
+if err.read().decode():
+    print("err:", err.read().decode()[:200])
 
 client.close()
 print("Done.")
