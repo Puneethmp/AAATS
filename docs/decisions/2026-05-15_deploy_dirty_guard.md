@@ -1,8 +1,40 @@
-# TODO — Dirty-working-tree guard for deploy scripts (2026-05-15)
+# Dirty-working-tree guard for deploy scripts (2026-05-15)
 
 ## Status
-DEFERRED — skipped during the 2026-05-15 drift-reconciliation session per the
-"deploy scripts have inconsistent shapes" STOP condition in the prompt.
+**IMPLEMENTED** — guard module `tools/operator/_dirty_tree_guard.py` (function
+`check_clean`) is wired into all three paramiko deploy scripts. Enforcement is
+live as of commit `21d0f21f`. Original-recipe content preserved below for
+historical context; small implementation deviations from the recipe are noted
+inline.
+
+Deviations from the recipe-as-written:
+- Helper module placed at `tools/operator/_dirty_tree_guard.py` (not
+  `scripts/_deploy_dirty_guard.py`) so it lives next to the deploy entrypoints
+  in `tools/operator/`.
+- Public API is `check_clean(manifest_paths, allow_dirty=False) -> None`
+  raising a `DirtyTreeError` (RuntimeError subclass), rather than
+  `check_clean_or_exit` calling `sys.exit(2)`. Lets callers catch in tests and
+  surfaces failures via Python tracebacks instead of bare exit codes.
+- Manifest entries use trailing-slash convention for directories
+  (`"trading/"`, `"scripts/"`); bare entries (no slash) are matched exactly as
+  files.
+- `--allow-dirty` is an explicit argparse flag on each deploy script (passed
+  through to `check_clean`) rather than auto-detected from `sys.argv`.
+- Repo root detected via `git rev-parse --show-toplevel` rather than assumed
+  from `__file__`.
+- Pytest coverage at `tests/test_operator/test_dirty_tree_guard.py` (six cases
+  including auto-cron-exclusion, directory prefix-match, and not-a-git-repo
+  fail-closed).
+
+---
+
+## Historical (recipe as drafted 2026-05-15)
+
+Originally filed under `docs/known_issues/` while DEFERRED. Now lives here as
+implementation history. Original status text:
+
+> DEFERRED — skipped during the 2026-05-15 drift-reconciliation session per the
+> "deploy scripts have inconsistent shapes" STOP condition in the prompt.
 
 ## Motivation
 This morning we discovered that `scripts/deploy_c5b_halt.py` SCP'd the working

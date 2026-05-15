@@ -24,17 +24,19 @@ feature scopes carrying similar drift.
 
 **How to apply.**
 
-- Every deploy script (`tools/operator/deploy_to_contabo.py` and the smaller
-  `tools/operator/deploy_*.py`) must run `git status --porcelain` against the
-  deploy manifest before SCP. If any manifest file is dirty: refuse the deploy
-  with a clear message, with an `--allow-dirty` emergency escape hatch that
-  prints a loud warning. See `docs/known_issues/2026-05-15_deploy_dirty_guard.md`
-  for the implementation recipe.
+- Enforcement is live as of `21d0f21f`; the guard
+  (`tools/operator/_dirty_tree_guard.py`, function `check_clean`) refuses
+  dirty-manifest deploys unless `--allow-dirty` is passed. The three paramiko
+  deploy scripts — `tools/operator/deploy_to_contabo.py`,
+  `scripts/deploy_c5b_halt.py`, `scripts/deploy_share_assertion.py` — invoke
+  the guard before any SCP/SSH side-effect. Grafana dashboard deploy is N/A
+  (POSTs to API, no on-disk manifest).
 - Don't apply blanket dirty-check to the whole repo — auto-cron writes to
-  `runtime/` and `data/` continuously. Check only files in the actual deploy
-  manifest.
+  `runtime/` and `data/` continuously. The guard takes an explicit manifest
+  argument so only files in the actual deploy payload trigger refusal.
 - If a deploy MUST proceed with a dirty tree (genuine emergency, code is correct
-  but unmerged), commit IMMEDIATELY after deploy as its own atomic commit
+  but unmerged), pass `--allow-dirty` — the guard prints a loud stderr warning
+  but lets you through. Commit IMMEDIATELY after deploy as its own atomic commit
   referencing the deploy SHA. Don't sit on it for a future session to find.
 
 ## Rule 2 — Push to `origin/main` at end of every session
@@ -79,8 +81,8 @@ this commit captures the source.">
 
 ## See also
 
-- `docs/known_issues/2026-05-15_deploy_dirty_guard.md` — implementation recipe
-  for the dirty-tree guard.
+- `docs/decisions/2026-05-15_deploy_dirty_guard.md` — implementation history
+  for the dirty-tree guard (status: IMPLEMENTED).
 - `docs/decisions/pre_live_gates.md` — gates that must close before live capital.
 - `docs/conventions/operator_local_files.md` — three-bucket file layout that
   rules 1 and 2 depend on.
