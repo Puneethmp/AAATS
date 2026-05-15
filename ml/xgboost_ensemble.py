@@ -257,12 +257,14 @@ def score_signal(market, features_row, ensemble):
 
 _GATE_CONFIG_PATH = Path(__file__).parent.parent / "strategies" / "configs" / "_ml_gate.yaml"
 
+# PAPER TRADING PHASE thresholds — lower skip to 0.32 to observe signal
+# distribution. Tighten back to 0.40 skip before going live (2026-05-22).
 _DEFAULT_BUCKETS = [
-    (0.40, 0.00),
-    (0.50, 0.30),
-    (0.60, 0.60),
-    (0.75, 0.85),
-    (1.01, 1.20),
+    (0.32, 0.00),   # below 0.32 = noise, skip
+    (0.45, 0.25),   # 0.32-0.45 = weak signal, 25% size (paper: observe behaviour)
+    (0.55, 0.50),   # 0.45-0.55 = moderate confidence, half size
+    (0.70, 0.85),   # 0.55-0.70 = good signal, near-full size
+    (1.01, 1.20),   # 0.70+ = high confidence, scale up
 ]
 
 _BUCKETS_CACHE = {}

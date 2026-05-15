@@ -1,0 +1,40 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# AAATS — ML Gate Position-Scale Buckets
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Maps XGBoost calibrated confidence (0.0–1.0) to position size multiplier.
+# Position size = base_kelly_size × this_multiplier × trade_quality_score.
+#
+# Each bucket: confidence_max → scale.
+#   "If confidence < confidence_max, use scale."
+#   Buckets evaluated in order (low to high). First match wins.
+#
+# Edit this YAML to retune ML gate aggressiveness without touching Python code.
+# Common adjustments:
+#   - Make system more conservative: lower the "scale" values across buckets.
+#   - Raise the cutoff for any trading: bump first bucket's confidence_max
+#     (e.g. 0.40 → 0.45 means anything <0.45 is skipped).
+#   - Disable the "elevated" bucket: set last bucket's scale from 1.20 to 1.00.
+#
+# Discipline rule (your own doctrine):
+#   NEVER edit this file during a drawdown period.
+#   Only adjust during operational stability + emotionally neutral state.
+# ─────────────────────────────────────────────────────────────────────────────
+
+default:
+  buckets:
+    - {confidence_max: 0.40, scale: 0.00}   # skip — no signal
+    - {confidence_max: 0.50, scale: 0.30}   # toe in — keep ML learning
+    - {confidence_max: 0.60, scale: 0.60}   # moderate
+    - {confidence_max: 0.75, scale: 0.85}   # near-base
+    - {confidence_max: 1.01, scale: 1.20}   # elevated — caller caps at Kelly max
+
+# Per-market overrides. Leave `buckets: null` to inherit `default` above.
+crypto:
+  buckets: null
+
+india:
+  buckets: null
+
+us:
+  buckets: null
