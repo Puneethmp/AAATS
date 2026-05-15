@@ -1,0 +1,119 @@
+2026-05-15 — Grafana share-equality alert wiring (P1 operational gap close)
+============================================================================
+
+CHANGE ID:  2026-05-15_grafana_alert
+DEPLOY:     atomic SCP (.tmp -> mv -f) per CLAUDE.md doctrine
+SCOPE:      aaats-grafana ONLY (compose project `aaats-base` at /srv/aaats/compose/)
+TYPE:       additive provisioning; no trading container touched
+
+WHY
+---
+The Prometheus counter `aaats_share_equality_mismatch_total` is live and
+verified (deploy 2026-05-15_share_assertion). Telemetry without routing is
+deaf — a mismatch fires the counter but nobody is paged. This change wires
+the Grafana alert rule that watches the counter and routes increments to
+the existing Telegram operator chat (TELEGRAM_CHAT_CRITICAL=1946109268).
+
+FILES CHANGED (in repo)
+-----------------------
+deployment/grafana/provisioning/alerting/share_equality.yaml
+  • Fixed datasourceUid: prometheus -> aaats-prom (was bug; alert would
+    silently fail eval against unknown datasource).
+  • Replaced inline empty `contactPoints` block (receivers: []) with
+    cross-reference to box-only telegram_contact.yaml (token is secret).
+  • Restructured `policies` as proper root (grafana-default-email) + child
+    route (telegram, matchers: severity="high" AND component="paper_trader").
+    Per Grafana v11 docs, matchers are illegal on root policy entries.
+  • Folder remains `AAATS` (matches dashboards.yml provisioning).
+
+FILES CHANGED (on box, NOT in repo — contains operator secrets)
+---------------------------------------------------------------
+/srv/aaats/compose/grafana/provisioning/alerting/telegram_contact.yaml
+  • Provisions the named contact point `telegram` that share_equality.yaml's
+    policy routes to.
+  • Embeds bottoken from /srv/aaats/secrets/telegram_bot_token
+    and chatid from /srv/aaats/compose/.env (TELEGRAM_CHAT_CRITICAL).
+  • Mode 0640, owner aaats:aaats. Bind-mounted RO into aaats-grafana at
+    /etc/grafana/provisioning/alerting/telegram_contact.yaml.
+
+PRE-DEPLOY STATE (rollback target)
+----------------------------------
+/srv/aaats/compose/grafana/provisioning/alerting/
+  -> directory did not exist (created during this deploy).
+
+Grafana API state before deploy:
+  GET /api/v1/provisioning/alert-rules   -> []  (no rules)
+  GET /api/v1/provisioning/contact-points -> 1 entry (placeholder email)
+  GET /api/v1/provisioning/policies      -> {receiver:"grafana-default-email",
+                                              group_by:["grafana_folder","alertname"]}
+
+ROLLBACK
+--------
+1. SSH to aaats@100.95.126.39
+2. rm -rf /srv/aaats/compose/grafana/provisioning/alerting/
+3. docker restart aaats-grafana
+4. Verify GET /api/v1/provisioning/alert-rules returns [].
+5. Revert the repo file in git:
+     git checkout HEAD~1 -- deployment/grafana/provisioning/alerting/share_equality.yaml
+
+DEPLOY MECHANISM
+----------------
+Repo file SCP'd via atomic .tmp + mv -f to:
+  /srv/aaats/compose/grafana/provisioning/alerting/share_equality.yaml
+Box-only file written in-place on box (token never leaves /srv/aaats/secrets/):
+  /srv/aaats/compose/grafana/provisioning/alerting/telegram_contact.yaml
+
+Reload: `docker restart aaats-grafana` (HUP does not reload unified-alerting
+provisioning in Grafana 11.x — full restart required).
+
+VALIDATION GATES
+----------------
+1. Container state: aaats-grafana UP healthy, RestartCount unchanged.
+2. GET /api/v1/provisioning/alert-rules contains `share_equality_mismatch`.
+3. GET /api/v1/provisioning/contact-points contains `telegram` with type=telegram.
+4. POST /api/v1/provisioning/contact-points/test for `telegram` -> Telegram
+   message arrives in the operator chat, visibly prefixed with TEST/marker.
+
+DEPLOY ARTIFACTS
+----------------
+GRAFANA_VERSION            = 11.3.0 (commit d9455ff7db73b694db7d412e49a68bec767f2b5a)
+PRE_RESTART_COUNT          = 0
+POST_DEPLOY_HEALTH         = Up (healthy) within 8s after `docker restart aaats-grafana`
+DEPLOYED_AT_UTC            = 2026-05-15T16:24Z
+
+POST-DEPLOY API VERIFICATION
+----------------------------
+GET /api/v1/provisioning/alert-rules
+  -> 1 entry: uid=share_equality_mismatch, ruleGroup=share_equality, folderUID=bfln6dxz1ooowe
+GET /api/v1/provisioning/contact-points
+  -> 2 entries: placeholder "email receiver" + new "telegram" (type=telegram, uid=telegram_critical)
+GET /api/v1/provisioning/policies
+  -> root receiver=grafana-default-email, child route severity="high" + component="paper_trader" -> telegram
+
+TELEGRAM ROUTING TEST
+---------------------
+POST /api/alertmanager/grafana/config/api/v1/receivers/test
+  -> HTTP 200, receivers[0].status="ok", notified_at=2026-05-15T16:28:37.135670769Z
+  -> Test message visibly prefixed "TEST alert (IGNORE) — share-equality Grafana→Telegram wiring verification 2026-05-15".
+
+KNOWN GAP — METRIC SOURCE
+-------------------------
+aaats-metrics container image was last built 2026-05-12, BEFORE the
+collect_share_equality() collector was added to monitoring/metrics_exporter.py.
+The Prometheus counter `aaats_share_equality_mismatch_total` therefore is
+NOT yet exposed end-to-end:
+  - paper_trader.py writes data/share_equality_mismatches.json correctly ✓
+  - metrics_exporter.py in the image has 0 references to share_equality ✗
+  - alert rule cannot evaluate because the metric series doesn't exist ✗
+
+The end-to-end alert path is wired but inert until aaats-metrics is rebuilt.
+Per this session's guardrails the rebuild was OUT OF SCOPE (touches the
+`deployment/` compose project). Track as follow-up: rebuild aaats-metrics
+in the next session that's authorized to touch /home/aaats/aaats/deployment/.
+Rebuild command (when authorized):
+  docker compose -f /home/aaats/aaats/deployment/docker-compose.yml \
+    up -d --build --no-deps aaats-metrics
+
+Until then, Telegram routing IS proven via Grafana's receivers/test API —
+when the metric source comes online, real share-equality mismatches will
+route through the same path verified here.

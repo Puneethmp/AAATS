@@ -2,11 +2,17 @@ apiVersion: 1
 
 # Grafana unified-alerting rule for the SELL/BUY share-equality detector.
 #
-# Wiring depends on the Telegram contact point already existing on the
-# Contabo Grafana instance — this file references it by name only. If the
-# Telegram point isn't registered yet, the rule still loads and the alert
-# fires on the default route (the operator should set up the contact
-# point under "alerting > contact points" with name = "telegram").
+# Datasource UID (`aaats-prom`) and folder title (`AAATS`) match
+# `deployment/grafana/provisioning/datasources/prometheus.yml` and the
+# folder auto-created by `deployment/grafana/provisioning/dashboards/dashboards.yml`.
+#
+# Routing: the `telegram` contact point referenced here is provisioned
+# OUTSIDE this repo on the box (file at
+# `/srv/aaats/compose/grafana/provisioning/alerting/telegram_contact.yaml`)
+# because the bot token + chat id are operator secrets and live in
+# `/srv/aaats/secrets/` rather than git. If the contact point ever goes
+# missing, the policy falls back to the root default via Grafana's normal
+# routing rules.
 #
 # Source metric: aaats_share_equality_mismatch_total{strategy,symbol}
 # Produced by:   execution/paper_trader.py:_bump_share_mismatch_counter()
@@ -28,7 +34,7 @@ groups:
             relativeTimeRange:
               from: 3600
               to: 0
-            datasourceUid: prometheus
+            datasourceUid: aaats-prom
             model:
               expr: |
                 sum by (strategy, symbol) (
@@ -69,21 +75,15 @@ groups:
           severity: high
           component: paper_trader
 
-contactPoints:
-  - orgId: 1
-    name: telegram
-    receivers: []
-    # NOTE: leave receivers empty in provisioning; the Telegram contact point
-    # is configured at runtime via the Grafana UI (operator-managed token).
-    # If `telegram` contact point doesn't exist, alerts route to the default.
-
 policies:
   - orgId: 1
-    receiver: telegram
+    receiver: grafana-default-email
     group_by: [grafana_folder, alertname]
-    matchers:
-      - severity = high
-      - component = paper_trader
-    group_wait: 0s
-    group_interval: 5m
-    repeat_interval: 1h
+    routes:
+      - receiver: telegram
+        matchers:
+          - severity = "high"
+          - component = "paper_trader"
+        group_wait: 0s
+        group_interval: 5m
+        repeat_interval: 1h
