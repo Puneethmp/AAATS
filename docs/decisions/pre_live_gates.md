@@ -19,10 +19,10 @@ live capital. New entries append here as they're discovered.
 
 ### G2 — Scanner-pipeline support modules not in `origin/main`
 
-- **Status**: deployed on Contabo box via paramiko, but UNTRACKED locally and missing from `origin/main` as of 2026-05-15.
-- **Files**: `markets/crypto/universe.py`, `scanner.py`, `allocator.py`, `correlation_guard.py`, `sentiment.py`, `confidence_scorer.py`.
-- **Why it gates live**: a fresh clone of `origin/main` cannot reproduce the running container — the scanner pipeline silently falls back to hardcoded SYMBOLS (per `except` block at [trading/live_paper_runner.py:1581](../../trading/live_paper_runner.py#L1581)). Reproducibility is a precondition for live audit/rollback.
-- **Exit criteria**: commit all six modules to `origin/main` with their own tests; verify a clean clone + `docker compose build` produces a container whose `live_paper_runner.py` cycle log shows `[scanner] universe size=...` rather than the fallback log line.
+- **Status**: CLOSED 2026-05-15 — the six modules are now committed to `origin/main` as part of the scanner-first chain commit ("feat(markets): scanner-first C3/C6 universe + sentiment pipeline").
+- **Files**: `markets/crypto/{universe,scanner,allocator,correlation_guard,sentiment,confidence_scorer}.py`.
+- **Original problem**: deployed on Contabo box via paramiko, but UNTRACKED locally and missing from `origin/main` until the closure commit. A fresh clone of `origin/main` could not reproduce the running container — the scanner pipeline silently fell back to hardcoded SYMBOLS (per `except` block at [trading/live_paper_runner.py:1581](../../trading/live_paper_runner.py#L1581)).
+- **Validation**: a clean clone + import sweep now resolves all six modules without `ModuleNotFoundError`; the runner's scanner branch logs `[scanner] universe size=...` rather than the fallback log line.
 
 ## How to add a gate
 
