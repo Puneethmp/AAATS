@@ -1434,11 +1434,15 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
         log.error("  Crypto stat_arb error: %s", exc, exc_info=True)
 
     # Funding rate arbitrage: BTC/ETH delta-neutral (C5b)
-    try:
-        from trading.funding_arb import run_funding_arb_crypto
-        run_funding_arb_crypto(portfolio["crypto"])
-    except Exception as exc:
-        log.error("  Funding arb error: %s", exc, exc_info=True)
+    # HALTED 2026-05-15: see docs/known_issues/2026-05-15_c5b_halt.md
+    # Schema delta ($25 per-leg BUY vs $50 round-trip SELL) would fire the
+    # share-equality assertion as $25 WARN on every close. Re-enable only after
+    # unified-ledger spec Q1-Q4 resolves dual-leg accounting.
+    # try:
+    #     from trading.funding_arb import run_funding_arb_crypto
+    #     run_funding_arb_crypto(portfolio["crypto"])
+    # except Exception as exc:
+    #     log.error("  Funding arb error: %s", exc, exc_info=True)
 
     # 4H Momentum Breakout: BTC/ETH only (C2)
     try:
