@@ -284,7 +284,7 @@ Once Angel One integration is verified:
 
 - Angel One API Docs: https://smartapi.angelbroking.com/docs
 - SmartAPI Python SDK: https://github.com/angelbroking-github/smartapi
-- AAATS Blueprint: [AAATS_MASTER_BLUEPRINT.md](AAATS_MASTER_BLUEPRINT.md)
+- AAATS Blueprint: [AAATS_MASTER_BLUEPRINT.md](docs/sprints/AAATS_MASTER_BLUEPRINT.md)
 
 ---
 

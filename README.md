@@ -6,7 +6,7 @@
 
 ## ⚠️ Important Disclaimer
 
-This system is built for **paper trading and systematic research**. It does not guarantee profits. No trading system does. Past backtest performance does not predict future results. Real capital is deployed only after a minimum of 3 months of successful paper trading **per market independently**. NSE F&O involves leverage — positions can lose more than capital deployed. Read the [Master Blueprint](AAATS_MASTER_BLUEPRINT.md) before touching any code.
+This system is built for **paper trading and systematic research**. It does not guarantee profits. No trading system does. Past backtest performance does not predict future results. Real capital is deployed only after a minimum of 3 months of successful paper trading **per market independently**. NSE F&O involves leverage — positions can lose more than capital deployed. Read the [Master Blueprint](docs/sprints/AAATS_MASTER_BLUEPRINT.md) before touching any code.
 
 ---
 
@@ -93,7 +93,7 @@ AAATS is a systematic trading engine that:
         [Streamlit Dashboard + Telegram Alerts]
 ```
 
-Full architecture: [AAATS_MASTER_BLUEPRINT.md](AAATS_MASTER_BLUEPRINT.md)
+Full architecture: [AAATS_MASTER_BLUEPRINT.md](docs/sprints/AAATS_MASTER_BLUEPRINT.md)
 
 ---
 
@@ -350,7 +350,6 @@ AAATS/
 ├── .env.example
 ├── .gitignore
 ├── .pre-commit-config.yaml        # ruff + black pre-commit hooks
-├── AAATS_MASTER_BLUEPRINT.md
 └── README.md
 ```
 
@@ -462,7 +461,7 @@ Claude prefers minimal context for simple questions. **For this project specific
 - **Debugging one test?** Paste the test, the error, and the relevant code section. Not the whole repo.
 - **Quick question?** "Should risk/us/position_sizer.py use scipy or numpy for this?" — just ask. Claude will clarify if needed.
 
-See the [Prompting Guidelines](AAATS_MASTER_BLUEPRINT.md#16-prompting-guidelines) section in AAATS_MASTER_BLUEPRINT.md for deeper guidance.
+See the [Prompting Guidelines](docs/sprints/AAATS_MASTER_BLUEPRINT.md#16-prompting-guidelines) section in docs/sprints/AAATS_MASTER_BLUEPRINT.md for deeper guidance.
 
 ---
 
@@ -505,7 +504,7 @@ These are hardcoded. They cannot be overridden from config or command line.
 | Max total deployment | 40% across all markets combined |
 | Total portfolio halt | -20% total triggers full system halt |
 
-Full risk documentation: [AAATS_MASTER_BLUEPRINT.md — Section 7](AAATS_MASTER_BLUEPRINT.md)
+Full risk documentation: [AAATS_MASTER_BLUEPRINT.md — Section 7](docs/sprints/AAATS_MASTER_BLUEPRINT.md)
 
 ---
 
@@ -565,7 +564,7 @@ Private. All rights reserved.
 ## Contact
 
 Built and maintained by Puneeth.
-Architecture decisions: [AAATS_MASTER_BLUEPRINT.md](AAATS_MASTER_BLUEPRINT.md)
+Architecture decisions: [AAATS_MASTER_BLUEPRINT.md](docs/sprints/AAATS_MASTER_BLUEPRINT.md)
 
 ---
 
