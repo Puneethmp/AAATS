@@ -24,7 +24,7 @@ feature scopes carrying similar drift.
 
 **How to apply.**
 
-- Enforcement is live as of `21d0f21f`; the guard
+- Enforcement is live as of `ae24d2c`; the guard
   (`tools/operator/_dirty_tree_guard.py`, function `check_clean`) refuses
   dirty-manifest deploys unless `--allow-dirty` is passed. The three paramiko
   deploy scripts — `tools/operator/deploy_to_contabo.py`,

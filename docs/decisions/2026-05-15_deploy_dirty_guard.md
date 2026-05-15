@@ -3,7 +3,7 @@
 ## Status
 **IMPLEMENTED** — guard module `tools/operator/_dirty_tree_guard.py` (function
 `check_clean`) is wired into all three paramiko deploy scripts. Enforcement is
-live as of commit `21d0f21f`. Original-recipe content preserved below for
+live as of commit `ae24d2c`. Original-recipe content preserved below for
 historical context; small implementation deviations from the recipe are noted
 inline.
 
