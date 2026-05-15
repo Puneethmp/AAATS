@@ -53,6 +53,7 @@ from decision.consensus_voting import ConsensusVoting, StrategyVote
 from risk.engine import RiskEngine, RiskDecision
 from risk.position_sizer import PositionSizer
 from observability.alerts import send_alert
+from config.doctrine import LOCKED_STARTING_EQUITY
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DB_PATH        = str(_ROOT / "data" / "paper_trades.db")
@@ -116,7 +117,7 @@ CRYPTO_SYMBOLS = [
 # BTC dominance threshold: when BTC dominance > 58%, alts underperform — reduce alt exposure
 BTC_DOMINANCE_CUTOFF = 58.0   # % — above this, skip SOL/LINK/DOT/AVAX BUYs
 
-INITIAL_CAPITAL = {"india": 25_000.0, "crypto": 120.0}  # India ₹25k, Crypto ₹10k≈$120 @ 83 INR/USD
+INITIAL_CAPITAL = {"india": 0.0, "crypto": 110.0}  # India halted (capital=0); Crypto budget=$110
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -666,9 +667,79 @@ _sizers: dict[str, PositionSizer] = {}
 def _get_risk_engine(portfolio: dict) -> RiskEngine:
     global _risk_engine
     if _risk_engine is None:
-        total = sum(p["capital"] for p in portfolio.values())
-        _risk_engine = RiskEngine(initial_portfolio=total)
+        # Doctrinal seed: never derive starting equity from current cash, which
+        # collapses to current_value after a state reset and silently masks
+        # live drawdown. The peak is then loaded from STATE_FILE if present.
+        _risk_engine = RiskEngine(initial_portfolio=LOCKED_STARTING_EQUITY)
     return _risk_engine
+
+
+def _strategy_state_book_value() -> float:
+    """
+    Sum of size_usd across data/*_state.json from external strategies.
+
+    The runner only owns positions written through ``execute()`` (those land
+    in paper_positions.json). Standalone strategies — altcoin_reversion,
+    bollinger_range, etc. — keep their own state files. Without counting
+    them here the runner's mark-to-market equity collapses to cash alone
+    and the kill switch over-reports drawdown after a restart.
+    """
+    data_dir = _ROOT / "data"
+    if not data_dir.is_dir():
+        return 0.0
+    total = 0.0
+    for state_file in data_dir.glob("*_state.json"):
+        if "cooldown" in state_file.name:
+            continue
+        try:
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(state, dict):
+            continue
+        for pos in state.values():
+            if not isinstance(pos, dict):
+                continue
+            try:
+                size_usd = float(pos.get("size_usd", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if size_usd > 0:
+                total += size_usd
+    return total
+
+
+def _compute_current_equity(
+    positions: dict,
+    portfolio: dict,
+    market: str,
+    symbol: str,
+    last_price: float,
+) -> float:
+    """
+    Total mark-to-market equity = cash across all markets + open book value
+    (runner-tracked positions + standalone strategy state files).
+
+    For the symbol currently being processed we use ``last_price``; for every
+    other runner-tracked position we fall back to the stored ``entry_price``
+    (the most recent mark we have on hand without re-querying the venue).
+    Standalone strategy positions are valued at their last-recorded
+    ``size_usd``; this is the canonical Source A used by the reconciler.
+    """
+    cash = sum(float(p.get("capital", 0.0) or 0.0) for p in portfolio.values())
+    open_value = 0.0
+    for mkt_name, mkt_positions in positions.items():
+        for sym, pos in mkt_positions.items():
+            shares = float(pos.get("shares", 0.0) or 0.0)
+            if shares == 0.0:
+                continue
+            if mkt_name == market and sym == symbol:
+                mark = float(last_price)
+            else:
+                mark = float(pos.get("entry_price", 0.0) or 0.0)
+            open_value += shares * mark
+    open_value += _strategy_state_book_value()
+    return cash + open_value
 
 
 def _get_sizer(market: str, capital: float) -> PositionSizer:
@@ -774,8 +845,11 @@ def execute(
     engine = _get_risk_engine(portfolio)
     sizer  = _get_sizer(market, capital)
 
-    # ── Update risk engine with current market value ───────────────────────
-    total_equity = sum(p["capital"] for p in portfolio.values())
+    # ── Update risk engine with mark-to-market equity ─────────────────────
+    # Cash alone hides drawdown: when capital is consumed by an open position
+    # the cash balance falls but the equity is unchanged. Using cash + open
+    # book value as the input lets the kill switch see the real picture.
+    total_equity = _compute_current_equity(positions, portfolio, market, symbol, last_price)
     engine.update_portfolio(total_equity)
     decision = engine.update_market(market, capital)
 
