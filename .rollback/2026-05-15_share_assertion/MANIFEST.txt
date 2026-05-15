@@ -1,0 +1,70 @@
+2026-05-15 — SELL/BUY share-equality assertion (P1 guardrail)
+==============================================================
+
+CHANGE ID:  2026-05-15_share_assertion
+DEPLOY:     atomic SCP (.tmp -> mv -f) per CLAUDE.md doctrine
+SCOPE:      paper-crypto only (aaats-paper-crypto)
+TYPE:       additive (detection-only); no strategy code touched
+
+WHY
+---
+The C3+C6 `_record` exit-sizing fix (deploy 2026-05-15_record_fix, image
+f19fa108e97a...) eliminates the SHARES = size_usd / exit_price bug-class but
+relies on every strategy author remembering to pass entry shares. A permanent
+post-write detector closes that loop: any future SELL whose shares != the
+FIFO-matched BUY shares fires a single WARN line, regardless of which
+strategy wrote it. Bug-class-level guardrail, not a single-strategy patch.
+
+Detection-only by design — HALT/reconcile decisions still belong to the
+reconciler and the upcoming unified-positions-ledger migration.
+
+FILES CHANGED
+-------------
+execution/paper_trader.py
+  • Added _check_sell_buy_share_equality() helper (module-private)
+  • record_trade(): one call site after successful INSERT commit, gated on
+    action == "SELL". Runs on the same sqlite3.Connection before close().
+  • Schema-variant tolerant: catches OperationalError (test DBs without
+    strategy column) and silently skips.
+
+tests/test_execution/test_paper_trader_sell_assertion.py (NEW)
+  • 3 tests, all pass locally:
+    - matching pair -> no warning
+    - artificial residual -> warning with correct delta string
+    - 3 BUYs / 2 SELLs FIFO advance -> warn on first, silent on second
+
+NO OTHER FILES TOUCHED. Strategy code untouched. Reconciler untouched.
+
+ROLLBACK
+--------
+cp .rollback/2026-05-15_share_assertion/paper_trader.py.pre \
+   execution/paper_trader.py
+Then SCP-upload back to /home/aaats/aaats/execution/paper_trader.py and
+rebuild aaats-paper-crypto.
+
+The new test file (tests/test_execution/test_paper_trader_sell_assertion.py)
+is NOT shipped to the container (tests/ is not in image bake or bind mount).
+Safe to leave on workstation even after rollback.
+
+DEPLOY VALIDATION GATES
+-----------------------
+1. pytest tests/test_execution/ + tests/test_trading/test_paper_loop.py
+   -> 31 passed locally (3 new + 28 existing) PRE-DEPLOY
+2. Pre/post image SHA captured below
+3. Container State.Status = running after recreate
+4. First post-deploy SELL on any strategy: no SELL/BUY share mismatch
+   WARN expected (C3/C6 fix already applied last cycle)
+5. If any WARN fires for an UNEXPECTED strategy -> huge finding, escalate
+
+REBUILD COMMAND
+---------------
+ssh aaats@100.95.126.39
+  docker compose -f /home/aaats/aaats/deployment/docker-compose.yml \
+    up -d --build --no-deps aaats-paper-crypto
+
+DEPLOY ARTIFACTS (filled at deploy time)
+----------------------------------------
+PRE_REBUILD_IMAGE_SHA  = sha256:f19fa108e97adcef8efdaa407b98ec1539c8684d5e5f177822d33205fe16737c
+POST_REBUILD_IMAGE_SHA = sha256:880341575aa81e0a6ad75490061315792dee702df996c4d59c6f96a809adbbb5
+PRE_RESTART_COUNT      = 0
+DEPLOYED_AT_UTC        = 2026-05-15T07:54:03Z
