@@ -73,9 +73,15 @@ def main() -> int:
     if str(PROJECT_ROOT) not in sys.path:
         sys.path.insert(0, str(PROJECT_ROOT))
     from tools.operator._dirty_tree_guard import check_clean
+    from tools.operator._newdir_parity_guard import check_newdir_parity
     check_clean(
         [LOCAL_FILE.relative_to(PROJECT_ROOT).as_posix()],
         allow_dirty=args.allow_dirty,
+    )
+    check_newdir_parity(
+        [LOCAL_FILE.relative_to(PROJECT_ROOT).as_posix()],
+        allow_dirty=args.allow_dirty,
+        warn_only=True,
     )
 
     print("=" * 65)

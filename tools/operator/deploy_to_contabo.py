@@ -129,7 +129,9 @@ def main():
     if str(_repo) not in sys.path:
         sys.path.insert(0, str(_repo))
     from tools.operator._dirty_tree_guard import check_clean
+    from tools.operator._newdir_parity_guard import check_newdir_parity
     check_clean(_build_manifest(), allow_dirty=args.allow_dirty)
+    check_newdir_parity(INCLUDE, allow_dirty=args.allow_dirty)
 
     print("=" * 65)
     print("  AAATS → Contabo Deployment")
