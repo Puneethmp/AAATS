@@ -1,0 +1,83 @@
+2026-05-15 — SELL-shares fix + loguru printf-format sweep
+==========================================================
+
+CHANGE ID:  2026-05-15_record_fix
+DEPLOY:     atomic SCP (.tmp → mv -f) + image rebuild
+SCOPE:      paper-crypto only (aaats-paper-crypto)
+
+WHY
+---
+Two unrelated bugs bundled into one atomic deploy because both touch
+image-baked code (trading/, execution/) and a single rebuild covers both:
+
+1. P1 — SELL-shares mismatch (root cause of TON/FET reconcile residuals)
+   Strategies C3 and C6 recorded SELL rows with shares = size_usd / SELL_price
+   instead of the BUY row's entry shares. SUM(BUY) - SUM(SELL) leaves dust
+   per closed position. C3 had been firing; C6 was latent (no losing-TRX
+   round-trip yet).
+
+2. P2 — Loguru printf-format sweep
+   `execution/paper_trader.py` had 3 `_log.<level>(...%s %d %.4f, args)` calls
+   (loguru wants `{}` format). All INFO/WARN, all on the trade-write hot path.
+   Operator was seeing literal `%s %s @ %.4f x%.6f` in trade logs since the
+   last paper_trader edit.
+
+FILES CHANGED
+-------------
+trading/altcoin_reversion.py
+  • _record(): added optional `shares` kwarg
+  • _record callsite (SELL, line ~466): pass stored entry shares
+  • BUY callsite unchanged (price IS entry price, computation correct)
+
+trading/bollinger_range.py
+  • Same shape as altcoin_reversion.py
+  • SELL callsite (line ~284) updated; BUY (line ~347) unchanged
+
+execution/paper_trader.py
+  • Three _log.* format strings: %s/%d/%.Nf → {}/{:.Nf}
+  • Positional args unchanged (loguru consumes them)
+
+docs/known_issues/2026-05-15_log_format_sweep.md    (NEW)
+docs/decisions/2026-05-15_drift_diagnosis.md        (NEW, mirror of memory file)
+docs/specs/unified_positions_ledger.md              (1-line ref-path update)
+
+ROLLBACK
+--------
+To revert strategy + paper_trader changes:
+    cp .rollback/2026-05-15_record_fix/altcoin_reversion.py.pre trading/altcoin_reversion.py
+    cp .rollback/2026-05-15_record_fix/bollinger_range.py.pre   trading/bollinger_range.py
+    cp .rollback/2026-05-15_record_fix/paper_trader.py.pre      execution/paper_trader.py
+Then SCP atomic-upload all three back to /home/aaats/aaats/ and rebuild
+aaats-paper-crypto.
+
+Docs are non-rollback (additive); leave them in place even if code reverts.
+
+DEPLOY VALIDATION GATES
+-----------------------
+1. pytest tests/ in container — all 25 tests pass
+2. One full reconcile_now() cycle — no new alerts on C3/C6 active symbols
+3. drawdown reading −3.94% ± 30 bps (no widening)
+4. RestartCount = 0 (container did not crash on first request)
+5. Pre/post image SHA captured below
+
+PRE-REBUILD IMAGE SHA
+---------------------
+(captured at deploy time, appended below)
+
+POST-REBUILD IMAGE SHA
+----------------------
+(captured at deploy time, appended below)
+
+REBUILD COMMAND
+---------------
+ssh aaats@100.95.126.39
+  docker compose -f /home/aaats/aaats/deployment/docker-compose.yml \
+    up -d --build --no-deps aaats-paper-crypto
+
+
+DEPLOY ARTIFACTS (filled at deploy time)
+----------------------------------------
+PRE_REBUILD_IMAGE_SHA  = sha256:2f6661753a9f0ddb9a24d56cfa0889261d22b564966a14320bc0c4dea9f0ae9d
+POST_REBUILD_IMAGE_SHA = sha256:f19fa108e97adcef8efdaa407b98ec1539c8684d5e5f177822d33205fe16737c
+PRE_RESTART_COUNT      = 0
+DEPLOYED_AT_UTC        = 2026-05-15T07:14:20Z

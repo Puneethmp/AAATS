@@ -358,23 +358,13 @@ def _record(
     pnl_pct: float | None = None,
     z_score: float = 0.0,
     exit_reason: str = "",
-    shares: float | None = None,
 ) -> None:
     try:
         from execution.paper_trader import record_trade
-        # SELL must record the same shares that the BUY row stored, otherwise
-        # paper_trades SUM(BUY) - SUM(SELL) leaves residual dust per closed
-        # position. Caller passes the entry-derived shares for SELL. BUY path
-        # falls back to size_usd/price (price IS entry price there, correct).
-        recorded_shares = (
-            float(shares)
-            if shares is not None
-            else round(size_usd / max(price, 1e-9), 8)
-        )
         record_trade(
             db_path=DB_PATH, market="crypto", symbol=symbol,
             action=action,
-            shares=recorded_shares,
+            shares=round(size_usd / max(price, 1e-9), 8),
             price=price, signal="C3_ALT_REVERSION",
             regime="RANGE_OR_BULL", risk_action="ALLOW",
             pnl=pnl,
@@ -479,9 +469,6 @@ def run_altcoin_reversion_crypto(
                         pnl=pnl, entry_time=pos["entry_ts"],
                         exit_time=exit_ts, pnl_pct=pnl_pct,
                         z_score=current_z, exit_reason=reason,
-                        shares=round(
-                            pos["size_usd"] / max(pos["entry_price"], 1e-9), 8
-                        ),
                     )
                     log.info(
                         "[c3] EXIT  %s  reason=%s  z=%.3f  "

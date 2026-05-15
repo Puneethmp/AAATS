@@ -167,8 +167,8 @@ def record_trade(
     existed, prior_id = dedupe_check(db_path, client_order_id)
     if existed:
         _log.warning(
-            "PAPER duplicate suppressed | cli_id={} | prior_trade={} | "
-            "{} {} @ {:.4f} x{:.6f} strat={}",
+            "PAPER duplicate suppressed | cli_id=%s | prior_trade=%s | "
+            "%s %s @ %.4f x%.6f strat=%s",
             client_order_id[:12], prior_id, action, symbol, price, shares,
             strategy or signal,
         )
@@ -210,13 +210,13 @@ def record_trade(
         c.close()
         winner = row[0] if row else trade_id
         _log.warning(
-            "PAPER duplicate race resolved by UNIQUE INDEX | cli_id={} | winner={}",
+            "PAPER duplicate race resolved by UNIQUE INDEX | cli_id=%s | winner=%s",
             client_order_id[:12], winner,
         )
         return winner
     c.close()
     _log.info(
-        "PAPER {} {} @ {:.4f} x{:.6f} | strat={} | regime={} | cli={} | corr={}",
+        "PAPER %s %s @ %.4f x%.6f | strat=%s | regime=%s | cli=%s | corr=%s",
         action, symbol, price, shares, strategy or signal, regime,
         client_order_id[:12], correlation_id[:8],
     )
