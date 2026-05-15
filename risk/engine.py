@@ -15,10 +15,22 @@ that the execution layer acts on. This keeps risk logic pure and testable.
 
 from __future__ import annotations
 
+import json
+import os
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 from foundation.logger import get_logger
+
+try:
+    from config.doctrine import LOCKED_STARTING_EQUITY
+except Exception:
+    # Fallback if config.doctrine import fails (e.g. test scaffolding before
+    # the module is on sys.path). The doctrinal value must stay in lockstep
+    # with config/doctrine.py.
+    LOCKED_STARTING_EQUITY = 110.0
 
 _log = get_logger("risk", "engine")
 
@@ -26,6 +38,12 @@ _log = get_logger("risk", "engine")
 PORTFOLIO_DRAWDOWN_HALT = -0.20   # -20% total portfolio
 MARKET_DRAWDOWN_HALT = -0.15      # -15% per market
 PER_TRADE_MAX_LOSS = -0.02        # -2% per trade from entry
+
+# Persisted drawdown-peak state. Restarts must NOT lose the high-water mark,
+# otherwise a halt-triggering drawdown silently resets to 0% on every reboot.
+STATE_FILE = Path(
+    os.environ.get("AAATS_RISK_STATE_FILE", "/app/data/state/risk_engine_state.json")
+)
 
 Action = Literal["ALLOW", "REDUCE", "HALT_MARKET", "HALT_ALL", "CLOSE_POSITION"]
 
@@ -76,8 +94,50 @@ class RiskEngine:
     _all_halted: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
-        self._portfolio_peak = self.initial_portfolio
+        loaded_peak = self._load_persisted_peak()
+        if loaded_peak is not None:
+            self._portfolio_peak = loaded_peak
+            _log.info(
+                f"Risk engine peak loaded from {STATE_FILE}: ${loaded_peak:.2f}"
+            )
+        else:
+            self._portfolio_peak = max(self.initial_portfolio, LOCKED_STARTING_EQUITY)
+            _log.info(
+                f"Risk engine peak seeded from doctrine: ${self._portfolio_peak:.2f} "
+                f"(initial={self.initial_portfolio:.2f}, locked={LOCKED_STARTING_EQUITY:.2f})"
+            )
         self._portfolio_current = self.initial_portfolio
+
+    @staticmethod
+    def _load_persisted_peak() -> float | None:
+        """Read the last-known portfolio peak from STATE_FILE. None on miss."""
+        try:
+            if not STATE_FILE.exists():
+                return None
+            data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            peak = float(data.get("peak", 0.0))
+            if peak <= 0:
+                return None
+            return peak
+        except Exception as exc:
+            _log.warning(f"Risk engine state file unreadable ({exc}); falling back to doctrine")
+            return None
+
+    @staticmethod
+    def _persist_peak(peak: float, last_equity: float) -> None:
+        """Atomically write the peak to STATE_FILE so restarts retain it."""
+        try:
+            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "peak": float(peak),
+                "last_update_ts": time.time(),
+                "last_equity": float(last_equity),
+            }
+            tmp = STATE_FILE.with_suffix(STATE_FILE.suffix + ".tmp")
+            tmp.write_text(json.dumps(payload), encoding="utf-8")
+            os.replace(tmp, STATE_FILE)
+        except Exception as exc:
+            _log.warning(f"Failed to persist risk engine peak to {STATE_FILE}: {exc}")
 
     # ── State updates ─────────────────────────────────────────────────────────
 
@@ -92,7 +152,13 @@ class RiskEngine:
             self._portfolio_peak = current_value
         self._portfolio_current = current_value
 
-        dd = (current_value - self._portfolio_peak) / self._portfolio_peak
+        # Persist after every update so a restart cannot reset the peak.
+        self._persist_peak(self._portfolio_peak, current_value)
+
+        if self._portfolio_peak <= 0:
+            dd = 0.0
+        else:
+            dd = (self._portfolio_current - self._portfolio_peak) / self._portfolio_peak
         if dd <= PORTFOLIO_DRAWDOWN_HALT:
             self._all_halted = True
             reason = (
