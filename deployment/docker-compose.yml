@@ -81,22 +81,32 @@ services:
     volumes:
       - ../logs:/app/logs
       - ../data:/app/data
+      # 2026-05-14: bind-mount scripts/ so hot-fixes (cleanup, reset, reconciler
+      # patches) take effect on container restart without rebuilding the image.
+      # Trades a tiny amount of immutability for a huge iteration-speed win.
+      - ../scripts:/app/scripts
       - state-crypto:/app/data/state
-    command: python trading/paper_loop.py --market crypto
+    # 2026-05-13: entrypoint runs DB migration before main loop. init_db
+    # is idempotent (CREATE TABLE IF NOT EXISTS) so safe on every start.
+    # Exec-form list to avoid YAML folded-scalar newline quirk.
+    command: ["sh", "-c", "python scripts/init_db.py && python trading/paper_loop.py --market crypto"]
     healthcheck:
-      test: ["CMD", "python3", "-c", "import os,sys; sys.exit(0 if os.path.exists('/app/data/paper_trades.db') else 1)"]
+      test: ["CMD", "python", "scripts/health_check.py"]
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 60s
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '0.75'
+          # 2026-05-13: raised 512M → 1G. Sustained ~76% at 20h uptime under
+          # 50-symbol scanner load. 1G provides headroom + leak-detection
+          # signal (alert at 85% = 870M).
+          memory: 1G
         reservations:
           cpus: '0.25'
-          memory: 256M
+          memory: 384M
 
   # Streamlit dashboard
   aaats-dashboard:
