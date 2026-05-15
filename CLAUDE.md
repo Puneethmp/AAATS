@@ -1,5 +1,7 @@
 # AAATS — Operator Notes for Claude Code
 
+Deploy discipline rules: see docs/conventions/deploy_discipline.md (canonical).
+
 ## Deploy mechanism (paramiko SCP — NOT `git pull`)
 
 The Contabo box (`aaats@100.95.126.39`, dir `/home/aaats/aaats`) is **not a git
