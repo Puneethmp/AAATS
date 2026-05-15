@@ -1,4 +1,12 @@
 """
+DEPRECATED 2026-05-15. One-shot validator for the first post-deploy SELL
+after the _record exit-sizing fix. Fired clean (NO WARN) at 10:51 IST on
+C3 ICP/USDT. Ongoing share-equality detection is now via
+aaats_share_equality_mismatch_total Prometheus counter + Grafana alert.
+Kept for historical reference; do not run.
+
+----- (original docstring preserved below) -----
+
 Watch aaats-paper-crypto logs for the first natural SELL post-deploy.
 
 Polls `docker logs --since <since>` every 30s. When a `PAPER SELL ...`
