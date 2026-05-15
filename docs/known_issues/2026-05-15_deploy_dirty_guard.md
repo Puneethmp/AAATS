@@ -25,7 +25,7 @@ uniform guard is awkward and the change exceeds the prompt's 30-line budget:
 | `tools/operator/deploy_to_contabo.py` | Tarball of dir trees (`INCLUDE=["trading", "foundation", ...]`) → SCP → remote extract → docker build | Needs `git status --porcelain` walked against every file under each INCLUDE path |
 | `scripts/deploy_c5b_halt.py` | Single-file SFTP+atomic-mv → no-deps rebuild | Trivial — check the one `LOCAL_FILE` |
 | `scripts/deploy_share_assertion.py` | Single-file SFTP+atomic-mv → no-deps rebuild | Trivial — same as above |
-| `deploy_grafana_dashboard.py` | Builds dashboard JSON in-code → HTTP POST to Grafana API | **N/A** — no file shipped from disk; dashboard state lives in Python, not the working tree |
+| `tools/operator/deploy_grafana_dashboard.py` | Builds dashboard JSON in-code → HTTP POST to Grafana API | **N/A** — no file shipped from disk; dashboard state lives in Python, not the working tree |
 
 A shared helper module + per-script invocation totals ~50 lines (35 helper +
 5 × 3 scripts) and has to handle two distinct manifest shapes (single file vs.
@@ -113,7 +113,7 @@ def check_clean_or_exit(manifest: list[str], allow_dirty: bool | None = None) ->
 
 - `scripts/deploy_share_assertion.py` — same shape as deploy_c5b_halt.py.
 
-- `deploy_grafana_dashboard.py` — **skip**, no on-disk manifest.
+- `tools/operator/deploy_grafana_dashboard.py` — **skip**, no on-disk manifest.
 
 ## Tests
 - Unit test the helper:
