@@ -55,7 +55,7 @@ def render() -> None:
         if not _h["runner_alive"]:
             st.error(
                 "**Runner appears dead** — no heartbeat in >2h.  "
-                "Restart: `python scripts/phase1_runner.py`"
+                "Restart: `python trading/paper_loop.py --market crypto`"
             )
         elif _h.get("last_cycle_age_s") and _h["last_cycle_age_s"] > 3900:
             st.warning(
@@ -93,7 +93,7 @@ def render() -> None:
     if status_df.empty:
         st.warning(
             "No engine status yet. Start the bot:  "
-            "`python main.py --mode paper --market all`"
+            "`python trading/paper_loop.py --market crypto`"
         )
     else:
         cols = st.columns(len(status_df))

@@ -268,7 +268,7 @@ Once Angel One integration is verified:
 
 2. **Start India data pipeline:**
    ```bash
-   python main.py --mode paper --market india
+   python trading/paper_loop.py --market india
    ```
 
 3. **Monitor dashboard:**

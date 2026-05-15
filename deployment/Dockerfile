@@ -32,5 +32,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
     CMD python scripts/health_check.py || exit 1
 
-# Default command (override in docker-compose)
-CMD ["python", "main.py"]
+# No default CMD — every compose service supplies its own command
+# (paper-crypto runs `trading/paper_loop.py`, dashboard runs `streamlit`,
+# metrics runs `monitoring/metrics_exporter.py`). Forcing the override
+# avoids resurrecting the deleted main.py orchestrator path.
+CMD ["python", "-c", "raise SystemExit('No default CMD; supply one in docker-compose.yml')"]

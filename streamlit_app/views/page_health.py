@@ -85,7 +85,7 @@ def render() -> None:
         st.error(
             "**Runner appears dead or stale** — no heartbeat or cycle update in >2h.  \n"
             "**Cloud:** supervisord auto-restarts it. Check `fly logs` if it stays dead.  \n"
-            "**Local:** `python scripts/continuous_runner.py`"
+            "**Local:** `python trading/paper_loop.py --market crypto`"
         )
     elif last_hb_age is not None and last_hb_age > _STALE_CAUTION:
         st.warning(

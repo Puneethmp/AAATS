@@ -127,3 +127,20 @@ The C3/C6 record fix is correctly anchored. The watcher's first natural
 SELL on C3 or C6 should produce no WARN. The first natural SELL on C5b,
 if/when it happens, will produce a $25.00 delta WARN unrelated to the C3/C6
 fix correctness.
+
+## 2026-05-15 follow-up: dead-code paths deleted
+
+Dead-code paths `execution/crypto_runner.py` and `execution/india_runner.py`
+deleted on 2026-05-15, along with the upstream chain that referenced them:
+`execution/orchestrator.py`, `scripts/continuous_runner.py`,
+`scripts/phase1_runner.py`, `scripts/phase1_local_monitor.py`, and the
+top-level `main.py` (Dockerfile default CMD that nothing live invoked —
+every compose service overrides `command:`).
+
+Surviving doc/UI references were updated to point at the production
+entrypoint `python trading/paper_loop.py --market <market>`; the Dockerfile
+CMD was replaced with a fail-fast sentinel so that any future compose
+service without an explicit `command:` halts loudly instead of silently
+falling back to a resurrected orchestrator.
+
+Recoverable via `git log --diff-filter=D --name-only`.

@@ -3,8 +3,9 @@ Canonical feature pipeline used by both training and inference.
 
 Adds: ema_50, ema_200, ema_spread_pct, rsi_14, atr_14, macd, adx_14.
 
-Mirrors execution/india_runner._compute_features for the basic indicators,
-extended with MACD and ADX_14 which the model feature lists require.
+Provides the basic indicators plus MACD and ADX_14 which the model feature
+lists require. (Historically mirrored a now-removed execution/india_runner
+helper; the canonical implementation is here.)
 
 If you add a feature here, also add it (or its mapping) to whichever caller
 needs it: trading/live_paper_runner.py for inference, ml/train_from_history.py

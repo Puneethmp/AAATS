@@ -359,13 +359,11 @@ AAATS/
 ## Running the System
 
 ```bash
-# Start full trading engine (paper mode, all markets)
-python main.py --mode paper
-
-# Start specific market only
-python main.py --mode paper --market us
-python main.py --mode paper --market india
-python main.py --mode paper --market india_fo
+# Start a paper-trading loop for a single market (production-shaped entrypoint)
+python trading/paper_loop.py --market crypto
+python trading/paper_loop.py --market us
+python trading/paper_loop.py --market india
+python trading/paper_loop.py --market india_fo
 
 # Run the dashboard
 streamlit run observability/dashboard.py
