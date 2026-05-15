@@ -1525,12 +1525,92 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
     except Exception as exc:
         log.error("  Momentum breakout error: %s", exc, exc_info=True)
 
-    # Altcoin Beta Mean Reversion: SOL/LINK/AVAX vs BTC (C3)
+    # ──────────────────────────────────────────────────────────────────
+    # SCANNER-FIRST PIPELINE (2026-05-12)
+    # 1. Fetch dynamic top-N liquid universe (default 50)
+    # 2. Score every symbol against each strategy in parallel
+    # 3. Apply portfolio caps (max 6 concurrent, max 3 per strategy)
+    # 4. Pass picks to C3 and C6 via `symbols=` (fallback: hardcoded list)
+    # ──────────────────────────────────────────────────────────────────
+    c3_picks: list | None = None
+    c6_picks: list | None = None
+    _skip_c3 = False
+    _skip_c6 = False
     try:
-        from trading.altcoin_reversion import run_altcoin_reversion_crypto
-        run_altcoin_reversion_crypto(portfolio["crypto"], fetch_crypto_hourly)
+        from markets.crypto.universe import get_liquid_universe
+        from markets.crypto.scanner import score_universe
+        from markets.crypto.allocator import allocate
+        from markets.crypto.correlation_guard import filter_plan_by_clusters
+        from markets.crypto.sentiment import (
+            get_fear_greed, should_skip_c3_on_sentiment, should_skip_c6_on_sentiment,
+        )
+
+        # 1. Liquid universe
+        universe = get_liquid_universe(top_n=50)
+        log.info("[scanner] universe size=%d  top5=%s",
+                 len(universe), universe[:5])
+
+        # 2. Score each candidate per strategy
+        ranked = score_universe(
+            universe=universe,
+            fetch_hourly_fn=fetch_crypto_hourly,
+            strategies=["c3", "c6"],
+        )
+
+        # 3. Top-K with portfolio caps
+        plan = allocate(
+            ranked_candidates=ranked,
+            open_positions=positions.get("crypto", {}),
+            portfolio_capital=portfolio["crypto"].get("capital", 0.0),
+        )
+
+        # 4. Correlation guard — block over-concentration in correlated clusters
+        open_syms = [s for s, p in positions.get("crypto", {}).items()
+                     if abs(float((p or {}).get("shares", 0.0) or 0.0)) > 1e-9]
+        plan = filter_plan_by_clusters(plan, open_symbols=open_syms)
+
+        # 5. Sentiment gates per strategy
+        fg = get_fear_greed()
+        _skip_c3 = should_skip_c3_on_sentiment(fg)
+        _skip_c6 = should_skip_c6_on_sentiment(fg)
+
+        c3_picks = plan.get("c3") or None
+        c6_picks = plan.get("c6") or None
+        log.info("[scanner] final plan: c3=%s  c6=%s  fg=%s  skip_c3=%s  skip_c6=%s",
+                 c3_picks, c6_picks, fg, _skip_c3, _skip_c6)
     except Exception as exc:
-        log.error("  Altcoin reversion error: %s", exc, exc_info=True)
+        log.error("  Scanner pipeline error (falling back to hardcoded SYMBOLS): %s",
+                  exc, exc_info=True)
+
+    # Altcoin Beta Mean Reversion: scanner picks or hardcoded SYMBOLS (C3)
+    if _skip_c3:
+        log.info("  C3 SKIPPED this cycle (sentiment gate: extreme greed)")
+    else:
+        try:
+            from trading.altcoin_reversion import run_altcoin_reversion_crypto
+            run_altcoin_reversion_crypto(
+                portfolio["crypto"], fetch_crypto_hourly,
+                symbols=c3_picks,
+            )
+        except Exception as exc:
+            log.error("  Altcoin reversion error: %s", exc, exc_info=True)
+
+    # Bollinger Range Trader: scanner picks or hardcoded SYMBOLS (C6)
+    # Fires when regime=RANGE_BOUND and %B<0.15 + RSI<32. Direct
+    # execution path — fills the gap when ensemble vote is HOLD in chop.
+    if _skip_c6:
+        log.info("  C6 SKIPPED this cycle (sentiment gate: extreme greed)")
+    else:
+        try:
+            from trading.bollinger_range import run_bollinger_range_crypto
+            run_bollinger_range_crypto(
+                portfolio["crypto"],
+                fetch_crypto_hourly,
+                open_positions=positions.get("crypto", {}),
+                symbols=c6_picks,
+            )
+        except Exception as exc:
+            log.error("  Bollinger range error: %s", exc, exc_info=True)
 
     save_positions(positions)
     save_portfolio(portfolio)
