@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 import pathlib
 from pathlib import Path
@@ -27,14 +28,18 @@ log = logging.getLogger(__name__)
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
-ENTRY_RATE_THRESHOLD = 0.0008   # 0.08% per 8H  — enter above this
+# 2026-05-12 TUNE — Phase 1 ($120 cap): entry threshold lowered
+# from 0.0008 → 0.0004 (most crypto funding sits in 0.02–0.06%/8H
+# band; original threshold rarely triggered). Exit kept at 0.0002
+# to preserve 2:1 asymmetry.
+ENTRY_RATE_THRESHOLD = 0.0004   # 0.04% per 8H  — enter above this  (was 0.0008)
 _ROOT    = pathlib.Path(__file__).resolve().parents[1]
 _DB_PATH = str(_ROOT / "data" / "paper_trades.db")
 EXIT_RATE_THRESHOLD  = 0.0002   # 0.02% per 8H  — exit below this
 CAPITAL_PER_SYMBOL   = 25.0     # USD per leg (spot leg + perp leg = $50 total)
 MAX_HOLD_DAYS        = 14       # Hard cap: exit after 14 days regardless
 PAYMENTS_PER_DAY     = 3        # 3 funding settlements per day (every 8H)
-STATE_FILE           = Path("data/funding_arb_state.json")
+STATE_FILE           = _ROOT / "data" / "funding_arb_state.json"
 
 # (spot_symbol, perp_symbol, base_asset)
 SYMBOLS = [
@@ -252,9 +257,10 @@ def run_funding_arb_crypto(portfolio: dict) -> None:
                 changed = True
             else:
                 state[base] = pos  # update accrual timestamp
+                income_total = pos["total_income"]
                 log.info(f"[funding_arb] HOLD  {base}  "
                          f"rate={rate:.4%}  age={age:.1f}d  "
-                         f"income=${pos['total_income']:.4f}")
+                         f"income=${income_total:.4f}")
 
         else:
             # ── No position: check entry ──────────────────────────────────────
