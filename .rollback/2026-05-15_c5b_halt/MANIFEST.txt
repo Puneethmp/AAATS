@@ -1,0 +1,63 @@
+2026-05-15 — C5b funding_arb HALTED (alert-pollution mitigation)
+==================================================================
+
+CHANGE ID:  2026-05-15_c5b_halt
+DEPLOY:     atomic SCP (.tmp -> mv -f) per CLAUDE.md doctrine
+SCOPE:      paper-crypto only (aaats-paper-crypto)
+TYPE:       subtractive (registration commented out); zero logic change
+
+WHY
+---
+C5b funding_arb has an asymmetric BUY/SELL recording schema ($25 per-leg
+BUY, $50 round-trip SELL). The share-equality assertion deployed 2026-05-15
+(image 880341575aa8...) will WARN on every C5b close with delta ~= $25
+to the Telegram channel. That alert looks identical to a real correctness
+bug from another strategy and pollutes the signal.
+
+The unified-ledger spec (Q1-Q4 pending operator answers) will decide
+per-leg vs round-trip accounting and harmonize the schema. Patching C5b's
+schema before that decision is rework — halting is the correct action.
+
+Halting is reversible in one config edit (uncomment 5 lines). Trading
+volume foregone is negligible ($100 max deployment, very low fire rate).
+
+FILES CHANGED
+-------------
+trading/live_paper_runner.py
+  • Commented out lines 1510-1515 (try-block invoking
+    run_funding_arb_crypto). Replaced with HALT note pointing at
+    docs/known_issues/2026-05-15_c5b_halt.md.
+
+docs/known_issues/2026-05-15_c5b_halt.md (NEW)
+  • Halt rationale, re-enable conditions, expected assertion behavior.
+
+NO OTHER FILES TOUCHED. funding_arb.py itself untouched (safe import
+target if re-enabled). Reconciler exclusion list untouched.
+
+ROLLBACK
+--------
+cp .rollback/2026-05-15_c5b_halt/live_paper_runner.py.pre \
+   trading/live_paper_runner.py
+Then SCP-upload to /home/aaats/aaats/trading/live_paper_runner.py and
+rebuild aaats-paper-crypto.
+
+DEPLOY VALIDATION GATES
+-----------------------
+1. Edit applied locally + syntax-checked (python -c "import ast; ast.parse(...)")
+2. Pre/post image SHA captured below
+3. Container State.Status = running after recreate
+4. Source file in container has the HALTED comment block (grep verify)
+5. Next two paper cycles: "Funding arb" log line absent
+
+REBUILD COMMAND
+---------------
+ssh aaats@100.95.126.39
+  docker compose -f /home/aaats/aaats/deployment/docker-compose.yml \
+    up -d --build --no-deps aaats-paper-crypto
+
+DEPLOY ARTIFACTS (filled at deploy time)
+----------------------------------------
+PRE_REBUILD_IMAGE_SHA  = sha256:880341575aa81e0a6ad75490061315792dee702df996c4d59c6f96a809adbbb5
+POST_REBUILD_IMAGE_SHA = sha256:7051c405c75abb11f0056055a2390d0071ccc858ff3e7bfc075627291d83a160
+PRE_RESTART_COUNT      = 0
+DEPLOYED_AT_UTC        = 2026-05-15T09:36:33Z
