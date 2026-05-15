@@ -22,7 +22,7 @@ uniform guard is awkward and the change exceeds the prompt's 30-line budget:
 
 | Script | Shape | Dirty-check fit |
 | --- | --- | --- |
-| `deploy_to_contabo.py` | Tarball of dir trees (`INCLUDE=["trading", "foundation", ...]`) → SCP → remote extract → docker build | Needs `git status --porcelain` walked against every file under each INCLUDE path |
+| `tools/operator/deploy_to_contabo.py` | Tarball of dir trees (`INCLUDE=["trading", "foundation", ...]`) → SCP → remote extract → docker build | Needs `git status --porcelain` walked against every file under each INCLUDE path |
 | `scripts/deploy_c5b_halt.py` | Single-file SFTP+atomic-mv → no-deps rebuild | Trivial — check the one `LOCAL_FILE` |
 | `scripts/deploy_share_assertion.py` | Single-file SFTP+atomic-mv → no-deps rebuild | Trivial — same as above |
 | `deploy_grafana_dashboard.py` | Builds dashboard JSON in-code → HTTP POST to Grafana API | **N/A** — no file shipped from disk; dashboard state lives in Python, not the working tree |
@@ -99,7 +99,7 @@ def check_clean_or_exit(manifest: list[str], allow_dirty: bool | None = None) ->
 
 ### Per-script invocation (~5 lines each)
 
-- `deploy_to_contabo.py` — add at top of `main()`:
+- `tools/operator/deploy_to_contabo.py` — add at top of `main()`:
   ```python
   from scripts._deploy_dirty_guard import check_clean_or_exit
   check_clean_or_exit(INCLUDE)
