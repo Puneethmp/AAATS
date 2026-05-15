@@ -1,5 +1,5 @@
 {
-  "title": "AAATS \u2014 Hedge Fund Command Center",
+  "title": "AAATS — Hedge Fund Command Center",
   "uid": "aaats-command-center-v1",
   "schemaVersion": 38,
   "version": 1,
@@ -20,7 +20,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "\ud83c\udf10  GLOBAL COMMAND CENTER",
+      "title": "🌐  GLOBAL COMMAND CENTER",
       "gridPos": {
         "x": 0,
         "y": 0,
@@ -405,7 +405,7 @@
     {
       "id": 8,
       "type": "row",
-      "title": "\ud83d\udcc8  P&L TIMELINE",
+      "title": "📈  P&L TIMELINE",
       "gridPos": {
         "x": 0,
         "y": 4,
@@ -530,7 +530,7 @@
     {
       "id": 11,
       "type": "row",
-      "title": "\ud83e\uddec  STRATEGY HEALTH MATRIX",
+      "title": "🧬  STRATEGY HEALTH MATRIX",
       "gridPos": {
         "x": 0,
         "y": 13,
@@ -543,7 +543,7 @@
     {
       "id": 12,
       "type": "bargauge",
-      "title": "Strategy Health Scores (0\u2013100)",
+      "title": "Strategy Health Scores (0–100)",
       "gridPos": {
         "x": 0,
         "y": 14,
@@ -606,6 +606,24 @@
           "expr": "aaats_strategy_health{strategy=\"C5b_funding_arb\"}",
           "legendFormat": "C5b Funding Arb",
           "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "expr": "aaats_strategy_health{strategy=\"C3_altcoin_reversion\"}",
+          "legendFormat": "C3_altcoin_reversion",
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "expr": "aaats_strategy_health{strategy=\"C6_bollinger_range\"}",
+          "legendFormat": "C6_bollinger_range",
+          "refId": "E",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -687,6 +705,24 @@
             "type": "prometheus",
             "uid": "prometheus"
           }
+        },
+        {
+          "expr": "aaats_strategy_positions{strategy=\"C3_altcoin_reversion\"}",
+          "legendFormat": "C3_altcoin_reversion",
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "expr": "aaats_strategy_positions{strategy=\"C6_bollinger_range\"}",
+          "legendFormat": "C6_bollinger_range",
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "datasource": {
@@ -697,7 +733,7 @@
     {
       "id": 14,
       "type": "row",
-      "title": "\ud83d\udd2d  OPPORTUNITY FUNNEL",
+      "title": "🔭  OPPORTUNITY FUNNEL",
       "gridPos": {
         "x": 0,
         "y": 20,
@@ -710,7 +746,7 @@
     {
       "id": 15,
       "type": "bargauge",
-      "title": "Signal Funnel \u2014 Assets \u2192 Executed",
+      "title": "Signal Funnel — Assets → Executed",
       "gridPos": {
         "x": 0,
         "y": 21,
@@ -852,7 +888,7 @@
     {
       "id": 17,
       "type": "row",
-      "title": "\ud83d\udd17  STAT-ARB PAIR INTELLIGENCE",
+      "title": "🔗  STAT-ARB PAIR INTELLIGENCE",
       "gridPos": {
         "x": 0,
         "y": 27,
@@ -959,7 +995,7 @@
     {
       "id": 20,
       "type": "row",
-      "title": "\ud83d\udcb0  FUNDING ARB INCOME",
+      "title": "💰  FUNDING ARB INCOME",
       "gridPos": {
         "x": 0,
         "y": 34,
@@ -1077,7 +1113,7 @@
     {
       "id": 23,
       "type": "row",
-      "title": "\ud83e\udde0  ML INTELLIGENCE & CALIBRATION",
+      "title": "🧠  ML INTELLIGENCE & CALIBRATION",
       "gridPos": {
         "x": 0,
         "y": 41,
@@ -1319,7 +1355,7 @@
     {
       "id": 28,
       "type": "row",
-      "title": "\ud83d\ude80  PHASE EXECUTION TRACKING",
+      "title": "🚀  PHASE EXECUTION TRACKING",
       "gridPos": {
         "x": 0,
         "y": 48,
@@ -1572,7 +1608,7 @@
     {
       "id": 33,
       "type": "row",
-      "title": "\u2699\ufe0f  SYSTEM HEALTH & INFRASTRUCTURE",
+      "title": "⚙️  SYSTEM HEALTH & INFRASTRUCTURE",
       "gridPos": {
         "x": 0,
         "y": 52,
@@ -1889,7 +1925,7 @@
     {
       "id": 39,
       "type": "row",
-      "title": "\ud83d\udea6  PRODUCTION READINESS \u2014 PAPER \u2192 LIVE GATE",
+      "title": "🚦  PRODUCTION READINESS — PAPER → LIVE GATE",
       "gridPos": {
         "x": 0,
         "y": 64,
@@ -2321,7 +2357,7 @@
     {
       "id": 46,
       "type": "bargauge",
-      "title": "Go-Live Checklist \u2014 Progress to Requirements",
+      "title": "Go-Live Checklist — Progress to Requirements",
       "gridPos": {
         "x": 0,
         "y": 70,
@@ -2557,7 +2593,7 @@
       "targets": [
         {
           "expr": "aaats_prod_file_present{file=\"env_file\"}",
-          "legendFormat": ".env \u2014 API credentials",
+          "legendFormat": ".env — API credentials",
           "refId": "A",
           "datasource": {
             "type": "prometheus",
@@ -2832,7 +2868,7 @@
         "y": 86
       },
       "id": 52,
-      "title": "\ud83e\udd16  AI DECISION EXPLAINABILITY",
+      "title": "🤖  AI DECISION EXPLAINABILITY",
       "type": "row"
     },
     {
@@ -3073,7 +3109,7 @@
         "y": 100
       },
       "id": 58,
-      "title": "\ud83d\udcca  STRATEGY PERFORMANCE TIMELINE",
+      "title": "📊  STRATEGY PERFORMANCE TIMELINE",
       "type": "row"
     },
     {
@@ -3263,7 +3299,7 @@
         "y": 116
       },
       "id": 63,
-      "title": "\ud83c\udf21\ufe0f  VOLATILITY RADAR",
+      "title": "🌡️  VOLATILITY RADAR",
       "type": "row"
     },
     {
@@ -3388,7 +3424,7 @@
     },
     {
       "type": "bargauge",
-      "title": "ATR% of Price \u2014 All Symbols",
+      "title": "ATR% of Price — All Symbols",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3433,7 +3469,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Volatility ATR% \u2014 Historical",
+      "title": "Volatility ATR% — Historical",
       "gridPos": {
         "h": 7,
         "w": 16,
@@ -3530,7 +3566,7 @@
         "y": 132
       },
       "id": 69,
-      "title": "\ud83d\uddfa\ufe0f  PORTFOLIO CORRELATION & CONCENTRATION",
+      "title": "🗺️  PORTFOLIO CORRELATION & CONCENTRATION",
       "type": "row"
     },
     {
@@ -3681,12 +3717,12 @@
         "y": 146
       },
       "id": 73,
-      "title": "\u23f1\ufe0f  TRADE LIFECYCLE ANATOMY",
+      "title": "⏱️  TRADE LIFECYCLE ANATOMY",
       "type": "row"
     },
     {
       "type": "bargauge",
-      "title": "Avg Hold Time \u2014 Winners vs Losers (hours)",
+      "title": "Avg Hold Time — Winners vs Losers (hours)",
       "gridPos": {
         "h": 7,
         "w": 10,
@@ -3823,7 +3859,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Hold Time Trend \u2014 Winners",
+      "title": "Hold Time Trend — Winners",
       "gridPos": {
         "h": 7,
         "w": 12,
@@ -3867,7 +3903,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Hold Time Trend \u2014 Losers",
+      "title": "Hold Time Trend — Losers",
       "gridPos": {
         "h": 7,
         "w": 12,
