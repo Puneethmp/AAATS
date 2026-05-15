@@ -1,6 +1,12 @@
 """
 AAATS Emergency Kill Switch CLI.
 
+Lives at the repo root deliberately. README.md documents the canonical
+invocation as `python kill.py --market <market>` from the project root, and
+foundation/kill_switch.py identifies callers as "kill.py CLI". Moving this
+under tools/ would break the operator's muscle-memory invocation during an
+incident — not worth the symmetry win.
+
 Usage:
     python kill.py --market us
     python kill.py --market india
