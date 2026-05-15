@@ -211,3 +211,116 @@ scripts/continuous_runner.py
 scripts/phase1_local_monitor.py
 scripts/phase1_runner.py
 ```
+
+## Triage outcome (2026-05-15, same-day follow-up)
+
+The 278-file gap was triaged against the *live runtime critical path* — i.e.,
+what the running `aaats-paper-crypto` container actually executes. Container
+state at triage time:
+
+- `aaats-paper-crypto` `Up 3 hours (healthy)`, image still `7051c405c75a…`,
+  `RestartCount=0`. Drawdown progressed from -3.94% to -4.24% on normal
+  market action; no crash signal.
+- Entrypoint: `python scripts/init_db.py && python trading/paper_loop.py --market crypto`.
+- `paper_loop.py` imports only from `foundation/`, `monitoring/`, `risk/` —
+  none of the 16 missing top-level dirs.
+- Healthcheck `scripts/health_check.py` is stdlib + psutil only.
+- Daily ML retrain cron runs `python -m ml.train_from_history`; `ml/` is on
+  box. `init_db.py` is stdlib-only.
+
+Conclusion before classification: **no live trading code path imports any of
+the missing dirs**. The 278-file gap is real but no foreground subprocess is
+currently failing because of it.
+
+### P1 classification table
+
+Bucket key: **RUNTIME-ACTIVE** = on a live import path (would crash now);
+**RUNTIME-LATENT** = runtime-shaped code, no live importer yet;
+**WORKSTATION-ONLY** = developer/operator tooling, never expected in
+container; **PARALLEL-SYSTEM** = `aaats-engine` v6 deployment, separate
+image; **DEAD** = no recent commits *and* no importers anywhere.
+
+| Entry | Files | Latest commit | Live-runtime importer? | Other importers | Bucket |
+|---|---|---|---|---|---|
+| `analytics/` | 5 | 2026-05-06 | none | `scripts/{daily_reconciliation,optimize_strategies,run_stress_tests}.py` (operator-on-demand) | RUNTIME-LATENT |
+| `backtesting/` | 3 | 2026-05-06 | none | tests only | RUNTIME-LATENT |
+| `compliance/` | 4 | 2026-05-06 | none | none | DEAD |
+| `engine/` | 6 | 2026-05-06 | none | engine internals only | PARALLEL-SYSTEM |
+| `infrastructure/` | 5 | 2026-05-06 | none | infrastructure internals only | RUNTIME-LATENT |
+| `intelligence/` | 9 | **2026-05-15** | none | intelligence internals only | RUNTIME-LATENT (ghost-captured by `395a6a6`) |
+| `learning/` | 4 | 2026-05-06 | none | learning internals + tests | RUNTIME-LATENT |
+| `portfolio/` | 12 | 2026-05-06 | none | portfolio internals only | RUNTIME-LATENT |
+| `production_readiness/` | 6 | 2026-05-06 | none | self + `safety/` + `streamlit_app/views/page_production_readiness.py` | RUNTIME-LATENT |
+| `research/` | 6 | 2026-05-06 | none | none | DEAD |
+| `safety/` | 5 | 2026-05-06 | none | self + `scripts/safety_check.py` (operator-on-demand) | RUNTIME-LATENT |
+| `strategies/` | 46 | **2026-05-15** | none | strategies internals + tests | RUNTIME-LATENT (ghost-captured by `eeb0963`) |
+| `streamlit_app/` | 17 | **2026-05-15** | none | self; dashboard runs on Streamlit Cloud, not container | WORKSTATION-ONLY |
+| `tools/` | 25 | **2026-05-15** | none | tests only | WORKSTATION-ONLY |
+| `v6-stack/` | 87 | 2026-05-06 | none | self only | PARALLEL-SYSTEM |
+| `validation/` | 1 | 2026-05-06 | none | none (`__init__.py` only) | DEAD |
+| `.pre-commit-config.yaml` | — | 2026-05-06 | n/a | git pre-commit hook (workstation) | WORKSTATION-ONLY |
+| `autodriver.sh` | — | 2026-05-06 | n/a | Claude Code session chainer (workstation) | WORKSTATION-ONLY |
+| `docker-compose.engine.yml` | — | 2026-05-06 | n/a | v6 engine compose | PARALLEL-SYSTEM |
+| `kill.py` | — | **2026-05-15** | n/a | emergency CLI; README documents `python kill.py --market <m>` from project root. Missing from host build context — operator-emergency tool, not container-baked. | RUNTIME-LATENT (host) |
+| `requirements.in` | — | 2026-05-06 | n/a | pip-tools input (workstation build step) | WORKSTATION-ONLY |
+| `config/settings.py` | — | 2026-05-06 | none in `--market crypto` runtime | `markets/us/fetcher.py` (US not live) | RUNTIME-LATENT |
+| `deployment/grafana/provisioning/alerting/share_equality.yaml` | — | **2026-05-15** | n/a | Grafana alert rule for the share-equality WARN counter. Verified absent from `/srv/aaats/compose/`, `/home/aaats/aaats/deployment/grafana/`, and inside `aaats-grafana`. **Counter fires (runtime assertion in `execution/paper_trader.py` is live) but no Grafana alert is wired to it.** | RUNTIME-LATENT (grafana side) |
+
+`scripts/` and `tests/` are excluded from this triage:
+- `scripts/` is bind-mounted from host; the 5 phantom-tombstones (cat (b)) and the 5 missing entries (`deploy_c5b_halt.py`, `deploy_share_assertion.py`, `verify_share_assertion_deployed.py`, `verify_share_equality_counter.py`, `watch_first_sell.py`) are operator deploy/verify scripts, never expected in the runtime fold.
+- `tests/` (65 files) is test surface; never expected on box.
+
+**Headline**: zero RUNTIME-ACTIVE entries. Every missing item is in
+RUNTIME-LATENT, WORKSTATION-ONLY, PARALLEL-SYSTEM, or DEAD.
+
+### Ghost-code commit findings (P2)
+
+A "ghost-code commit" = today's commit that captured a file into a
+now-missing dir. The commit stands as an accurate "what's in git" record;
+the question is whether its message overstated what's actually live on the
+box. Three matches:
+
+| SHA | Subject | Ghost-captured file(s) | Reality on box |
+|---|---|---|---|
+| `395a6a6` | `feat(execution,foundation,intelligence): paper-fidelity engine + decision ledger + HMM regime` | `intelligence/regime/regime_pipeline.py` | The execution + foundation halves of the commit ARE deployed (`execution/{fill_model,idempotency,oms,paper_executor}.py`, `foundation/decision_ledger.py` are on box). The **HMM regime** half is *not* — `intelligence/regime/regime_pipeline.py` never reached `/home/aaats/aaats/`, and `paper_loop.py` doesn't import `intelligence` anyway. "HMM regime live" reading of this commit's subject is false. |
+| `eeb0963` | `feat(ml): paper-phase confidence bucket tuning + commit _ml_gate.yaml` | `strategies/configs/_ml_gate.yaml` | `ml/xgboost_ensemble.py` deployed; daily ML retrain works. But the YAML gate config is in the missing `strategies/` tree, so any code reading `strategies/configs/_ml_gate.yaml` (if/when wired) silently misses the tuned thresholds. |
+| `2c69a54` | `feat(observability): SELL/BUY share-equality assertion + WARN counter + Grafana alert` | `deployment/grafana/provisioning/alerting/share_equality.yaml` | The runtime assertion (in `execution/paper_trader.py`) IS live and the WARN counter increments per the project memory. The **Grafana alert rule** is *not* deployed — the YAML is absent from `/srv/aaats/compose/`, the host build context, and the `aaats-grafana` container. The counter has no alert wired to it. |
+
+No retroactive reverts. The commits remain accurate as repo snapshots. The
+deploy-discipline convention should note that "captures source for what's
+running on the box" *requires a same-cycle audit of the manifest the
+paramiko deploy actually shipped* — otherwise the commit message is a
+forward-looking statement of intent, not a verifiable claim.
+
+### Revised verdict
+
+Still **FAIL** — the structural gap is real and the gate stays open. But
+the failure is qualified:
+
+- **PASS** on per-file SCP fidelity (cat (c) = 0 across 135 common paths).
+- **PASS** on live-runtime safety (no RUNTIME-ACTIVE entries; the running
+  container does not silently depend on any missing module).
+- **FAIL** on structural completeness (16 dirs + 6 files in repo, absent
+  from host build context; image rebuild would not reproduce `origin/main`).
+- **FAIL** on commit-message verifiability (three today-commits captured
+  half-deployed features as if the whole thing were live).
+
+### Remediation path (no execution this session)
+
+1. **rsync only what needs to live in the image**: RUNTIME-LATENT dirs +
+   `kill.py` + `config/settings.py`. Skip WORKSTATION-ONLY and
+   PARALLEL-SYSTEM. Rebuild the paper-crypto image. (`v6-stack/` +
+   `docker-compose.engine.yml` belong to the `aaats-engine` deploy lane
+   and are out of scope here.)
+2. **Deploy the Grafana alert YAML** to the actual Grafana compose path
+   (`/srv/aaats/compose/grafana/provisioning/alerting/`) so commit
+   `2c69a54`'s alert half catches up to the deployed assertion half.
+3. **DEAD candidates** (`compliance/`, `research/`, `validation/`) — file
+   for a separate cleanup decision; do not propose deletion from this
+   audit.
+4. **New-dir parity guard** at deploy time, recipe filed at
+   [docs/known_issues/2026-05-15_deploy_newdir_parity.md](../known_issues/2026-05-15_deploy_newdir_parity.md).
+5. **Re-run the audit** after the rebuild. Audit RUNTIME-LATENT dirs as a
+   first-class success criterion; permit WORKSTATION-ONLY and
+   PARALLEL-SYSTEM via an explicit allow-list in
+   [docs/conventions/deploy_discipline.md](../conventions/deploy_discipline.md).
