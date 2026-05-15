@@ -1682,8 +1682,44 @@ def main(market: str = "crypto") -> None:
             except Exception as exc:
                 log.error("run_india error: %s", exc, exc_info=True)
 
+        # Intra-cycle reconciliation (gap 3) — drift detection + auto-halt
+        # Runs at end of every cycle. If drift > 2% on any position,
+        # fires foundation.kill_switch.halt() and exits main loop.
+        try:
+            from scripts.reconcile_intracycle import reconcile_now
+            _markets_to_check = []
+            if market in ("crypto", "both"):
+                _markets_to_check.append("crypto")
+            if market in ("india", "both"):
+                _markets_to_check.append("india")
+            if _markets_to_check:
+                _rec = reconcile_now(markets=_markets_to_check, halt_on_critical=False)
+                if _rec.halted:
+                    log.critical(
+                        "RECONCILIATION HALTED | issues=%d | "
+                        "investigate via scripts/emergency_resume.py",
+                        len(_rec.issues),
+                    )
+                    break
+        except Exception as _rec_exc:
+            log.error("Reconciliation worker error (non-fatal): %s",
+                      _rec_exc)
+
         elapsed = time.time() - cycle_start
         sleep_sec = max(0, CYCLE_INTERVAL_SEC - elapsed)
+        # heartbeat write — so monitoring/metrics_exporter emits a fresh heartbeat_age_seconds
+        try:
+            import json as _json, datetime as _dt, pathlib as _pl
+            _hb = _pl.Path("data/heartbeat.json")
+            _hb.parent.mkdir(parents=True, exist_ok=True)
+            _hb.write_text(_json.dumps({
+                "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                "cycle": int(cycle),
+                "market": market,
+                "cycle_duration_seconds": float(elapsed),
+            }))
+        except Exception as _hb_exc:
+            log.debug("heartbeat write failed: %s", _hb_exc)
         log.info("  Cycle %d done in %.1fs — sleeping %.0fs", cycle, elapsed, sleep_sec)
         time.sleep(sleep_sec)
 
