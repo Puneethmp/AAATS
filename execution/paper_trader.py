@@ -114,6 +114,75 @@ def _conn(db_path: str) -> sqlite3.Connection:
     return c
 
 
+def _check_sell_buy_share_equality(
+    c: sqlite3.Connection,
+    strategy: str,
+    symbol: str,
+    sell_shares: float,
+) -> None:
+    """
+    Post-INSERT SELL/BUY share-equality detector (P1 guardrail, 2026-05-15).
+
+    For each SELL row just inserted, find the FIFO-matching BUY for the same
+    (strategy, symbol) — the k-th BUY in timestamp ASC order, where k = total
+    SELL count for that pair (including this row). If shares differ by more
+    than 1e-9, emit a warning. Detection-only: never halts, never modifies.
+
+    The reconciler / ledger migration owns HALT decisions for share drift.
+    """
+    try:
+        n_sells = c.execute(
+            "SELECT COUNT(*) FROM paper_trades "
+            "WHERE strategy = ? AND symbol = ? AND action = 'SELL'",
+            (strategy, symbol),
+        ).fetchone()[0]
+        if n_sells <= 0:
+            return
+        row = c.execute(
+            "SELECT shares FROM paper_trades "
+            "WHERE strategy = ? AND symbol = ? AND action = 'BUY' "
+            "ORDER BY timestamp ASC, id ASC LIMIT 1 OFFSET ?",
+            (strategy, symbol, n_sells - 1),
+        ).fetchone()
+        if row is None:
+            return  # orphan SELL — reconciler's problem, not this hook's
+        buy_shares = float(row[0])
+        delta = abs(sell_shares - buy_shares)
+        if delta > 1e-9:
+            _log.warning(
+                "SELL/BUY share mismatch | strategy={} symbol={} "
+                "buy_shares={} sell_shares={} delta={:.10f}",
+                strategy, symbol, buy_shares, sell_shares, delta,
+            )
+            _bump_share_mismatch_counter(strategy, symbol)
+    except sqlite3.OperationalError:
+        # Schema variant (e.g. test DB without strategy column) — silently skip.
+        return
+
+
+def _bump_share_mismatch_counter(strategy: str, symbol: str) -> None:
+    """Persist a per-(strategy,symbol) mismatch tally for the Prometheus exporter.
+
+    Cross-container handoff: paper_trader (aaats-paper-crypto) writes to the
+    shared data/ bind mount; metrics_exporter (aaats-metrics) reads on scrape.
+    Best-effort — never blocks the trade write path.
+    """
+    try:
+        import json as _json
+        counter_path = Path(__file__).resolve().parent.parent / "data" / "share_equality_mismatches.json"
+        state: dict[str, int] = {}
+        if counter_path.exists():
+            try:
+                state = _json.loads(counter_path.read_text(encoding="utf-8"))
+            except Exception:
+                state = {}
+        key = f"{strategy}|{symbol}"
+        state[key] = int(state.get(key, 0)) + 1
+        counter_path.write_text(_json.dumps(state), encoding="utf-8")
+    except Exception:
+        return
+
+
 def record_trade(
     db_path: str,
     market: str,
@@ -214,6 +283,8 @@ def record_trade(
             client_order_id[:12], winner,
         )
         return winner
+    if action == "SELL":
+        _check_sell_buy_share_equality(c, strategy, symbol, shares)
     c.close()
     _log.info(
         "PAPER {} {} @ {:.4f} x{:.6f} | strat={} | regime={} | cli={} | corr={}",

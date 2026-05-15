@@ -1,0 +1,89 @@
+apiVersion: 1
+
+# Grafana unified-alerting rule for the SELL/BUY share-equality detector.
+#
+# Wiring depends on the Telegram contact point already existing on the
+# Contabo Grafana instance — this file references it by name only. If the
+# Telegram point isn't registered yet, the rule still loads and the alert
+# fires on the default route (the operator should set up the contact
+# point under "alerting > contact points" with name = "telegram").
+#
+# Source metric: aaats_share_equality_mismatch_total{strategy,symbol}
+# Produced by:   execution/paper_trader.py:_bump_share_mismatch_counter()
+#                via data/share_equality_mismatches.json
+# Scraped by:    monitoring/metrics_exporter.py:collect_share_equality()
+#                on aaats-metrics:9091
+
+groups:
+  - orgId: 1
+    name: share_equality
+    folder: AAATS
+    interval: 1m
+    rules:
+      - uid: share_equality_mismatch
+        title: SELL/BUY share-equality mismatch detected
+        condition: A_above_zero
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: |
+                sum by (strategy, symbol) (
+                  increase(aaats_share_equality_mismatch_total{strategy!="_none"}[1h])
+                )
+              instant: true
+              intervalMs: 60000
+              maxDataPoints: 43200
+              refId: A
+          - refId: A_above_zero
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              refId: A_above_zero
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "Share-equality WARN fired in last 1h"
+          description: "paper_trader detected SELL.shares != FIFO BUY.shares for one or more (strategy, symbol) pairs. Inspect docker logs aaats-paper-crypto | grep 'SELL/BUY share mismatch' and consult docs/known_issues/2026-05-15_buy_side_audit.md."
+        labels:
+          severity: high
+          component: paper_trader
+
+contactPoints:
+  - orgId: 1
+    name: telegram
+    receivers: []
+    # NOTE: leave receivers empty in provisioning; the Telegram contact point
+    # is configured at runtime via the Grafana UI (operator-managed token).
+    # If `telegram` contact point doesn't exist, alerts route to the default.
+
+policies:
+  - orgId: 1
+    receiver: telegram
+    group_by: [grafana_folder, alertname]
+    matchers:
+      - severity = high
+      - component = paper_trader
+    group_wait: 0s
+    group_interval: 5m
+    repeat_interval: 1h
