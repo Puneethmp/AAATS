@@ -39,6 +39,53 @@ feature scopes carrying similar drift.
   but lets you through. Commit IMMEDIATELY after deploy as its own atomic commit
   referencing the deploy SHA. Don't sit on it for a future session to find.
 
+## Rule 1b — Never SCP-deploy with origin/main top-level dirs uncovered by the manifest
+
+The paramiko deploy in `tools/operator/deploy_to_contabo.py` ships per a
+hardcoded `INCLUDE` list. When a brand-new top-level directory is added to
+`origin/main` and nobody amends `INCLUDE`, the deploy silently skips it — the
+box never receives the dir and the image is rebuilt from a partial tree. The
+2026-05-15 box-vs-repo audit found 16 such directories and 278 missing files
+this way (see `docs/decisions/2026-05-15_box_repo_audit.md`).
+
+**How to apply.**
+
+- Enforcement is live; `tools/operator/_newdir_parity_guard.py` (`check_newdir_parity`)
+  is invoked alongside the dirty-tree guard in all three paramiko deploy entrypoints:
+  `tools/operator/deploy_to_contabo.py`, `scripts/deploy_c5b_halt.py`,
+  `scripts/deploy_share_assertion.py`. The single-file deploys use `warn_only=True`
+  (soft warning); the full-tree deploy refuses by default.
+- The guard compares `git ls-tree --name-only origin/main` against the manifest
+  + an allow-list of entries that intentionally never ship to the paper-crypto
+  runtime. The allow-list is the single source of truth for "non-runtime
+  top-level entries"; it must stay in sync between `_newdir_parity_guard.py`
+  and the **Non-runtime top-level entries** section below.
+- When the guard refuses a deploy, triage each uncovered entry: (a) add it to
+  `INCLUDE` if it's runtime code that genuinely belongs on the box, (b) add it
+  to `DEPLOY_ALLOWLIST_NONRUNTIME` + this doc if it's workstation-only or a
+  parallel-system asset, or (c) delete it from `origin/main` if it's clutter.
+  Reach for `--allow-dirty` only as a last resort and commit the manifest
+  update immediately after — same discipline as the dirty-tree guard.
+
+### Non-runtime top-level entries (authoritative allow-list)
+
+These entries are in `origin/main` but intentionally NOT on the paper-crypto
+box. The mirror in `tools/operator/_newdir_parity_guard.py:DEPLOY_ALLOWLIST_NONRUNTIME`
+must be updated when this list changes (or vice versa).
+
+| Category | Entries |
+|---|---|
+| **WORKSTATION-ONLY** (operator tooling, UI) | `tools/`, `streamlit_app/`, `.pre-commit-config.yaml`, `autodriver.sh`, `requirements.in` |
+| **PARALLEL-SYSTEM** (`aaats-engine` lane — not paper-crypto) | `engine/`, `v6-stack/`, `docker-compose.engine.yml` |
+| **DEAD** (cleanup pending — will be deleted from repo) | `compliance/`, `research/`, `validation/` |
+| **Repo metadata / never-shipped** | `docs/`, `.github/`, `.rollback/`, `.claude/`, `.streamlit/`, `tests/`, `diagnostics/`, `.gitignore`, `.gitattributes`, `README.md`, `CLAUDE.md`, `LICENSE` |
+| **Runtime artifacts** (written by container, not deploy) | `data/`, `logs/`, `runtime/` |
+
+Everything ELSE in `origin/main` MUST appear in the deploy manifest — the
+guard treats absence as a refusal. See
+`docs/known_issues/2026-05-15_deploy_newdir_parity.md` for the implementation
+record.
+
 ## Rule 2 — Push to `origin/main` at end of every session
 
 Every Claude Code session that modifies code or docs must end with a push to

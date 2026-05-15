@@ -1,13 +1,20 @@
 # New-dir parity guard for paramiko deploy scripts (2026-05-15)
 
 ## Status
-**DEFERRED** — recipe filed alongside the
-[box-vs-repo audit triage](../decisions/2026-05-15_box_repo_audit.md). To be
-picked up after the audit-driven host rsync + image rebuild closes
-[pre-live gate G3](../decisions/pre_live_gates.md). Companion to the
-already-implemented [dirty-tree guard](../decisions/2026-05-15_deploy_dirty_guard.md);
-implementation should land in the same `tools/operator/` neighborhood and
-wire into the same three deploy entrypoints.
+**IMPLEMENTED** 2026-05-15. Module
+[`tools/operator/_newdir_parity_guard.py`](../../tools/operator/_newdir_parity_guard.py)
+exposes `check_newdir_parity(manifest_paths, allow_dirty, warn_only)`; wired
+into all three paramiko deploy entrypoints alongside the dirty-tree guard:
+- `tools/operator/deploy_to_contabo.py` (full tree deploy — hard refuse)
+- `scripts/deploy_c5b_halt.py` (single-file — `warn_only=True`)
+- `scripts/deploy_share_assertion.py` (single-file — `warn_only=True`)
+
+Allow-list mirrored in
+[`docs/conventions/deploy_discipline.md`](../conventions/deploy_discipline.md) §"Non-runtime top-level entries".
+Pytest coverage: `tests/test_operator/test_newdir_parity_guard.py` (9 cases).
+
+Implementation commit: captured in the same session as the box-vs-repo
+audit triage; see `git log -- tools/operator/_newdir_parity_guard.py`.
 
 ## Motivation
 
