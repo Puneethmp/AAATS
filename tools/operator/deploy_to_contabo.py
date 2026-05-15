@@ -2,7 +2,7 @@
 AAATS → Contabo Deployment Script (v2 — surgical, 2026-05-13)
 
 Reads credentials from .env file.
-Run: venv\Scripts\python deploy_to_contabo.py
+Run: venv\Scripts\python deploy_to_contabo.py [--allow-dirty]
 
 v2 changes (fixes 2026-05-13 collateral-damage incident):
   • No more `docker compose down --remove-orphans` (was nuking grafana,
@@ -14,8 +14,12 @@ v2 changes (fixes 2026-05-13 collateral-damage incident):
   • Other observability services (grafana, prometheus, metrics, telegram-bot)
     are NEVER touched by this script. Manage them via deployment/docker-compose
     directly when needed.
+
+Dirty-tree guard (2026-05-15):
+  Refuses to deploy if any file/dir in INCLUDE has uncommitted git changes.
+  Pass --allow-dirty for an emergency override (commit immediately after).
 """
-import subprocess, sys, os, pathlib
+import argparse, subprocess, sys, os, pathlib
 
 try:
     import paramiko
@@ -101,7 +105,32 @@ def build_tarball():
     print(f"    {count} files, {len(data)/1024/1024:.1f} MB")
     return data
 
+def _build_manifest():
+    """INCLUDE -> manifest entries: dirs get trailing slash, files stay bare."""
+    file_entries = {".env", "requirements.txt"}
+    return [
+        item if item in file_entries else item.rstrip("/") + "/"
+        for item in INCLUDE
+    ]
+
+
 def main():
+    parser = argparse.ArgumentParser(description="AAATS deploy to Contabo")
+    parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="emergency override: ship uncommitted local edits. You'll need to "
+             "commit them immediately after deploy or you've created drift.",
+    )
+    args = parser.parse_args()
+
+    # Repo root for the dirty-tree guard import (this script lives in tools/operator/).
+    _repo = pathlib.Path(__file__).resolve().parent.parent.parent
+    if str(_repo) not in sys.path:
+        sys.path.insert(0, str(_repo))
+    from tools.operator._dirty_tree_guard import check_clean
+    check_clean(_build_manifest(), allow_dirty=args.allow_dirty)
+
     print("=" * 65)
     print("  AAATS → Contabo Deployment")
     print(f"  Target: {USER}@{HOST} (Tailscale):{REMOTE_DIR}")

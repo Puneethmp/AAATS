@@ -7,10 +7,15 @@ Doctrine (CLAUDE.md):
   3. docker compose up -d --build --no-deps aaats-paper-crypto
 
 Captures pre/post image SHAs into .rollback/2026-05-15_share_assertion/MANIFEST.txt.
-Run: venv\\Scripts\\python scripts\\deploy_share_assertion.py
+Run: venv\\Scripts\\python scripts\\deploy_share_assertion.py [--allow-dirty]
+
+Dirty-tree guard (2026-05-15):
+  Refuses to deploy if LOCAL_FILE has uncommitted git changes. Pass
+  --allow-dirty for an emergency override (commit immediately after).
 """
 from __future__ import annotations
 
+import argparse
 import datetime as _dt
 import pathlib as _pl
 import sys
@@ -56,6 +61,23 @@ def _run(client: paramiko.SSHClient, cmd: str, label: str) -> tuple[int, str]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Share-assertion single-file deploy")
+    parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="emergency override: ship uncommitted local edits. You'll need to "
+             "commit them immediately after deploy or you've created drift.",
+    )
+    args = parser.parse_args()
+
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+    from tools.operator._dirty_tree_guard import check_clean
+    check_clean(
+        [LOCAL_FILE.relative_to(PROJECT_ROOT).as_posix()],
+        allow_dirty=args.allow_dirty,
+    )
+
     print("=" * 65)
     print("  Share-assertion deploy -> aaats-paper-crypto")
     print(f"  Target: {USER}@{HOST}:{REMOTE_FILE}")
