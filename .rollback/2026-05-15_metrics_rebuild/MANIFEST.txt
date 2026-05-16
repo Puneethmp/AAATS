@@ -69,6 +69,10 @@ KNOWN FOLLOW-UPS
 ----------------
 - aaats-metrics network attach is runtime-only. Edit deployment/docker-compose.yml
   to add the `aaats` external network so the fix survives container recreation.
+  RESOLVED 2026-05-16 (commit 708b58b, recreate 2026-05-16T06:21:14Z): compose
+  now declares `aaats` external + service-level networks: [default, aaats].
+  Post-recreate image c9e2e54ab593...; both networks attached natively without
+  docker network connect; share-equality chain re-validated end-to-end.
 - Alert message template at /srv/aaats/compose/grafana/provisioning/alerting/
   telegram_contact.yaml doesn't render metric labels (strategy, symbol). Adding
   these to the template would let _TEST_-tagged synthetic runs be unambiguous.

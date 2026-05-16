@@ -362,6 +362,8 @@ Additionally, 6 tombstones (`execution/crypto_runner.py`, `execution/india_runne
 
 Applied: `docker network connect aaats aaats-metrics`. Fully reversible; reverts on container recreate. **Persistent fix is a follow-up** — needs `deployment/docker-compose.yml` to attach `aaats-metrics` to the external `aaats` network. Tracked in `.rollback/2026-05-15_metrics_rebuild/MANIFEST.txt` under KNOWN FOLLOW-UPS.
 
+**RESOLVED 2026-05-16** (commit `708b58b`, recreate `2026-05-16T06:21:14Z`): `deployment/docker-compose.yml` now declares the external `aaats` network at top level and lists it under `aaats-metrics.networks`. Post-recreate verification: image `c9e2e54ab593…`, RestartCount=0, both `aaats` (172.18.0.14) and `aaats-network` (172.19.0.3) attached natively without `docker network connect`. End-to-end chain re-validated via `_TEST_RECREATE_` synthetic write → exporter `:9091/metrics` → `aaats-prometheus` query returns the labeled series.
+
 ### End-to-end chain validation
 
 Synthetic `_TEST_/_TEST_` trigger via direct write to `data/share_equality_mismatches.json` (production code path: same JSON the `_bump_share_mismatch_counter` writes to). Bumped twice to give `increase()[1h]` a non-zero delta.
