@@ -1,0 +1,80 @@
+P2 + P3 — RUNTIME-LATENT rsync + aaats-paper-crypto rebuild (G3 closure)
+=========================================================================
+
+DATE         : 2026-05-16
+SESSION      : G3 + G3.partial closure (operational sprint)
+CONTAINER    : aaats-paper-crypto
+HOST PATH    : aaats@100.95.126.39:/home/aaats/aaats/
+
+RUNTIME-LATENT TARBALL SHIPPED
+------------------------------
+Source       : git archive --format=tar origin/main -- <11 entries> | gzip
+Path local   : /tmp/runtime_latent_payload.tar.gz
+Path on box  : /tmp/runtime_latent_payload.tar.gz
+SHA256       : ddc0e8dff9ce20947e12255e907daf022ecef6ed90891ce74b3381c15fa734fe
+Size         : 102 KB compressed; 124 entries (dirs + files)
+
+11 ENTRIES SHIPPED (all from origin/main HEAD = 3ffa77e)
+--------------------------------------------------------
+  analytics/                  (5 .py)
+  backtesting/                (3 .py)
+  infrastructure/             (5 .py)
+  intelligence/               (9 .py incl. ml/, regime/, strategies/)
+  learning/                   (4 .py)
+  portfolio/                  (10 .py)
+  production_readiness/       (6 .py)
+  safety/                     (5 .py)
+  strategies/                 (46+ .py + 4 yaml configs)
+  config/settings.py          (3865 B, sha 0d…)  ← added beside existing config/__init__.py + doctrine.py
+  kill.py                     (3655 B)
+
+PRE-EXTRACT SNAPSHOT
+--------------------
+Snapshot dir : /tmp/aaats_predeploy_snapshot_1778907861/  (box)
+Snapshot     : only `config/` existed pre-extract; all 10 other entries absent
+               (matches audit finding)
+
+CONTAINER REBUILD
+-----------------
+Pre  image   : sha256:7051c405c75abb11f0056055a2390d0071ccc858ff3e7bfc075627291d83a160
+Post image   : sha256:f90fef0a22df82f5714b4236f159bea4a5591ffe19c3efc706dfc22887a5c4ee
+Rebuild cmd  : docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-paper-crypto
+
+POST-REBUILD VALIDATION
+-----------------------
+- Status=running, RestartCount=0, Health=healthy (within 12s of start)
+- risk_engine_state.json peak=$110.00 (UNCHANGED — peak persistence intact)
+- last_equity=$103.74 → drawdown -5.69% (Δ 0.11pp from pre-session -5.58%; within tolerance)
+- Cycle 1 completed in 7.8s
+- No ImportError/ModuleNotFoundError/SyntaxError in startup
+- Reconciler ran clean (9 dust drift filtered, 2 deny-list skipped, 9 positions checked)
+- 42/42 tests pass locally (risk persistence, denylist, risk engine, US drawdown
+  guardian, US position sizer, share-equality assertion)
+
+ROLLBACK PROCEDURE
+------------------
+If aaats-paper-crypto post-rebuild misbehaves:
+
+  PRE_SHA=$(cat .rollback/2026-05-15_runtime_latent_rsync/aaats_paper_crypto_pre_image.txt | sed 's/sha256://')
+  ssh aaats@100.95.126.39 "docker tag $PRE_SHA aaats-paper-crypto:rollback && \
+    docker stop aaats-paper-crypto && docker rm aaats-paper-crypto && \
+    docker run -d --name aaats-paper-crypto \
+      --env-file /home/aaats/aaats/.env \
+      -v /home/aaats/aaats/logs:/app/logs \
+      -v /home/aaats/aaats/data:/app/data \
+      -v /home/aaats/aaats/scripts:/app/scripts \
+      -v state-crypto:/app/data/state \
+      --network aaats-network \
+      aaats-paper-crypto:rollback \
+      sh -c 'python scripts/init_db.py && python trading/paper_loop.py --market crypto'"
+
+(Or simpler: revert host paths to /tmp/aaats_predeploy_snapshot_1778907861 contents
+ — `cp -r /tmp/aaats_predeploy_snapshot_1778907861/* /home/aaats/aaats/` —
+ then rebuild. Note: this only restores `config/`; the 10 other dirs were ABSENT pre-rsync,
+ so rollback by deletion `rm -rf analytics backtesting infrastructure intelligence learning
+ portfolio production_readiness safety strategies kill.py` is also valid.)
+
+KNOWN FOLLOW-UPS
+----------------
+- Tests don't run inside the container (tests/ never expected on box). Validation
+  done on workstation; documented for future plan authors.

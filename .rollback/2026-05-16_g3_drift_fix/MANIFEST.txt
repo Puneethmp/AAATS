@@ -1,0 +1,95 @@
+P5 drift-fix — paper_trader.py + Dockerfile drift + tombstone cleanup
+======================================================================
+
+DATE         : 2026-05-16
+SESSION      : G3 + G3.partial closure (operational sprint)
+CONTAINER    : aaats-paper-crypto
+HOST PATH    : aaats@100.95.126.39:/home/aaats/aaats/
+
+WHY THIS PATCH WAS NEEDED
+-------------------------
+The P5 re-audit with LF-normalized hashing uncovered pre-existing RUNTIME drift
+the original 2026-05-15 audit had missed (the audit hashed the image, not the
+host build context, so divergence between origin/main and host was invisible).
+
+THREE DRIFTS FIXED
+------------------
+1. execution/paper_trader.py
+   origin/main  sha256 : 0926a0fee50426fd825581c98d87d35742937c9dad5c2d5e8dee8d61a6824fba
+   host stale   sha256 : 94aa9d88ffaece5aa0ccb24259b5ab652f89528f7f3db3953a8196ccd49c747f (LF-normalized; CRLF on disk)
+   gap          : box was missing _bump_share_mismatch_counter() function + its
+                  call site. Production WARN path emitted log line but never
+                  persisted to share_equality_mismatches.json. Exporter saw zero
+                  counter increments from production triggers — only synthetic
+                  triggers worked.
+   shipped via  : scp .tmp + mv -f (atomic swap)
+
+2. deployment/Dockerfile
+   origin/main  sha256 : e36bb0bcadb38b98e7d6747230662bc40afeb9592f223911f194991dc3dd9770
+   host stale   sha256 : 58ec331c95bdc9b8ba0a38cde39fddc239266db00b2722a0012d25e7aa696769
+   gap          : box CMD pointed at deleted main.py; origin/main fails fast
+                  with explicit SystemExit. Cosmetic-safety (compose always
+                  overrides CMD) but real drift.
+   shipped via  : scp .tmp + mv -f
+
+3. Six tombstones cleaned from /home/aaats/aaats/
+   - execution/crypto_runner.py
+   - execution/india_runner.py
+   - execution/orchestrator.py
+   - scripts/continuous_runner.py
+   - scripts/phase1_local_monitor.py
+   - scripts/phase1_runner.py
+   action       : moved to /tmp/aaats_tombstones_2026-05-16/ (recoverable;
+                  not deleted) so the next rebuild bakes a clean image.
+
+CONTAINER REBUILD (3rd of session)
+-----------------------------------
+Pre  image   : sha256:f90fef0a22df82f5714b4236f159bea4a5591ffe19c3efc706dfc22887a5c4ee (post-P3)
+Post image   : sha256:1a06f1a3de03045eeab54fcd82e9bdbe232ad59a58fd78b28e03c2d15fb73b5c (final)
+Rebuild cmd  : docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-paper-crypto
+
+POST-REBUILD VALIDATION
+-----------------------
+- Status=running, RestartCount=0, Health=healthy (within 15s)
+- risk_engine_state.json peak=$110.00 (UNCHANGED — peak persistence intact across 3rd restart)
+- last_equity=$103.65 → drawdown -5.78% (Δ 0.20pp from pre-session -5.58%; within tolerance)
+- No ImportError / ModuleNotFoundError / SyntaxError / traceback in startup
+- `docker exec aaats-paper-crypto grep -c "_bump_share_mismatch_counter" /app/execution/paper_trader.py` returns 2
+  (definition + call site → production trigger now live)
+
+RE-AUDIT RESULT (LF-normalized)
+-------------------------------
+- 200 production-code files on box (was 206; tombstone cleanup removed 6)
+- 0 hash mismatches
+- 0 phantom files on box
+- 6 only-in-repo entries remain (all WORKSTATION-ONLY per audit allow-list):
+  config/.env.example, scripts/{deploy_c5b_halt, deploy_share_assertion,
+  verify_share_assertion_deployed, verify_share_equality_counter, watch_first_sell}.py
+
+ROLLBACK PROCEDURE
+------------------
+If the new image misbehaves:
+
+  # 1. Restore prior files
+  scp .rollback/2026-05-16_g3_drift_fix/paper_trader.py.pre \
+      aaats@100.95.126.39:/home/aaats/aaats/execution/paper_trader.py.tmp
+  scp .rollback/2026-05-16_g3_drift_fix/Dockerfile.pre \
+      aaats@100.95.126.39:/home/aaats/aaats/deployment/Dockerfile.tmp
+  ssh aaats@100.95.126.39 'mv -f /home/aaats/aaats/execution/paper_trader.py.tmp \
+                                 /home/aaats/aaats/execution/paper_trader.py && \
+                           mv -f /home/aaats/aaats/deployment/Dockerfile.tmp \
+                                 /home/aaats/aaats/deployment/Dockerfile'
+
+  # 2. Restore tombstones (only if rollback genuinely needed)
+  ssh aaats@100.95.126.39 'for f in /tmp/aaats_tombstones_2026-05-16/*; do
+    case "$(basename $f)" in
+      crypto_runner.py|india_runner.py|orchestrator.py)
+        cp "$f" /home/aaats/aaats/execution/$(basename $f) ;;
+      continuous_runner.py|phase1_local_monitor.py|phase1_runner.py)
+        cp "$f" /home/aaats/aaats/scripts/$(basename $f) ;;
+    esac
+  done'
+
+  # 3. Rebuild from prior code (rollback to f90fef0a image)
+  ssh aaats@100.95.126.39 'cd /home/aaats/aaats && \
+    docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-paper-crypto'

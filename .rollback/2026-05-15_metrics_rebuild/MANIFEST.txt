@@ -1,0 +1,74 @@
+P1 — aaats-metrics rebuild + share-equality export chain (G3.partial closure)
+==============================================================================
+
+DATE         : 2026-05-16
+SESSION      : G3 + G3.partial closure (operational sprint)
+CONTAINER    : aaats-metrics
+HOST PATH    : aaats@100.95.126.39:/home/aaats/aaats/
+
+CHANGES SHIPPED
+---------------
+1. monitoring/metrics_exporter.py  (1165 → 1200 lines; adds collect_share_equality)
+   pre  sha256 : 99ab80c2f49e398f38cb4d1a06ea1ae5dcf21d144596e6f978a11e78b8fde680
+   post sha256 : 1400b0e904637483903a9bca2afcb877b033d11b3157956dd580aa3e60a5d633
+   shipped via : scp .tmp + mv -f (CLAUDE.md atomic swap protocol)
+
+2. aaats-metrics container image rebuild
+   pre  image  : sha256:6866e2779981782f8931d0fb3eea7ceeb9c073dfd09a7a1314dd0d17b78358a6
+   post image  : sha256:79c80b570b95039b3c8d279ed5f1ae629219dcda2ce995a2479396e9a8f887b8
+   rebuild cmd : docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-metrics
+
+3. RUNTIME-ONLY network attach (not persisted in compose)
+   command     : docker network connect aaats aaats-metrics
+   purpose     : aaats-metrics lives on aaats-network (deployment compose);
+                 aaats-prometheus lives on aaats (Grafana compose). Without
+                 this connect, Prometheus DNS-fails on aaats-metrics:9091.
+   reverts on  : next container recreate. Persistent fix requires editing
+                 deployment/docker-compose.yml to add aaats-metrics to the
+                 external `aaats` network. Tracked as G3.partial-followup.
+
+CHAIN VALIDATION (synthetic _TEST_/_TEST_ trigger)
+--------------------------------------------------
+- Layer 1 (exporter)   : counter present at aaats-metrics:9091
+                         aaats_share_equality_mismatch_total{strategy="_TEST_",symbol="_TEST_"} 1
+- Layer 2 (prometheus) : target aaats-metrics health=up after network connect
+                         increase()[1h] = 1.09 after second sample
+- Layer 3 (grafana)    : rule_uid=share_equality_mismatch fired at
+                         2026-05-16T04:39:00Z + 2026-05-16T04:40:00Z
+                         (Grafana logs: "Sending alerts to local notifier count=1")
+- Layer 4 (telegram)   : delivery confirmed by operator (chat 1946109268)
+                         body: "SELL/BUY share-equality mismatch detected"
+
+CLEANUP
+-------
+- data/share_equality_mismatches.json reset to {} after validation.
+  Series will go stale within ~2-5min; alert auto-resolves on next eval cycle.
+
+ROLLBACK PROCEDURE
+------------------
+If the new exporter image misbehaves:
+
+  # 1. Restore prior metrics_exporter.py
+  scp .rollback/2026-05-15_metrics_rebuild/metrics_exporter.py.pre \
+      aaats@100.95.126.39:/home/aaats/aaats/monitoring/metrics_exporter.py.tmp
+  ssh aaats@100.95.126.39 'mv -f /home/aaats/aaats/monitoring/metrics_exporter.py.tmp \
+                           /home/aaats/aaats/monitoring/metrics_exporter.py'
+
+  # 2. Rebuild aaats-metrics from prior code
+  ssh aaats@100.95.126.39 'cd /home/aaats/aaats && \
+    docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-metrics'
+
+  # 3. (Optional) Re-attach to aaats network for Prometheus reachability
+  ssh aaats@100.95.126.39 'docker network connect aaats aaats-metrics'
+
+  # 4. Verify pre-image SHA restored
+  ssh aaats@100.95.126.39 'docker inspect aaats-metrics --format "{{.Image}}"'
+  # expect: sha256:6866e2779981...
+
+KNOWN FOLLOW-UPS
+----------------
+- aaats-metrics network attach is runtime-only. Edit deployment/docker-compose.yml
+  to add the `aaats` external network so the fix survives container recreation.
+- Alert message template at /srv/aaats/compose/grafana/provisioning/alerting/
+  telegram_contact.yaml doesn't render metric labels (strategy, symbol). Adding
+  these to the template would let _TEST_-tagged synthetic runs be unambiguous.
