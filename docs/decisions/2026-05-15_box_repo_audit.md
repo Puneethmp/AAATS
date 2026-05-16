@@ -324,3 +324,70 @@ the failure is qualified:
    first-class success criterion; permit WORKSTATION-ONLY and
    PARALLEL-SYSTEM via an explicit allow-list in
    [docs/conventions/deploy_discipline.md](../conventions/deploy_discipline.md).
+
+## Remediation 2026-05-16
+
+Executed in a single bypassPermissions session ending 2026-05-16T05:30Z.
+
+### Image SHAs
+
+| Container | Pre-session | Post-session |
+| --- | --- | --- |
+| `aaats-metrics` | `sha256:6866e2779981782f8931d0fb3eea7ceeb9c073dfd09a7a1314dd0d17b78358a6` | `sha256:79c80b570b95039b3c8d279ed5f1ae629219dcda2ce995a2479396e9a8f887b8` |
+| `aaats-paper-crypto` | `sha256:7051c405c75abb11f0056055a2390d0071ccc858ff3e7bfc075627291d83a160` | `sha256:1a06f1a3de03045eeab54fcd82e9bdbe232ad59a58fd78b28e03c2d15fb73b5c` |
+
+Two paper-crypto rebuilds (P3 then drift-fix), one metrics rebuild.
+
+### RUNTIME-LATENT tarball
+
+- Source: `git archive --format=tar origin/main -- <11 entries>` (origin/main HEAD `3ffa77e` at session start).
+- SHA256: `ddc0e8dff9ce20947e12255e907daf022ecef6ed90891ce74b3381c15fa734fe`
+- Size: 102 KB compressed; 124 tar entries.
+- Path on box: `/tmp/runtime_latent_payload.tar.gz`.
+- 11 entries shipped: `analytics/`, `backtesting/`, `infrastructure/`, `intelligence/`, `learning/`, `portfolio/`, `production_readiness/`, `safety/`, `strategies/`, `config/settings.py`, `kill.py`.
+
+### Mid-session findings (not in original audit scope)
+
+The audit's `(c) = 0 hash mismatches` finding had a methodology artifact: it hashed `docker exec aaats-paper-crypto find /app`, i.e., the *image*, not the *host build context*. The remediation re-audit hashed the new image with LF-normalization (`tr -d '\r'` before `sha256sum`) and surfaced three pre-existing drifts the original audit had missed:
+
+1. **`monitoring/metrics_exporter.py`** — origin/main `1400b0e9…`, host stale `99ab80c2…` (May-12). The `collect_share_equality()` function added in commit `f6e835a` had never been SCP'd to the host. Fixed by atomic paramiko swap pre-P1 rebuild.
+2. **`execution/paper_trader.py`** — origin/main `0926a0fe…`, host stale `94aa9d88…` (LF-normalized). Box was missing `_bump_share_mismatch_counter()` and its call site — meaning live SELL/BUY mismatches never persisted to `data/share_equality_mismatches.json`. Production trigger of the very feature G3.partial closes was inert. Fixed by atomic paramiko swap pre-drift-fix rebuild.
+3. **`deployment/Dockerfile`** — origin/main `e36bb0bc…`, host `58ec331c…`. Box CMD pointed at deleted `main.py`; origin/main fails fast with explicit SystemExit. Cosmetic-safety only (compose always overrides CMD), but real drift. Fixed in the same atomic swap.
+
+Additionally, 6 tombstones (`execution/crypto_runner.py`, `execution/india_runner.py`, `execution/orchestrator.py`, `scripts/{continuous,phase1_local_monitor,phase1}_runner.py`) survived the P3 rebuild because the host build context still contained them. Moved to `/tmp/aaats_tombstones_2026-05-16/` on box (recoverable) before the drift-fix rebuild baked them out of the image.
+
+### Network topology fix (runtime-only)
+
+`aaats-metrics` (network: `aaats-network`, deployment compose) was unreachable from `aaats-prometheus` (network: `aaats`, aaats-base compose). DNS-resolved name `aaats-metrics` failed cross-network. The Prometheus target had been silently `down` since the Grafana stack overlay (2026-05-06), invisible to the original audit because the audit didn't query Prometheus targets.
+
+Applied: `docker network connect aaats aaats-metrics`. Fully reversible; reverts on container recreate. **Persistent fix is a follow-up** — needs `deployment/docker-compose.yml` to attach `aaats-metrics` to the external `aaats` network. Tracked in `.rollback/2026-05-15_metrics_rebuild/MANIFEST.txt` under KNOWN FOLLOW-UPS.
+
+### End-to-end chain validation
+
+Synthetic `_TEST_/_TEST_` trigger via direct write to `data/share_equality_mismatches.json` (production code path: same JSON the `_bump_share_mismatch_counter` writes to). Bumped twice to give `increase()[1h]` a non-zero delta.
+
+| Layer | Evidence |
+| --- | --- |
+| Exporter | `aaats_share_equality_mismatch_total{strategy="_TEST_",symbol="_TEST_"} 1` at `aaats-metrics:9091/metrics` |
+| Prometheus | Target `aaats-metrics` health=`up`; `increase(...)[1h] = 1.09` |
+| Grafana | Rule `share_equality_mismatch` fired at `2026-05-16T04:39:00Z` and `04:40:00Z` (log: `Sending alerts to local notifier count=1`) |
+| Telegram | Operator confirmed delivery to chat `1946109268`; body: "SELL/BUY share-equality mismatch detected" |
+
+Cleanup: `data/share_equality_mismatches.json` reset to `{}` post-validation. Series stales out on next scrape; alert auto-resolves.
+
+### Re-audit diff
+
+LF-normalized box hashes vs origin/main, production-code surface (206 → 200 files after tombstone cleanup):
+
+- **Hash mismatches**: 0
+- **Phantom files on box (only_in_box)**: 0
+- **only_in_repo (acceptable absences)**: 6 — all WORKSTATION-ONLY operator scripts allow-listed in original audit (`config/.env.example`, `scripts/deploy_c5b_halt.py`, `scripts/deploy_share_assertion.py`, `scripts/verify_share_assertion_deployed.py`, `scripts/verify_share_equality_counter.py`, `scripts/watch_first_sell.py`).
+
+### Final verdict: **PASS**
+
+G3 closure conditions all met:
+- ✅ RUNTIME-LATENT dirs present on box and baked into image
+- ✅ Pre-existing RUNTIME hash drift (paper_trader.py, Dockerfile) resolved
+- ✅ Tombstones cleaned from host build context
+- ✅ Re-audit produces 0 RUNTIME drift
+- ✅ Share-equality alert chain validated end-to-end with explicit timestamp.
