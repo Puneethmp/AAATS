@@ -27,7 +27,7 @@ Use `docker exec aaats-paper-crypto python -c "import sqlite3; ..."` for ad-hoc 
 
 | Service | Container | Port (host:container) | Notes |
 | --- | --- | --- | --- |
-| Prometheus exporter | `aaats-metrics` | `9091:9091` | Source: `monitoring/metrics_exporter.py:30`. Image `sha256:79c80b570b95…` (rebuilt 2026-05-16 to bake in `collect_share_equality()`). Scraped by Prometheus per `/srv/aaats/compose/prometheus/prometheus.yml`. Hosts the share-equality counter and all per-strategy gauges. |
+| Prometheus exporter | `aaats-metrics` | `9091:9091` | Source: `monitoring/metrics_exporter.py:30`. Image `sha256:c9e2e54ab593…` (rebuilt 2026-05-16T06:21Z to persist `aaats` network attachment in compose; prior `79c80b570b95…` baked in `collect_share_equality()`). Scraped by Prometheus per `/srv/aaats/compose/prometheus/prometheus.yml`. Hosts the share-equality counter and all per-strategy gauges. |
 | Trading container | `aaats-paper-crypto` | (none) | Image `sha256:1a06f1a3de03…` (rebuilt 2026-05-16 with full RUNTIME-LATENT tree + paper_trader.py drift fix). Exposes no ports; metrics surfaced by `aaats-metrics` reading shared `data/` bind mounts. |
 | Grafana | `aaats-grafana` | Tailscale-only on `:3000` | See memory `project_aaats_grafana.md`. |
 
@@ -44,7 +44,8 @@ writes `data/share_equality_mismatches.json` on every WARN; the exporter scrapes
 that file on the 30s `SCRAPE_INTERVAL`. Synthetic test recipe: write
 `{"_TEST_|_TEST_": <n>}` into that JSON twice (to give `increase()[1h]` a delta).
 
-**Known follow-up**: `aaats-metrics` is attached to the `aaats` network at runtime
-via `docker network connect aaats aaats-metrics`. This reverts on container recreate.
-Persistent fix requires adding the external `aaats` network to `aaats-metrics`
-in `deployment/docker-compose.yml`.
+**Network attachment** (persistent as of commit `708b58b`, 2026-05-16): `aaats-metrics`
+declares `networks: [default, aaats]` in `deployment/docker-compose.yml` and the
+top-level `networks:` block lists `aaats: external: true`. This survives container
+recreation. Do NOT run `docker network connect aaats aaats-metrics` manually —
+compose owns this attachment now.
