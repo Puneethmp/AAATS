@@ -157,6 +157,9 @@ services:
     environment:
       - PYTHONPATH=/app
     command: python monitoring/metrics_exporter.py
+    networks:
+      - default
+      - aaats
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:9091/metrics', timeout=3); sys.exit(0)"]
       interval: 30s
@@ -246,3 +249,5 @@ volumes:
 networks:
   default:
     name: aaats-network
+  aaats:
+    external: true
