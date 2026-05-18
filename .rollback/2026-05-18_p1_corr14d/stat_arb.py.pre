@@ -125,23 +125,16 @@ def _engle_granger_pvalue(a: pd.Series, b: pd.Series) -> float:
         return 0.0
 
 
-def _rolling_correlation(a: pd.Series, b: pd.Series, n: int) -> float | None:
+def _rolling_correlation(a: pd.Series, b: pd.Series, n: int) -> float:
     """
     Pearson correlation of the last n bars of series a and b.
-
-    Returns None on insufficient data or NaN so the caller can distinguish
-    "I can't compute this yet" from a genuine ~0 correlation. Previously
-    returned 0.0, which silently failed the health gate's `corr >= 0.80`
-    check and poisoned the 7-day-cached pair_healthy=False state when
-    fetch depth was below the requested window.
+    Returns 0.0 if insufficient data or NaN.
     """
     combined = pd.DataFrame({"a": a, "b": b}).dropna()
     if len(combined) < n:
-        return None
+        return 0.0
     corr = combined.tail(n)["a"].corr(combined.tail(n)["b"])
-    if pd.isna(corr):
-        return None
-    return float(corr)
+    return float(corr) if not np.isnan(corr) else 0.0
 
 
 # == Spread computation =========================================================
@@ -313,30 +306,20 @@ def _run_pair(
     if _is_health_stale(health_entry):
         # crypto: 14 days * 24 hours; india: 14 daily bars
         n_corr = 14 * 24 if pair.market == "crypto" else 14
+        eg_p   = _engle_granger_pvalue(prices_a, prices_b)
         corr14 = _rolling_correlation(prices_a, prices_b, n_corr)
-        if corr14 is None:
-            # Insufficient data — don't poison the cache. Existing health_entry
-            # (possibly empty) remains; will retry on next cycle.
-            window_days = n_corr // (24 if pair.market == "crypto" else 1)
-            log.warning(
-                f"  [{key}] health update SKIPPED: need {n_corr} bars for "
-                f"{window_days}d correlation, have {len(prices_a)}. "
-                f"Retry next cycle."
-            )
-        else:
-            eg_p    = _engle_granger_pvalue(prices_a, prices_b)
-            healthy = eg_p < pair.cointegration_p_max and corr14 >= pair.min_correlation_14d
-            health[key] = {
-                "eg_pvalue":    eg_p,
-                "corr_14d":     corr14,
-                "checked_at":   datetime.now(timezone.utc).isoformat(),
-                "pair_healthy": healthy,
-            }
-            log.info(
-                f"  [{key}] health updated: eg_p={eg_p:.4f} "
-                f"corr14d={corr14:.3f} healthy={healthy}"
-            )
-            health_entry = health[key]
+        healthy = eg_p < pair.cointegration_p_max and corr14 >= pair.min_correlation_14d
+        health[key] = {
+            "eg_pvalue":    eg_p,
+            "corr_14d":     corr14,
+            "checked_at":   datetime.now(timezone.utc).isoformat(),
+            "pair_healthy": healthy,
+        }
+        log.info(
+            f"  [{key}] health updated: eg_p={eg_p:.4f} "
+            f"corr14d={corr14:.3f} healthy={healthy}"
+        )
+        health_entry = health[key]
 
     pair_healthy  = health_entry.get("pair_healthy", True)
     cached_eg_p   = health_entry.get("eg_pvalue", 0.0)
