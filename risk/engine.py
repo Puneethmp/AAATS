@@ -92,9 +92,11 @@ class RiskEngine:
     _markets: dict[str, MarketState] = field(default_factory=dict, init=False)
     _halted_markets: set[str] = field(default_factory=set, init=False)
     _all_halted: bool = field(default=False, init=False)
+    _loaded_market_peaks: dict[str, float] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
-        loaded_peak = self._load_persisted_peak()
+        persisted = self._load_persisted_state()
+        loaded_peak = persisted.get("peak")
         if loaded_peak is not None:
             self._portfolio_peak = loaded_peak
             _log.info(
@@ -107,37 +109,69 @@ class RiskEngine:
                 f"(initial={self.initial_portfolio:.2f}, locked={LOCKED_STARTING_EQUITY:.2f})"
             )
         self._portfolio_current = self.initial_portfolio
+        self._loaded_market_peaks = persisted.get("market_peaks", {})
+        if self._loaded_market_peaks:
+            peaks_str = ", ".join(
+                f"{m}=${v:.2f}" for m, v in self._loaded_market_peaks.items()
+            )
+            _log.info(f"Risk engine market peaks loaded from {STATE_FILE}: {peaks_str}")
 
     @staticmethod
-    def _load_persisted_peak() -> float | None:
-        """Read the last-known portfolio peak from STATE_FILE. None on miss."""
+    def _load_persisted_state() -> dict:
+        """Read persisted risk-engine state from STATE_FILE.
+
+        Returns:
+            dict with optional keys ``peak`` (portfolio high-water mark) and
+            ``market_peaks`` (dict[str, float] of per-market high-water marks).
+            Empty dict on miss or unreadable file. Backward-compatible with
+            the pre-2026-05-18 schema that lacks ``market_peaks``.
+        """
         try:
             if not STATE_FILE.exists():
-                return None
+                return {}
             data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            out: dict = {}
             peak = float(data.get("peak", 0.0))
-            if peak <= 0:
-                return None
-            return peak
+            if peak > 0:
+                out["peak"] = peak
+            raw_peaks = data.get("market_peaks", {})
+            if isinstance(raw_peaks, dict):
+                valid = {
+                    str(m): float(v)
+                    for m, v in raw_peaks.items()
+                    if isinstance(v, (int, float)) and float(v) > 0
+                }
+                if valid:
+                    out["market_peaks"] = valid
+            return out
         except Exception as exc:
-            _log.warning(f"Risk engine state file unreadable ({exc}); falling back to doctrine")
-            return None
+            _log.warning(
+                f"Risk engine state file unreadable ({exc}); falling back to doctrine"
+            )
+            return {}
 
-    @staticmethod
-    def _persist_peak(peak: float, last_equity: float) -> None:
-        """Atomically write the peak to STATE_FILE so restarts retain it."""
+    def _persist_state(self) -> None:
+        """Atomically persist portfolio + per-market peaks to STATE_FILE.
+
+        Called after every update_portfolio / update_market so a process
+        restart cannot reset any high-water mark — without this, per-market
+        peaks were in-memory only and silently reset on container recreate.
+        """
         try:
             STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
             payload = {
-                "peak": float(peak),
+                "peak": float(self._portfolio_peak),
                 "last_update_ts": time.time(),
-                "last_equity": float(last_equity),
+                "last_equity": float(self._portfolio_current),
+                "market_peaks": {
+                    m: float(s.peak_value) for m, s in self._markets.items()
+                },
             }
             tmp = STATE_FILE.with_suffix(STATE_FILE.suffix + ".tmp")
             tmp.write_text(json.dumps(payload), encoding="utf-8")
             os.replace(tmp, STATE_FILE)
         except Exception as exc:
-            _log.warning(f"Failed to persist risk engine peak to {STATE_FILE}: {exc}")
+            _log.warning(f"Failed to persist risk engine state to {STATE_FILE}: {exc}")
 
     # ── State updates ─────────────────────────────────────────────────────────
 
@@ -153,7 +187,7 @@ class RiskEngine:
         self._portfolio_current = current_value
 
         # Persist after every update so a restart cannot reset the peak.
-        self._persist_peak(self._portfolio_peak, current_value)
+        self._persist_state()
 
         if self._portfolio_peak <= 0:
             dd = 0.0
@@ -182,11 +216,23 @@ class RiskEngine:
             RiskDecision with HALT_MARKET if drawdown > 15%, else ALLOW.
         """
         if market not in self._markets:
+            # Seed peak from persisted high-water mark when available; else
+            # from the current value. ``max`` guards against a stale persisted
+            # peak being lower than what we observe right now — we'd never
+            # want to discard newly-observed information.
+            seed_peak = max(
+                self._loaded_market_peaks.get(market, 0.0),
+                current_value,
+            )
             self._markets[market] = MarketState(
-                peak_value=current_value, current_value=current_value
+                peak_value=seed_peak, current_value=current_value
             )
         state = self._markets[market]
         state.update(current_value)
+
+        # Persist after every update — per-market peaks must survive restarts
+        # or the kill switch silently resets on every container recreate.
+        self._persist_state()
 
         dd = state.drawdown
         if dd <= MARKET_DRAWDOWN_HALT:

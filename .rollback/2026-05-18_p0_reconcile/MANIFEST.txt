@@ -28,21 +28,53 @@ Rollback procedure:
   3. Verify sha256sum == 0bd28b6bf850c90f015fc1861128526c5ed8489051772f783e8ec516a507bfdf
   4. docker compose -f /home/aaats/aaats/deployment/docker-compose.yml up -d --build --no-deps aaats-paper-crypto
 
-POST-EDIT — to be filled after C1.b:
+POST-EDIT (Commit 1 deployed) — captured 2026-05-18T12:33:51Z:
   File:        /home/aaats/aaats/trading/live_paper_runner.py
-  SHA256:      <PENDING>
+  Local SHA:   15929fb5e31e9c55d663366b9da9cbac751f90c3cc8f10fb9840ba5650966029
+  Box SHA:     15929fb5e31e9c55d663366b9da9cbac751f90c3cc8f10fb9840ba5650966029
+  Pre image:   sha256:1a06f1a3de03045eeab54fcd82e9bdbe232ad59a58fd78b28e03c2d15fb73b5c
+  Post image:  sha256:81ffdba80125f519da1b2d34bb214365c2a257330f59c66ec436c3b88c6a6605
+  State:       running
+  RestartCount: 0 -> 0
+  StartedAt:   2026-05-18T12:33:49.414798304Z
+
+================================================================================
+COMMIT 2 — Per-market peak persistence
+================================================================================
+
+Baseline (PRE-EDIT) — captured 2026-05-18 from box aaats@100.95.126.39:
+
+  File:        /home/aaats/aaats/risk/engine.py
+  Box SHA256:  451797da5dc672a8f79cc7206418c720d0a3b2ee59d34195129f6b5b6cef1f85  (CRLF, 12655 bytes)
+  HEAD SHA256: 9400546265d506f2c048a83df9a4f75a09e6e12c9147134827066260260154f6  (LF, 12328 bytes — same content)
+  HEAD-as-CRLF SHA256: 451797da5dc672a8f79cc7206418c720d0a3b2ee59d34195129f6b5b6cef1f85 (matches box)
+  Mtime:       2026-05-14 21:08:33 +0200
+  Drift:       NONE — box is HEAD content with CRLF line endings (no semantic drift)
+  Last commit touching file: 4b01e5d "feat(risk): persist drawdown peak + introduce config.doctrine anchor"
+
+Notes:
+  - live_paper_runner.py is NOT touched in C2 (persistence is wired entirely in engine.py).
+  - State file lives in named docker volume ``deployment_state-crypto`` (not bind-mounted),
+    so peaks naturally survive container recreate. Pre-C2, in-memory MarketState peaks
+    were lost on restart anyway.
+  - "Migration" semantics: C2 code seeds per-market peaks from the first observed
+    market_equity post-restart (via ``seed_peak = max(loaded, current_value)``).
+    The historical in-memory peak from the C1-running container is forfeit on the
+    C2 restart, same as every prior restart. From this restart forward, peaks
+    persist across container recreates.
+
+Rollback procedure (C2 only — does NOT roll back C1):
+  1. Restore engine.py from local commit ef5544c (C1):
+       git show ef5544c:risk/engine.py > /tmp/engine_pre_c2.py
+       paramiko SCP -> /home/aaats/aaats/risk/engine.py.tmp
+       mv -f
+  2. docker compose -f /home/aaats/aaats/deployment/docker-compose.yml up -d --build --no-deps aaats-paper-crypto
+  3. The named volume's risk_engine_state.json now has the new schema with market_peaks;
+     old code ignores that key, so no extra cleanup needed.
+
+POST-EDIT (Commit 2 deployed) — to be filled after C2.e:
   Local SHA:   <PENDING>
-  Commit:      <PENDING>
-
-================================================================================
-COMMIT 2 — Per-market peak persistence (TBD)
-================================================================================
-
-Baseline (PRE-EDIT) — to be captured before C2.a:
-  File:        risk/engine.py (and possibly trading/live_paper_runner.py if persistence wired there)
-  SHA256:      <PENDING>
-
-POST-EDIT — to be filled after C2.e:
-  File:        <PENDING>
-  SHA256:      <PENDING>
+  Box SHA:     <PENDING>
+  Pre image:   <PENDING>
+  Post image:  <PENDING>
   Commit:      <PENDING>
