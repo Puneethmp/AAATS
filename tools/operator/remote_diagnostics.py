@@ -156,7 +156,7 @@ def main():
 
             # Reload prometheus
             print("\n[ACTION] Reloading Prometheus...")
-            out5, err5, rc5 = run_cmd(client, "curl -s -X POST http://localhost:9090/-/reload 2>&1")
+            out5, err5, rc5 = run_cmd(client, "docker exec aaats-prometheus wget --post-data='' -qO- 'http://localhost:9090/-/reload' 2>&1")
             print_section("2f. Prometheus reload response", out5 or f"(exit code {rc5})", err5)
 
             if rc5 != 0 or "error" in (out5+err5).lower():
@@ -166,7 +166,7 @@ def main():
                 time.sleep(5)
 
             # Verify targets
-            out7, err7, rc7 = run_cmd(client, "curl -s http://localhost:9090/api/v1/targets | python3 -c \"import sys,json; t=json.load(sys.stdin)['data']['activeTargets']; [print(x['labels']['job'], x['health']) for x in t]\" 2>&1")
+            out7, err7, rc7 = run_cmd(client, "docker exec aaats-prometheus wget -qO- 'http://localhost:9090/api/v1/targets' | python3 -c \"import sys,json; t=json.load(sys.stdin)['data']['activeTargets']; [print(x['labels']['job'], x['health']) for x in t]\" 2>&1")
             print_section("2h. Prometheus active targets", out7, err7)
     else:
         print("[WARN] Could not find or read prometheus.yml on host")
@@ -175,7 +175,7 @@ def main():
         print_section("2i. Broad search for prometheus.yml", out8, err8)
 
     # Also check prometheus targets even without fix
-    out_t, err_t, rc_t = run_cmd(client, "curl -s http://localhost:9090/api/v1/targets 2>&1 | python3 -c \"import sys,json; data=json.load(sys.stdin); t=data.get('data',{}).get('activeTargets',[]); [print(x['labels'].get('job','?'), x.get('health','?'), x['scrapeUrl']) for x in t]\" 2>&1")
+    out_t, err_t, rc_t = run_cmd(client, "docker exec aaats-prometheus wget -qO- 'http://localhost:9090/api/v1/targets' 2>&1 | python3 -c \"import sys,json; data=json.load(sys.stdin); t=data.get('data',{}).get('activeTargets',[]); [print(x['labels'].get('job','?'), x.get('health','?'), x['scrapeUrl']) for x in t]\" 2>&1")
     print_section("2j. Current Prometheus targets (always)", out_t, err_t)
 
     # ================================================================
@@ -206,7 +206,7 @@ def main():
     print("  STEP 4: Additional checks")
     print("="*70)
 
-    out, err, rc = run_cmd(client, "curl -s http://localhost:9090/api/v1/targets 2>&1")
+    out, err, rc = run_cmd(client, "docker exec aaats-prometheus wget -qO- 'http://localhost:9090/api/v1/targets' 2>&1")
     print_section("4a. Full Prometheus targets JSON", out, err)
 
     out, err, rc = run_cmd(client, "curl -s http://localhost:3000/api/health 2>&1")

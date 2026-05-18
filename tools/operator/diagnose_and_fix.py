@@ -87,7 +87,7 @@ log(out if out else "(not found)")
 log()
 
 # Also check what prometheus is actually scraping
-out, _ = run("curl -s http://localhost:9090/api/v1/targets 2>&1 | python3 -c \""
+out, _ = run("docker exec aaats-prometheus wget -qO- 'http://localhost:9090/api/v1/targets' 2>&1 | python3 -c \""
              "import sys,json; d=json.load(sys.stdin); "
              "[print(t['discoveredLabels'].get('__address__','?'), t['health']) "
              "for t in d.get('data',{}).get('activeTargets',[])]\" 2>&1")

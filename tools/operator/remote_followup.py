@@ -45,7 +45,7 @@ def main():
     # ================================================================
     # A. Prometheus targets after restart
     # ================================================================
-    out, err, rc = run_cmd(client, "curl -s http://localhost:9090/api/v1/targets 2>&1")
+    out, err, rc = run_cmd(client, "docker exec aaats-prometheus wget -qO- 'http://localhost:9090/api/v1/targets' 2>&1")
     sec("A. Prometheus targets JSON (raw)", out[:3000], err)
 
     # Parse it nicely
@@ -133,7 +133,7 @@ def main():
 
             # Reload
             time.sleep(1)
-            reload_out, reload_err, reload_rc = run_cmd(client, "curl -s -X POST http://localhost:9090/-/reload 2>&1")
+            reload_out, reload_err, reload_rc = run_cmd(client, "docker exec aaats-prometheus wget --post-data='' -qO- 'http://localhost:9090/-/reload' 2>&1")
             sec("C7. Prometheus reload after fix", reload_out or f"(exit code {reload_rc})", reload_err)
 
             if reload_rc != 0 or not reload_out.strip():
@@ -144,7 +144,7 @@ def main():
 
             # Verify targets
             time.sleep(3)
-            targets_out, _, _ = run_cmd(client, "curl -s http://localhost:9090/api/v1/targets 2>&1")
+            targets_out, _, _ = run_cmd(client, "docker exec aaats-prometheus wget -qO- 'http://localhost:9090/api/v1/targets' 2>&1")
             try:
                 tdata = json.loads(targets_out)
                 tatargets = tdata.get('data', {}).get('activeTargets', [])
