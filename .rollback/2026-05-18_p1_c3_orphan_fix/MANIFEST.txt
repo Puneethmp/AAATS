@@ -1,0 +1,35 @@
+ROLLBACK BASELINE — 2026-05-18 P1 C3 orphan-exit fix
+=====================================================
+
+Scope:
+  Single-file change to trading/altcoin_reversion.py expanding the per-cycle
+  iteration to include held positions outside the scanner-derived universe.
+  Targets the orphan-by-design between markets/crypto/allocator.py (which
+  excludes held symbols from picks) and trading/altcoin_reversion.py (which
+  iterated only the per-cycle universe).
+
+Pre-deploy state:
+  Branch:                   main
+  Branch HEAD SHA:          29cda4b  (docs(rollback): P0 reconcile post-deploy SHAs + verification chronology)
+  Container image ID:       sha256:20d631b6473f12e43e1748ba21394b500b215191d1f7c5ca3809d6a427c5f305
+  Box file SHA (LF):        305432984335d552322ee07b45ab543caa18cac8440077e82f764413eb81de0a  /app/trading/altcoin_reversion.py
+  Workstation file SHA:     ca4b215d4a0792ab89cf81fe95e30861e0629168fab7a5deb8095f6f8f4649c4  trading/altcoin_reversion.py  (CRLF — divergence from box is line-endings only; .pre LF snapshot matches box SHA exactly)
+
+Snapshots captured:
+  altcoin_reversion.py.pre              — pulled from container via `docker exec cat`; SHA matches live file on box
+  altcoin_reversion_state.json.pre      — 8 open positions: PUMP, OP, ARB, SPK, PENDLE (stuck) + BCH, LAYER, CHIP (waiting)
+  risk_engine_state.json.pre            — last_equity=103.056752550579, peak=110.0, market_peaks.crypto=103.056752550579
+
+Expected post-deploy delta:
+  altcoin_reversion_state.json shrinks 8 -> 3 (only BCH, LAYER, CHIP remain)
+  altcoin_reversion_cooldown.json grows {} -> 5 entries (PUMP/OP/ARB/SPK/PENDLE each 24h)
+  risk_engine_state.json: last_equity ~unchanged (positions were mark-to-market already; SELL just realizes unrealized)
+  share_equality_mismatches.json: stays {}
+  paper_trades.db: 5 new SELL rows tagged C3_ALT_REVERSION with exit_reason=time_stop_24h
+  Combined realized PnL on the 5 SELLs: approximately -$3.40 (matches audit unrealized estimate within mark-to-market drift)
+
+Rollback procedure if any verification fails:
+  1. SCP altcoin_reversion.py.pre back to box as trading/altcoin_reversion.py.tmp, mv -f atomic swap
+  2. docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-paper-crypto
+  3. Compare post-rollback SHA against 305432984335d5...
+  4. Investigate before re-attempting

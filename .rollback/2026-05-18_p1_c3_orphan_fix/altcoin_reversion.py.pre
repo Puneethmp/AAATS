@@ -430,28 +430,12 @@ def run_altcoin_reversion_crypto(
         btc_regime = "RANGE_BOUND"
 
     universe = symbols if symbols is not None else SYMBOLS
-
-    # Also evaluate exits for any held position outside the per-cycle universe.
-    # The runner's scanner-driven c3_picks excludes held symbols by design
-    # (allocator.py:167), which would otherwise orphan exit evaluation: once
-    # a held symbol drops off c3_picks, _should_exit never runs for it and
-    # time_stop_24h becomes inert. Entry branch is gated by `pos is None`, so
-    # held_outside symbols only exercise the manage-open branch — no risk of
-    # an unintended re-entry.
-    held_outside = sorted(set(state) - set(universe))
-    if held_outside:
-        log.info(
-            "[c3] also evaluating %d held position(s) outside picks: %s",
-            len(held_outside), held_outside,
-        )
-    to_evaluate = list(universe) + held_outside
-
     open_count = len(state)
     if cooldown:
         cooling = [f"{s}({_is_cooling_down(s, cooldown)[1]:.1f}h)" for s in cooldown]
         log.info("[c3] cooldown active for: %s", ", ".join(cooling))
 
-    for sym in to_evaluate:
+    for sym in universe:
         try:
             alt_df = fetch_hourly_fn(sym)
             if alt_df is None or len(alt_df) < LOOKBACK_BARS + 10:
