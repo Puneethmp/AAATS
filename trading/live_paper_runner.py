@@ -742,6 +742,40 @@ def _compute_current_equity(
     return cash + open_value
 
 
+def _compute_market_equity(
+    positions: dict,
+    portfolio: dict,
+    market: str,
+    symbol: str,
+    last_price: float,
+) -> float:
+    """
+    Mark-to-market equity for a single market = that market's cash +
+    open book value of runner-tracked positions in that market +
+    standalone-strategy book value (crypto-only as of 2026-05-18).
+
+    Mirrors ``_compute_current_equity`` but scoped to one market so the
+    per-market drawdown gate sees the true equity, not just cash. Without
+    this, a BUY consumes cash and the gate misreads it as a drawdown,
+    producing phantom HALTs.
+    """
+    cash = float(portfolio[market].get("capital", 0.0) or 0.0)
+    open_value = 0.0
+    for sym, pos in positions[market].items():
+        shares = float(pos.get("shares", 0.0) or 0.0)
+        if shares == 0.0:
+            continue
+        mark = float(last_price) if sym == symbol else float(pos.get("entry_price", 0.0) or 0.0)
+        open_value += shares * mark
+    # ASSUMPTION: standalone-strategy positions are crypto-only as of 2026-05-18.
+    # If N-series (NSE) strategies ever go standalone, this branch silently
+    # excludes them from per-market equity. Revisit if a non-crypto standalone
+    # strategy is added.
+    if market == "crypto":
+        open_value += _strategy_state_book_value()
+    return cash + open_value
+
+
 def _get_sizer(market: str, capital: float) -> PositionSizer:
     if market not in _sizers:
         _sizers[market] = PositionSizer(
@@ -851,7 +885,8 @@ def execute(
     # book value as the input lets the kill switch see the real picture.
     total_equity = _compute_current_equity(positions, portfolio, market, symbol, last_price)
     engine.update_portfolio(total_equity)
-    decision = engine.update_market(market, capital)
+    market_equity = _compute_market_equity(positions, portfolio, market, symbol, last_price)
+    decision = engine.update_market(market, market_equity)
 
     if decision.action in ("HALT_ALL", "HALT_MARKET"):
         log.warning(f"  🛑 RISK HALT [{market}]: {decision.reason}")

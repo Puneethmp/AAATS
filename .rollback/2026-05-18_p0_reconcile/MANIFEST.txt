@@ -1,0 +1,48 @@
+# P0 Reconcile — Phantom Drawdown Fix + Per-Market Peak Persistence
+# Created: 2026-05-18
+# Scope: Two atomic commits
+#   C1: trading/live_paper_runner.py — pass mark-to-market market_equity to engine.update_market (was passing cash)
+#   C2: risk/engine.py (+ persistence wiring) — persist per-market peaks to risk_engine_state.json
+
+================================================================================
+COMMIT 1 — Phantom-drawdown fix
+================================================================================
+
+Baseline (PRE-EDIT) — captured 2026-05-18 from box aaats@100.95.126.39:
+
+  File:        /home/aaats/aaats/trading/live_paper_runner.py
+  SHA256:      0bd28b6bf850c90f015fc1861128526c5ed8489051772f783e8ec516a507bfdf
+  Size:        71925 bytes
+  Mtime:       2026-05-15 11:36:11.307084196 +0200
+  Container:   aaats-paper-crypto, image sha256:1a06f1a3de03045eeab54fcd82e9bdbe232ad59a58fd78b28e03c2d15fb73b5c
+  Started:     2026-05-16T05:21:36.65770616Z
+  Local SHA:   0bd28b6bf850c90f015fc1861128526c5ed8489051772f783e8ec516a507bfdf  (matches box — no drift)
+  Last commit: 3141a355ffe121bc87cec22b0f4afd21c30510e1 "docs(audit): strategy activity audit 2026-05-18 — findings"
+
+Rollback procedure:
+  1. ssh aaats@100.95.126.39
+  2. Restore from box backup if present, else SCP from local commit 3141a35:
+       git show 3141a35:trading/live_paper_runner.py > /tmp/live_paper_runner.py.rollback
+       paramiko SCP -> /home/aaats/aaats/trading/live_paper_runner.py.tmp
+       mv -f /home/aaats/aaats/trading/live_paper_runner.py.tmp /home/aaats/aaats/trading/live_paper_runner.py
+  3. Verify sha256sum == 0bd28b6bf850c90f015fc1861128526c5ed8489051772f783e8ec516a507bfdf
+  4. docker compose -f /home/aaats/aaats/deployment/docker-compose.yml up -d --build --no-deps aaats-paper-crypto
+
+POST-EDIT — to be filled after C1.b:
+  File:        /home/aaats/aaats/trading/live_paper_runner.py
+  SHA256:      <PENDING>
+  Local SHA:   <PENDING>
+  Commit:      <PENDING>
+
+================================================================================
+COMMIT 2 — Per-market peak persistence (TBD)
+================================================================================
+
+Baseline (PRE-EDIT) — to be captured before C2.a:
+  File:        risk/engine.py (and possibly trading/live_paper_runner.py if persistence wired there)
+  SHA256:      <PENDING>
+
+POST-EDIT — to be filled after C2.e:
+  File:        <PENDING>
+  SHA256:      <PENDING>
+  Commit:      <PENDING>
