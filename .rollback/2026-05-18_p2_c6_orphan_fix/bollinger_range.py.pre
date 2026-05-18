@@ -241,23 +241,7 @@ def run_bollinger_range_crypto(
 
     open_now = sum(1 for _ in state.values())
 
-    universe = symbols if symbols is not None else SYMBOLS
-
-    # Same orphan-by-design fix as C3 (commit f137cb3). When the runner's
-    # scanner-derived c6_picks excludes held symbols (allocator.py:167), the
-    # strategy would otherwise never re-evaluate held positions outside the
-    # per-cycle universe — orphaning all exit conditions including the 12h
-    # time stop. Entry branch is gated by `pos is None`, so held_outside
-    # symbols only exercise the manage-open branch.
-    held_outside = sorted(set(state) - set(universe))
-    if held_outside:
-        log.info(
-            "[c6] also evaluating %d held position(s) outside picks: %s",
-            len(held_outside), held_outside,
-        )
-    to_evaluate = list(universe) + held_outside
-
-    for sym in to_evaluate:
+    for sym in (symbols if symbols is not None else SYMBOLS):
         try:
             df = fetch_hourly_fn(sym)
             if df is None or len(df) < BB_PERIOD + 10:

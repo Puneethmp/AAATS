@@ -1,0 +1,41 @@
+ROLLBACK BASELINE — 2026-05-18 P2 C6 orphan-exit fix (preventive)
+==================================================================
+
+Scope:
+  Single-file change to trading/bollinger_range.py expanding the per-cycle
+  iteration to include held positions outside the scanner-derived universe.
+  Mirrors f137cb3 (C3). Preventive — state is currently empty, no live
+  orphan manifestation, but the architectural pattern is identical to C3.
+
+Pre-deploy state:
+  Branch HEAD SHA:                f402beb  (fix(strategies): C1 silent-zero correlation when fetch depth was below 14d window)
+  Container image ID:             sha256:68fed0ed25d5b33f15bdd735d86014cbd2868817298227d797dc573dfaedb892
+  trading/bollinger_range.py:     5f371b382abf1a6cb6e7e4bc461f536a30f2128376db67b979c5be9cb500ce65
+  data/bollinger_range_state.json: 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a  ({})
+  data/share_equality_mismatches.json: ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356  ({})
+
+Expected post-deploy delta:
+  trading/bollinger_range.py SHA changes
+  No state-file changes expected (state is empty; held_outside=[] → no behavior delta)
+  No new log line "[c6] also evaluating ..." (would only appear if held_outside non-empty)
+  share_equality_mismatches.json stays {}
+  C3 cycle unchanged (3 HOLDs on BCH/LAYER/CHIP, cooldown line)
+  No new C6 entries unless legitimate scanner picks fire (independent of this fix)
+
+Verification approach (mechanical, not empirical):
+  Cannot empirically demonstrate the fix under load — state is empty, no
+  positions to orphan. Verification is:
+    1. SHA-match the deployed file against the local LF SHA after rebuild
+    2. grep -c "held_outside" /app/trading/bollinger_range.py inside container
+       returns >=1 (confirms new code is in the active runtime)
+    3. One clean cycle with no traceback, no regression in C3 cadence,
+       share_equality stays {}
+  Empirical verification deferred to the first cycle C6 actually holds a
+  position outside hardcoded [BTC,ETH,SOL] — then the new log line will
+  appear and exit evaluation will run on the held-outside symbol.
+
+Rollback procedure if any verification fails:
+  1. SCP bollinger_range.py.pre back to box as trading/bollinger_range.py.tmp, mv -f atomic swap
+  2. docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-paper-crypto
+  3. Compare post-rollback SHA against 5f371b382abf...
+  4. Investigate before re-attempting
