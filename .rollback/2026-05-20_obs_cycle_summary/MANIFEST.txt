@@ -1,0 +1,67 @@
+ROLLBACK BASELINE — 2026-05-20 OBS CYCLE_SUMMARY observability hook
+====================================================================
+
+Scope:
+  Single-file change to trading/live_paper_runner.py adding:
+
+    1. _LAST_CYCLE_CONTEXT: dict — module-level scratchpad populated by
+       run_crypto() with per-cycle gate signals (fg, skip_c3, skip_c6,
+       c3_picks, c6_picks) so the cycle-end summary can render reasons.
+
+    2. _emit_cycle_summary(cycle: int) -> None — reads each strategy's
+       state file (data/<name>_state.json) + the cycle context, emits one
+       INFO line per cycle:
+         [runner] cycle <N> complete: C1=<state> C2=<state> C3=<state>
+                                      C5b=halted_src C6=<state>
+       States: hold(N), idle, skipped(<reason>), halted_src, unknown.
+       Best-effort: never raises into the main loop.
+
+    3. Context capture in run_crypto() around the scanner pipeline block
+       (after fg + _skip_c3 + _skip_c6 + c3_picks + c6_picks are computed).
+
+    4. Hook call near end of main loop, just before the per-cycle sleep
+       and after the existing "Cycle %d done in %.1fs" log line.
+       Wrapped in try/except log.debug to satisfy best-effort guarantee.
+
+Rationale:
+  Solves the silent-vs-broken disambiguation problem that caused the C2
+  audit confusion (zero log lines was indistinguishable from
+  never-dispatched). One line per cycle (~96 lines/day) reports every
+  strategy's state and any gate reason.
+
+Pre-deploy state:
+  Branch HEAD SHA:                <to be filled at deploy time after G1 commit>
+  Container image ID:             <to be filled by deploy script — expected sha256:0377e8a330905a (G1)>
+  trading/live_paper_runner.py (box, post-G1):     2de7edec984a67ab7b76c5044285d30bb424ccd86dc69620d908dbecb04f1e96
+  data/share_equality_mismatches.json:             snapshot below
+
+Expected post-deploy delta:
+  trading/live_paper_runner.py SHA changes
+  grep -c '_emit_cycle_summary\|_LAST_CYCLE_CONTEXT' inside container
+    returns >= 2 (definition + invocation refs)
+  One new "[runner] cycle N complete: ..." INFO line per cycle in logs
+  share_equality_mismatches.json stays {}
+  No strategy regression — state files continue to update as before
+
+Verification approach (J-obs criteria):
+  1. SHA-match deployed file against local LF SHA after rebuild.
+  2. 2-cycle soak with the following gates:
+     - One CYCLE_SUMMARY log.info line per cycle (grep count == cycle count)
+     - All 5 active strategies (C1, C2, C3, C5b, C6) appear in each summary
+     - No log-volume explosion (INFO lines per cycle < 200)
+     - No strategy regression (state files updating as before)
+
+Rollback procedure if HS1/HS2 or J-obs fails:
+  1. SCP live_paper_runner.py.pre back to box as
+     trading/live_paper_runner.py.tmp, mv -f atomic swap.
+  2. docker compose -f deployment/docker-compose.yml up -d --build --no-deps
+     aaats-paper-crypto
+  3. Compare post-rollback SHA against 2de7edec984a67ab... (G1 baseline).
+  4. Investigate before re-attempting. G1 (halt_on_critical=True) and B'
+     (kill-switch helper) are NOT rolled back — orthogonal, already verified.
+
+Post-deploy SHAs (filled in by deploy script):
+  PRE_REBUILD_IMAGE_SHA  = sha256:0377e8a330905aabb0c02435a9399cbee2f0b94502d2efd22f2401b9f84ebe8d
+  POST_REBUILD_IMAGE_SHA = sha256:d5f30630754a57d391a799a0f72df1cb3bc81dbbbc2c84f34b7b645c5b0c11f9
+  PRE_RESTART_COUNT      = 0
+  DEPLOYED_AT_UTC        = 2026-05-20T17:08:58Z

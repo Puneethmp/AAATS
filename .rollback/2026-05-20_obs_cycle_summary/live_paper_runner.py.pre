@@ -132,92 +132,6 @@ logging.basicConfig(
 log = logging.getLogger("paper_runner")
 
 
-# OBS: per-cycle context populated by run_crypto, consumed by
-# _emit_cycle_summary. Cleared at the start of each run_crypto() call to
-# avoid stale carry-over if the scanner pipeline raises.
-_LAST_CYCLE_CONTEXT: dict = {}
-
-
-def _emit_cycle_summary(cycle: int) -> None:
-    """Emit one INFO line per cycle summarizing every strategy's steady-state.
-
-    Disambiguates "gated / halted / never-dispatched" from log silence — the
-    C2 audit confusion of 2026-05-18 was the trigger (zero log lines looked
-    identical to never-dispatched).
-
-    Best-effort: any unreadable state -> "<label>=unknown" and continues.
-    Must never raise into the main loop.
-
-    Format:
-      [runner] cycle <N> complete: C1=<state> C2=<state> C3=<state>
-                                   C5b=<state> C6=<state>
-
-    States:
-      hold(N[,reason])  state file has N entries (positions / active pairs)
-      idle[(reason)]    state file empty {} or missing
-      skipped(reason)   sentiment-gated this cycle (C3/C6 only)
-      halted_src        disabled at source (C5b — funding_arb commented out)
-      unknown           state file unreadable
-    """
-    ctx = dict(_LAST_CYCLE_CONTEXT)
-    fg = ctx.get("fg")
-    skip_c3 = bool(ctx.get("skip_c3"))
-    skip_c6 = bool(ctx.get("skip_c6"))
-    c3_picks = ctx.get("c3_picks") or []
-    c6_picks = ctx.get("c6_picks") or []
-
-    def _read_count(path: str):
-        try:
-            p = Path(path)
-            if not p.exists():
-                return 0
-            raw = p.read_text(encoding="utf-8").strip()
-            if not raw:
-                return 0
-            data = json.loads(raw)
-            if isinstance(data, (dict, list)):
-                return len(data)
-            return 0
-        except Exception:
-            return None
-
-    def _fmt(label, count, *, skipped=False, reason="", halted_src=False):
-        if halted_src:
-            return f"{label}=halted_src"
-        if count is None:
-            return f"{label}=unknown"
-        if skipped:
-            return f"{label}=skipped({reason})" if reason else f"{label}=skipped"
-        if count == 0:
-            return f"{label}=idle({reason})" if reason else f"{label}=idle"
-        inner = f",{reason}" if reason else ""
-        return f"{label}=hold({count}{inner})"
-
-    c1 = _fmt("C1", _read_count("data/stat_arb_state.json"))
-    c2 = _fmt("C2", _read_count("data/momentum_state.json"))
-
-    c3_reason = ""
-    if skip_c3:
-        c3_reason = f"fg={fg}" if fg is not None else "sentiment"
-    elif c3_picks:
-        c3_reason = f"picks={len(c3_picks)}"
-    c3 = _fmt("C3", _read_count("data/altcoin_reversion_state.json"),
-              skipped=skip_c3, reason=c3_reason)
-
-    c5b = _fmt("C5b", None, halted_src=True)
-
-    c6_reason = ""
-    if skip_c6:
-        c6_reason = f"fg={fg}" if fg is not None else "sentiment"
-    elif c6_picks:
-        c6_reason = f"picks={len(c6_picks)}"
-    c6 = _fmt("C6", _read_count("data/bollinger_range_state.json"),
-              skipped=skip_c6, reason=c6_reason)
-
-    log.info("[runner] cycle %d complete: %s %s %s %s %s",
-             cycle, c1, c2, c3, c5b, c6)
-
-
 # ── .env parser ───────────────────────────────────────────────────────────────
 
 def _load_env() -> dict[str, str]:
@@ -1573,7 +1487,6 @@ def run_india(positions: dict, portfolio: dict) -> None:
 def run_crypto(positions: dict, portfolio: dict) -> None:
     """Run one crypto paper-trading cycle across CRYPTO_SYMBOLS."""
     log.info("== Crypto cycle | capital=USD %.2f ==", portfolio["crypto"]["capital"])
-    _LAST_CYCLE_CONTEXT.clear()
 
     if not _binance_healthy():
         log.warning("  Binance unreachable -- skipping crypto cycle")
@@ -1729,13 +1642,6 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
         c6_picks = plan.get("c6") or None
         log.info("[scanner] final plan: c3=%s  c6=%s  fg=%s  skip_c3=%s  skip_c6=%s",
                  c3_picks, c6_picks, fg, _skip_c3, _skip_c6)
-        _LAST_CYCLE_CONTEXT.update({
-            "fg": fg,
-            "skip_c3": _skip_c3,
-            "skip_c6": _skip_c6,
-            "c3_picks": list(c3_picks or []),
-            "c6_picks": list(c6_picks or []),
-        })
     except Exception as exc:
         log.error("  Scanner pipeline error (falling back to hardcoded SYMBOLS): %s",
                   exc, exc_info=True)
@@ -1883,10 +1789,6 @@ def main(market: str = "crypto") -> None:
         except Exception as _hb_exc:
             log.debug("heartbeat write failed: %s", _hb_exc)
         log.info("  Cycle %d done in %.1fs — sleeping %.0fs", cycle, elapsed, sleep_sec)
-        try:
-            _emit_cycle_summary(cycle)
-        except Exception as _sum_exc:
-            log.debug("cycle summary emit failed: %s", _sum_exc)
         time.sleep(sleep_sec)
 
 
