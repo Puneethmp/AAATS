@@ -1,0 +1,116 @@
+ROLLBACK BASELINE — 2026-05-20 B' apply_kill_switch_gate() helper + C3/C6 wiring
+================================================================================
+
+Scope:
+  Three-file change shipping Option B' from
+  docs/decisions/2026-05-20_g2_execute_routing_hs4.md:
+
+  1. trading/live_paper_runner.py
+       - NEW: apply_kill_switch_gate(market, symbol, last_price, positions,
+         portfolio) -> tuple[bool, str] above execute().
+       - REFACTOR: execute() now calls the helper instead of inlining the
+         portfolio/market HALT block (formerly lines 879-894). Byte-equivalent
+         semantics: the helper internally re-invokes _get_risk_engine
+         (singleton cache), _compute_current_equity, engine.update_portfolio,
+         _compute_market_equity, engine.update_market — same call sequence,
+         same side-effects (log.warning + send_alert on HALT). execute() then
+         re-fetches the engine for downstream check_new_order() use.
+       - WIRING: run_altcoin_reversion_crypto() and run_bollinger_range_crypto()
+         call sites pass full_positions=positions, full_portfolio=portfolio.
+
+  2. trading/altcoin_reversion.py
+       - NEW kwargs: full_positions, full_portfolio (default None for back-compat).
+       - NEW: gate-check call at TOP of BUY emission branch (after sizing
+         success, BEFORE entry_ts/capital/_record).
+       - NEW: gate-check call at TOP of SELL emission branch (after _should_exit
+         returns True, BEFORE pnl/capital/_record).
+       - On gate trip, logs "[c3] %s: SKIP BUY/SELL — kill switch active (%s)"
+         and continues to next symbol.
+
+  3. trading/bollinger_range.py
+       - NEW kwargs: full_positions, full_portfolio (default None).
+       - NEW: gate-check call at TOP of BUY emission (after MIN_TRADE_USD).
+       - NEW: gate-check call at TOP of SELL emission (after exit_reason set).
+       - Same skip semantics as C3.
+
+J3 placement: every gate call is BEFORE any state mutation, BEFORE any
+record_trade(), BEFORE any portfolio["capital"] adjustment. No dual-ledger
+risk introduced — the gate is purely additive read-only equity computation
+that ALREADY happens for execute()-routed trades.
+
+J2 semantic equivalence: execute()'s kill-switch path is identical
+pre- and post-refactor. RiskEngine singleton means helper and execute()
+share the same engine instance; update_portfolio/update_market called in
+the same order with the same arguments.
+
+Pre-deploy state:
+  Branch HEAD SHA:                38a7db4  (docs(audit): mark C2 invocation finding as resolved)
+  Container image ID:             sha256:4627ce2fc042563d5e93cac98157dd14ee59baded05004cfc2156ee204d018a4
+  Container status:               Up 45 hours (healthy), restartCount=0
+  trading/live_paper_runner.py (box):     6ccab20e20fba26b6eff938348c9e344e7245b3f360ea9a9a826378570032a51
+  trading/altcoin_reversion.py (box):     9b2aaafa72c2e300ff25ed638291bf4b01d4a2050c06a7743440945129680d47
+  trading/bollinger_range.py (box):       ea9524069c9c00663d12b379e03d3d5dbc03f600a44162cd92f59ea8a2c18e1b
+  data/share_equality_mismatches.json:    {}  (clean baseline)
+  data/altcoin_reversion_state.json:      6 open positions (SOL, CHZ, XUSD, U, RLUSD, LTC)
+  data/bollinger_range_state.json:        {}  (no open positions)
+
+  Activity baselines (from docker logs --since 24h):
+    C3 ENTRY  last 24h:   8
+    C3 EXIT   last 24h:   4
+    C6 ENTRY  last 24h:   3
+    C3 ENTRY  last 45m:   0  (J4 cannot trigger — prior window is empty)
+
+  J4 derived thresholds:
+    expected_per_45m = 8 * 45 / (24*60) = 0.25
+    50% × expected   = 0.125
+    HS2 fires only if observed < 0.125 AND prior-45m >= 1. Prior is 0 → safe.
+
+  apply_kill_switch_gate() helper signature (J1 — adapted to capture
+    execute()'s current inputs verbatim, the LEAST disruptive shape):
+      apply_kill_switch_gate(
+          market: str,
+          symbol: str,
+          last_price: float,
+          positions: dict,
+          portfolio: dict,
+      ) -> tuple[bool, str]
+    (Returns (False, reason) on HALT; helper also performs the existing
+    log.warning + send_alert side-effects.)
+
+Expected post-deploy delta:
+  Three file SHAs change on the box.
+  Container image SHA changes.
+  RestartCount unchanged (clean rebuild).
+  share_equality_mismatches.json stays {}.
+  No new HALT events expected — C3 already running clean, kill switch was
+    inert for C3/C6 (no enforcement) until this commit. With G1 still False
+    (next commit), reconciler HALTs still WARN only, so the gate is
+    presently dormant for C3/C6 unless a real portfolio/market drawdown
+    exceeds the engine threshold.
+  C3 cadence preserved: HOLDs on 6 open positions continue, new entries
+    only when allocator emits a pick (currently capital=$18.66 < $25 min,
+    so no new entries this cycle regardless).
+  Log volume neutral: no SKIP lines unless the gate actually fires.
+
+Verification approach:
+  1. SHA-grep deployed files (sha256sum vs pre/post).
+  2. Container restartCount unchanged after rebuild.
+  3. Helper resolvable inside container:
+       docker exec aaats-paper-crypto python -c \
+         "from trading.live_paper_runner import apply_kill_switch_gate; \
+          print(apply_kill_switch_gate.__name__)"
+  4. Soak 3 cycles (~45 min). Apply HS1/HS2/HS3/HS4 continuously.
+  5. Confirm C3 still logs HOLD lines for 6 held positions, no traceback.
+  6. Confirm share_equality_mismatches.json stays {}.
+
+Rollback procedure (per file, atomic, only if HS1-HS4 fires):
+  1. SCP each *.pre file back to box as trading/<file>.py.tmp.
+  2. mv -f atomic swap.
+  3. docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-paper-crypto.
+  4. Compare post-rollback SHAs against the box SHAs above.
+
+Post-deploy SHAs (filled in by deploy script):
+  PRE_REBUILD_IMAGE_SHA  =
+  POST_REBUILD_IMAGE_SHA =
+  PRE_RESTART_COUNT      =
+  DEPLOYED_AT_UTC        =

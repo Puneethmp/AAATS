@@ -399,8 +399,6 @@ def run_altcoin_reversion_crypto(
     portfolio: dict,
     fetch_hourly_fn,
     symbols: list[str] | None = None,
-    full_positions: dict | None = None,
-    full_portfolio: dict | None = None,
 ) -> None:
     """
     Main entry point called from live_paper_runner.py each crypto cycle.
@@ -411,23 +409,7 @@ def run_altcoin_reversion_crypto(
         symbols:        Optional override of trade universe. When provided,
                         ONLY these symbols are evaluated this cycle. None = use
                         hardcoded SYMBOLS default (backward compat).
-        full_positions: Full positions dict {"crypto": {...}, "india": {...}}.
-                        Required for kill-switch gate (B' helper). When None
-                        (test/back-compat callers), the gate is bypassed.
-        full_portfolio: Full portfolio dict {"crypto": {...}, "india": {...}}.
-                        Same role as full_positions.
     """
-    # Resolve kill-switch helper once per cycle. Imported lazily to avoid the
-    # circular trading.live_paper_runner <-> trading.altcoin_reversion edge
-    # when this module is loaded under pytest fixtures that don't go through
-    # the runner.
-    _gate_check = None
-    if full_positions is not None and full_portfolio is not None:
-        try:
-            from trading.live_paper_runner import apply_kill_switch_gate as _gate_check
-        except Exception as exc:
-            log.warning("[c3] kill-switch helper unavailable (%s) — proceeding ungated", exc)
-            _gate_check = None
     state    = _load_state()
     cooldown = _load_cooldown()
     changed  = False
@@ -499,22 +481,6 @@ def run_altcoin_reversion_crypto(
 
                 exit_now, reason = _should_exit(pos, current_z)
                 if exit_now:
-                    # Kill-switch gate (B') — block SELL emission BEFORE any
-                    # state mutation, DB write, or capital adjustment. If the
-                    # gate trips, leave the position open for re-evaluation
-                    # next cycle.
-                    if _gate_check is not None:
-                        _allowed, _kill_reason = _gate_check(
-                            "crypto", sym, current_price,
-                            full_positions, full_portfolio,
-                        )
-                        if not _allowed:
-                            log.info(
-                                "[c3] %s: SKIP SELL — kill switch active (%s)",
-                                sym, _kill_reason,
-                            )
-                            continue
-
                     entry      = pos["entry_price"]
                     size       = pos["size_usd"]
                     pnl        = size * (current_price - entry) / entry
@@ -588,21 +554,6 @@ def run_altcoin_reversion_crypto(
                 if trade_usd <= 0:
                     log.info("[c3] %s: SKIP entry — %s", sym, reason)
                     continue
-
-                # Kill-switch gate (B') — block BUY emission BEFORE any state
-                # mutation, DB write, or capital adjustment. If tripped, the
-                # entry is skipped this cycle (re-evaluated next cycle).
-                if _gate_check is not None:
-                    _allowed, _kill_reason = _gate_check(
-                        "crypto", sym, current_price,
-                        full_positions, full_portfolio,
-                    )
-                    if not _allowed:
-                        log.info(
-                            "[c3] %s: SKIP BUY — kill switch active (%s)",
-                            sym, _kill_reason,
-                        )
-                        continue
 
                 entry_ts   = datetime.now(timezone.utc).isoformat()
                 capital   -= trade_usd

@@ -215,8 +215,6 @@ def run_bollinger_range_crypto(
     fetch_hourly_fn: Callable[[str], pd.DataFrame | None],
     open_positions: dict | None = None,
     symbols: list[str] | None = None,
-    full_positions: dict | None = None,
-    full_portfolio: dict | None = None,
 ) -> None:
     """
     One C6 cycle. Mutates portfolio["capital"] in-place.
@@ -230,18 +228,7 @@ def run_bollinger_range_crypto(
       symbols:          Optional injected list (e.g. from scanner+allocator).
                         When provided, overrides hardcoded SYMBOLS. None =
                         use defaults (backward compat).
-      full_positions:   Full positions dict {"crypto": {...}, "india": {...}}.
-                        Required for kill-switch gate (B' helper). When None
-                        (test/back-compat callers), the gate is bypassed.
-      full_portfolio:   Full portfolio dict, same role as full_positions.
     """
-    _gate_check = None
-    if full_positions is not None and full_portfolio is not None:
-        try:
-            from trading.live_paper_runner import apply_kill_switch_gate as _gate_check
-        except Exception as exc:
-            log.warning("[c6] kill-switch helper unavailable (%s) — proceeding ungated", exc)
-            _gate_check = None
     state   = _load_state()
     changed = False
     capital = portfolio.get("capital", 0.0)
@@ -315,21 +302,6 @@ def run_bollinger_range_crypto(
                     exit_reason = f"regime_flip({regime})"
 
                 if exit_reason:
-                    # Kill-switch gate (B') — block SELL emission BEFORE any
-                    # state mutation, DB write, or capital adjustment. If
-                    # tripped, hold the position and re-evaluate next cycle.
-                    if _gate_check is not None:
-                        _allowed, _kill_reason = _gate_check(
-                            "crypto", sym, price,
-                            full_positions, full_portfolio,
-                        )
-                        if not _allowed:
-                            log.info(
-                                "[c6] %s: SKIP SELL — kill switch active (%s)",
-                                sym, _kill_reason,
-                            )
-                            continue
-
                     exit_ts  = datetime.now(timezone.utc).isoformat()
                     capital += size_usd + pnl
                     portfolio["capital"] = capital
@@ -386,20 +358,6 @@ def run_bollinger_range_crypto(
                     log.info("[c6] %s: trade size $%.2f < min $%.2f — skip",
                              sym, trade_usd, MIN_TRADE_USD)
                     continue
-
-                # Kill-switch gate (B') — block BUY emission BEFORE any state
-                # mutation, DB write, or capital adjustment.
-                if _gate_check is not None:
-                    _allowed, _kill_reason = _gate_check(
-                        "crypto", sym, price,
-                        full_positions, full_portfolio,
-                    )
-                    if not _allowed:
-                        log.info(
-                            "[c6] %s: SKIP BUY — kill switch active (%s)",
-                            sym, _kill_reason,
-                        )
-                        continue
 
                 entry_ts = datetime.now(timezone.utc).isoformat()
                 capital -= trade_usd
