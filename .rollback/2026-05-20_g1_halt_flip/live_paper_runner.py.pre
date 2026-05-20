@@ -1761,7 +1761,7 @@ def main(market: str = "crypto") -> None:
             if market in ("india", "both"):
                 _markets_to_check.append("india")
             if _markets_to_check:
-                _rec = reconcile_now(markets=_markets_to_check, halt_on_critical=True)
+                _rec = reconcile_now(markets=_markets_to_check, halt_on_critical=False)
                 if _rec.halted:
                     log.critical(
                         "RECONCILIATION HALTED | issues=%d | "

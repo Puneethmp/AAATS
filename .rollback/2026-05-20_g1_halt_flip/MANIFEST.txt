@@ -1,0 +1,58 @@
+ROLLBACK BASELINE — 2026-05-20 G1 halt_on_critical=False -> True flip
+======================================================================
+
+Scope:
+  One-line flag flip at trading/live_paper_runner.py:1764:
+    BEFORE: _rec = reconcile_now(markets=_markets_to_check, halt_on_critical=False)
+    AFTER:  _rec = reconcile_now(markets=_markets_to_check, halt_on_critical=True)
+
+Rationale:
+  Flag was originally False as a band-aid during the phantom -19.5% per-market
+  drawdown era (479 false-positive HALTs/day). Phantom diagnosis closed via:
+    - ef5544c (mark-to-market reconciliation fix)
+    - 6fb5767 (per-market peak persisted)
+  C3/C6 also now subject to kill-switch via apply_kill_switch_gate() (128ced5).
+  Flipping the flag activates the kill switch across reconciler-driven HALTs.
+
+Pre-deploy state:
+  Branch HEAD SHA:                128ced5  (refactor(risk): apply_kill_switch_gate helper)
+  Container image ID:             sha256:6167f09ea1453aab8a58756dd6075dc022aa0c1fe084565563fb0a4cbbea2941
+  trading/live_paper_runner.py (box):     <to be filled by deploy script>
+  trading/live_paper_runner.py (local):   <to be filled by deploy script>
+  data/halt_state.json (snapshot):        see halt_state.json.pre
+
+Expected post-deploy delta:
+  trading/live_paper_runner.py SHA changes (one-line)
+  grep -n 'halt_on_critical=' inside box file returns line:
+      _rec = reconcile_now(markets=_markets_to_check, halt_on_critical=True)
+  share_equality_mismatches.json stays {}
+  HALT may legitimately fire if reconciler detects critical drift; the test
+  in J-g1 is that HS5 only triggers on PHANTOM HALT (inconsistent drawdown
+  computation between Source A and Source B), not on legitimate HALT.
+
+Verification approach:
+  1. SHA-match the deployed file against the local LF SHA after rebuild.
+  2. grep -n 'halt_on_critical=True' /app/trading/live_paper_runner.py inside
+     container returns 1 hit on line 1764.
+  3. Soak 5 cycles:
+     a. share_equality_mismatches.json stays {}
+     b. restartCount stays 0
+     c. If RECONCILIATION HALTED fires: verify drawdown computation is
+        consistent (per-market peak persisted + mark-to-market correct).
+        Inconsistent = HS5 (phantom regression) -> roll back G1, keep B'.
+        Consistent = legitimate HALT, document and continue.
+
+Rollback procedure if HS1/HS2/HS5 fires:
+  1. SCP live_paper_runner.py.pre back to box as
+     trading/live_paper_runner.py.tmp, mv -f atomic swap.
+  2. docker compose -f deployment/docker-compose.yml up -d --build --no-deps
+     aaats-paper-crypto
+  3. Compare post-rollback SHA against pre-deploy SHA captured above.
+  4. Investigate before re-attempting. B' (kill-switch helper) is NOT rolled
+     back — it is orthogonal and already verified.
+
+Post-deploy SHAs (filled in by deploy script):
+  PRE_REBUILD_IMAGE_SHA  = sha256:6167f09ea1453aab8a58756dd6075dc022aa0c1fe084565563fb0a4cbbea2941
+  POST_REBUILD_IMAGE_SHA = sha256:0377e8a330905aabb0c02435a9399cbee2f0b94502d2efd22f2401b9f84ebe8d
+  PRE_RESTART_COUNT      = 0
+  DEPLOYED_AT_UTC        = 2026-05-20T15:30:02Z
