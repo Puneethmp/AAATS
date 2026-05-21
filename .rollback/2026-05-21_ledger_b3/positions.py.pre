@@ -180,31 +180,6 @@ def close_position(
     return _row_to_dict(row)
 
 
-def update_position_metadata(
-    strategy: str,
-    symbol: str,
-    metadata: dict[str, Any] | None,
-    db_path: str | None = None,
-) -> bool:
-    """Replace ``metadata_json`` for an existing position row.
-
-    Returns ``True`` if a row was updated, ``False`` if no row existed for
-    ``(strategy, symbol)``. Pass ``metadata=None`` to clear.
-
-    Only ``metadata_json`` is mutated -- entry_shares, entry_price,
-    size_usd, entry_ts, entry_correlation_id stay immutable for the row's
-    lifetime (close + re-open semantics for those).
-    """
-    meta_json = json.dumps(metadata) if metadata is not None else None
-    with _conn(db_path) as c:
-        cur = c.execute(
-            "UPDATE positions SET metadata_json=? "
-            "WHERE strategy=? AND symbol=?",
-            (meta_json, strategy, symbol),
-        )
-        return cur.rowcount > 0
-
-
 def list_positions(
     strategy: str | None = None,
     market: str | None = None,

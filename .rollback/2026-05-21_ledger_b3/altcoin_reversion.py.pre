@@ -101,20 +101,9 @@ STATE_FILE = _ROOT / "data" / "altcoin_reversion_state.json"
 COOLDOWN_FILE = _ROOT / "data" / "altcoin_reversion_cooldown.json"
 DB_PATH    = str(_ROOT / "data" / "paper_trades.db")
 
-# Unified positions ledger wiring (Q1-Q4=A, ledger commit 3/3 2026-05-21).
-# Flag is read ONCE at module import per Q4=A; flips require container restart.
-from foundation import state_bridge as _state_bridge
-
-STRATEGY_ID = "C3_altcoin_reversion"
-MARKET = "crypto"
-_USE_UNIFIED_LEDGER = _state_bridge.is_unified_ledger_enabled()
-
 
 # ── State helpers ─────────────────────────────────────────────────────────────
 def _load_state() -> dict[str, Any]:
-    if _USE_UNIFIED_LEDGER:
-        return _state_bridge.load_state(STRATEGY_ID, MARKET, STATE_FILE,
-                                        use_unified=True)
     try:
         if STATE_FILE.exists():
             raw = STATE_FILE.read_text(encoding="utf-8")
@@ -125,10 +114,6 @@ def _load_state() -> dict[str, Any]:
 
 
 def _save_state(state: dict[str, Any]) -> None:
-    if _USE_UNIFIED_LEDGER:
-        _state_bridge.save_state(STRATEGY_ID, MARKET, state, STATE_FILE,
-                                 use_unified=True)
-        return
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")

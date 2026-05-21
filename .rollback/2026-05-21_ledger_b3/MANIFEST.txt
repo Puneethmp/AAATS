@@ -1,0 +1,81 @@
+ROLLBACK BASELINE — 2026-05-21 unified positions ledger commit B3
+================================================================================
+
+Scope:
+  Workstream B3 from NEXT_PROMPT.md 2026-05-21 / Q1-Q4=A path.
+  Wire 4 crypto strategies (C1/C2/C3/C6) to read/write the positions table
+  via foundation.state_bridge when USE_UNIFIED_LEDGER is ON. The legacy
+  JSON path is untouched when the flag is OFF -- the production default.
+
+Files added by B3:
+  + foundation/state_bridge.py             (new flag-aware bridge)
+  + tests/foundation/test_state_bridge.py  (bridge + update_position_metadata)
+  + tests/test_trading/test_strategy_ledger_wiring.py
+  + .rollback/2026-05-21_ledger_b3/*       (this manifest + 5 .pre files)
+
+Files modified by B3:
+  M  foundation/positions.py
+       + update_position_metadata(strategy, symbol, metadata, db_path=None)
+  M  trading/altcoin_reversion.py
+       + STRATEGY_ID = "C3_altcoin_reversion", MARKET = "crypto"
+       + _USE_UNIFIED_LEDGER = state_bridge.is_unified_ledger_enabled()
+       + _load_state / _save_state branch on _USE_UNIFIED_LEDGER
+  M  trading/bollinger_range.py
+       + STRATEGY_ID = "C6_bollinger_range", MARKET = "crypto"
+       + same flag-aware load/save pattern
+  M  trading/stat_arb.py
+       + STRATEGY_ID = "C1_stat_arb", MARKET = "crypto"
+       + same flag-aware load/save pattern
+  M  trading/momentum_breakout.py
+       + STRATEGY_ID = "C2_momentum", MARKET = "crypto"
+       + same flag-aware load/save pattern
+
+Pre-deploy state (workstation):
+  Branch HEAD SHA:                61c93e7  (feat(scripts): unified ledger migration + flag-flip safety (Q1-Q4 commit 2/3))
+  positions table:                empty (workstation default DB)
+  USE_UNIFIED_LEDGER env var:     unset / OFF in production
+
+Behavior with flag OFF (production default, unchanged):
+  - Each strategy reads/writes its existing data/<name>_state.json file.
+  - foundation.positions is NOT touched by any code path.
+
+Behavior with flag ON (operator-staged rollout, after B2 migration):
+  - _load_state pulls {symbol: {entry_price, entry_ts, size_usd, **metadata}}
+    from the positions table.
+  - _save_state diffs in-memory state vs DB:
+      * new symbols       -> positions.open_position
+      * removed symbols   -> positions.close_position
+      * surviving symbols -> positions.update_position_metadata
+  - Legacy JSON state files are NOT written.
+
+Tests (16 new B3 tests, 71 total in foundation+scripts+trading suite):
+  - Per-strategy: STRATEGY_ID / MARKET / _USE_UNIFIED_LEDGER attrs exist.
+  - Per-strategy: OFF branch round-trip via JSON file.
+  - Per-strategy: ON branch writes positions table (NOT the JSON file).
+  - Per-strategy: ON branch close drops the row.
+  - Bridge: env flag parsing (true/1/yes/on/false/0/empty).
+  - Bridge: ON/OFF branches load + save.
+  - Bridge: metadata updates surface on next load.
+  - Bridge: composite-key isolation across strategies.
+  - Bridge: explicit entry_shares field honored when present.
+  - update_position_metadata: rowcount semantics, clear-to-None.
+
+Hard constraints honored:
+- DO NOT modify trading/funding_arb.py (C5b stays halted at source) -- NOT modified.
+- USE_UNIFIED_LEDGER stays OFF in production after this commit -- no env file changed.
+- DO NOT edit scripts/reconcile_intracycle.py -- NOT modified.
+- Tests pass before each push.
+
+Rollback procedure (per file, atomic, only if soak issues surface):
+  1. SCP each *.pre file back to box as <file>.tmp
+  2. mv -f atomic swap
+  3. docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-paper-crypto
+  4. Compare post-rollback SHAs against the box SHAs above
+
+Notes:
+  - This commit is NOT deployed to the box in this session per NEXT_PROMPT.md:
+    "Do NOT deploy B3 to the box in this session." Box deploy of the ledger
+    work happens after live-flip soak is stable.
+  - The reconciler swap (scripts/reconcile_intracycle.py reading from the
+    positions table instead of *_state.json) is a separate follow-up commit
+    AFTER B3 soaks for 48h on the box with the flag ON.
