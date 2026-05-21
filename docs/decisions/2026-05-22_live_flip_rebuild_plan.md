@@ -499,6 +499,85 @@ this.
   deep-dive on C3 + C6, parallel-safe with **Track A.0** readiness-scorer
   fix.
 
+- **2026-05-21 (session 1)** — A.0 + B.0 + B.0.5 + D.0 executed in parallel.
+
+  **Track A.0 — SHIPPED (workstation; not yet deployed to box).** Root
+  cause located: `production_readiness/metrics_aggregator.py:127-136`
+  (drawdown — `max(peak, 1.0)` denominator + realized-only pnl-curve
+  instead of canonical equity peak) and `:210-211, 226` (uptime — binary
+  `1.0 if heartbeats else 0.0` ignored freshness). The NO-GO doc's
+  fingered path `monitoring/metrics_aggregator.py` does not exist; bug
+  lives in `production_readiness/`. Fix prefers `data/state/risk_engine_state.json`
+  peak/last_equity; falls back to a clamped pnl-curve calc with $100
+  starting-capital denominator floor; uses `is_alive(market, max_age_seconds=120)`
+  per-market for uptime. Tests: `tests/test_live_readiness_scorer.py`
+  (3 drawdown + 3 uptime cases, 6/6 pass; fails pre-fix per design) and
+  `tests/test_dual_ledger_drift.py` (bounded-drift baseline over data/
+  and runtime/ ledgers, 2/2 pass). Rollback baseline at
+  `.rollback/2026-05-21_A0_readiness_scorer/`. **Bind-mount note:** the
+  bug-bearing file is image-baked, NOT bind-mounted — fix takes effect
+  on box only after `docker compose ... up -d --build --no-deps aaats-paper-crypto`.
+  Scorer is operator-invoked (next PF1 run), not a daemon, so a stale
+  image continues producing garbage until rebuild.
+
+  **Track A.0 — surfaced new findings:**
+    (i) `runtime/paper_positions.json` has 9 actual positions while
+        `data/paper_positions.json` is empty. Drift is between `data/`
+        (canonical-for-prod) and `runtime/` (debug/scratch), NOT solely
+        between `paper_positions.json` and `paper_trades.db`. Worth a
+        Track B item to identify the writer of `runtime/paper_positions.json`.
+    (ii) `data/share_equality_mismatches.json` is **NOT** empty —
+        contains `{"C3_altcoin_reversion|TON/USDT":6, "...|FET/USDT":6}`.
+        Pre-existing per `docs/operator/aaats_dual_equity_ledger_debt.md`,
+        but the parent plan stated `{}`. State has changed since the
+        plan was authored.
+    (iii) Drift baseline updated in `tests/test_dual_ledger_drift.py`
+        to reflect actual state: stablecoins + ADA + U + PENGU (open
+        C3 BUY) + ICICIBANK (HALTed india leg). Rebaseline procedure
+        documented in the test docstring.
+
+  **Track B.0 — SHIPPED.** Three memos written:
+    - `docs/known_issues/2026-05-21_strategy_c3_altcoin_reversion_diagnostic.md`
+      — verdict **PARAM-TUNE** (contingent HALT). Load-bearing finding:
+      `BTC_DOM_FAST_RISE = 0.008` is declared at
+      `trading/altcoin_reversion.py:77` and documented in the module's
+      own docstring at :10-11 as the "alt season over" entry filter, but
+      it is **never read by `_entry_allowed` at :314-330**. Wiring it
+      is a 1–3 line patch (concrete code sketch in the memo §5.1).
+      Symbol-level halt math: residual P&L without OP/ARB/PUMP/FET/LUNC =
+      **-$1.216 over 9d** (vs the full -$5.634), residual EV ≈
+      -$0.034/trade. 2026-05-18 blowup root cause = market event
+      (BTC-led rally) exposed by the unwired filter.
+    - `docs/known_issues/2026-05-21_strategy_c6_bollinger_range_diagnostic.md`
+      — verdict **KEEP** (insufficient data). 5 SELLs / -$0.128 is
+      below triage-confidence noise floor; per-trade magnitudes within
+      the strategy's own documented expected range. Re-evaluate after
+      4 weeks of B.3 soak with ≥30 SELLs OR a >1% weekly loss.
+    - `docs/known_issues/2026-05-21_silent_strategy_audit.md` (Phase
+      B.0.5) — 1 regressed-silent (C1 stat_arb, `corr14d=0.000` from
+      poisoned 7-day cache despite a sitting z=+4.74 signal — fix is a
+      single-file deletion of `data/stat_arb_health.json`), 2 gate-honest
+      dormant (C2, C5b), 7 out-of-scope dormant (N1 due to `--market crypto`
+      at compose:92; N2–N7 have no source files). C1 is the
+      highest-leverage near-term fix because it's market-neutral and
+      lowers the equity-curve correlation against the
+      currently-90%-directional book.
+
+  **Track B.1 triage table (output of B.0 + B.0.5):**
+    | Strategy | Verdict |
+    |---|---|
+    | C1_stat_arb | FIX (cache invalidation, prereq for B.2) |
+    | C2_momentum_breakout | KEEP (gate-honest) |
+    | C3_altcoin_reversion | PARAM-TUNE |
+    | C5b_funding_arb | HALT (existing) |
+    | C6_bollinger_range | KEEP (insufficient data) |
+    | N1–N7 | OUT OF SCOPE |
+
+  **Pytest:** 8/8 new tests pass; broader run shows 614/619 pass with
+  5 pre-existing failures in `test_ml/`, `test_decision/`, and 6 errors
+  in `test_india/test_angel_one_integration.py` (live broker creds).
+  None caused by A.0 work — those files were not touched this session.
+
 ---
 
 ## What this plan does NOT cover

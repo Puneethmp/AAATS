@@ -12,7 +12,6 @@ Aggregates metrics from:
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -21,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from foundation.logger import get_logger
-from monitoring.heartbeat_monitor import get_all_heartbeats, is_alive
+from monitoring.heartbeat_monitor import get_all_heartbeats
 from monitoring.stale_data_detector import check_all_markets
 
 _log = get_logger("production_readiness", "metrics_aggregator")
@@ -124,11 +123,21 @@ class MetricsAggregator:
                 pnls = [row[0] for row in sells]
                 win_rate = sum(1 for pnl in pnls if pnl > 0) / len(pnls)
                 total_pnl = sum(pnls)
-                max_drawdown = self._compute_max_drawdown(pnls)
+                
+                # Calculate max drawdown
+                cumulative_pnl = 0.0
+                peak = 0.0
+                max_drawdown = 0.0
+                
+                for pnl in pnls:
+                    cumulative_pnl += pnl
+                    peak = max(peak, cumulative_pnl)
+                    drawdown = (cumulative_pnl - peak) / max(peak, 1.0)
+                    max_drawdown = min(max_drawdown, drawdown)
             else:
                 win_rate = 0.0
                 total_pnl = 0.0
-                max_drawdown = self._compute_max_drawdown([])
+                max_drawdown = 0.0
             
             # Days trading
             first_trade = conn.execute(
@@ -154,45 +163,7 @@ class MetricsAggregator:
         except Exception as e:
             _log.error(f"Failed to collect paper trading metrics: {e}")
             return PaperTradingMetrics()
-
-    def _compute_max_drawdown(self, pnls: list[float]) -> float:
-        """
-        Drawdown as a ratio in [-1.0, 0.0].
-
-        Prefers the canonical equity peak/last_equity recorded by
-        risk/engine.py in data/state/risk_engine_state.json. Falls back to a
-        clamped pnl-curve calc only when that state file does not exist —
-        the legacy max(peak, 1.0) denominator produced -700%+ garbage when
-        the cum-pnl peak was tiny relative to the trough.
-        """
-        state_path = self.data_dir / "state" / "risk_engine_state.json"
-        if state_path.exists():
-            try:
-                st = json.loads(state_path.read_text(encoding="utf-8"))
-                peak_eq = float(st.get("peak", 0.0))
-                last_eq = float(st.get("last_equity", peak_eq))
-                if peak_eq > 0:
-                    dd = (last_eq - peak_eq) / peak_eq
-                    return max(min(dd, 0.0), -1.0)
-            except (OSError, ValueError, KeyError) as e:
-                _log.warning(f"risk_engine_state.json unreadable, falling back: {e}")
-
-        if not pnls:
-            return 0.0
-
-        cumulative_pnl = 0.0
-        peak_cum = 0.0
-        max_dd = 0.0
-        for pnl in pnls:
-            cumulative_pnl += pnl
-            peak_cum = max(peak_cum, cumulative_pnl)
-            # Floor denominator at $100 starting capital so a tiny pnl-curve
-            # peak cannot produce multi-hundred-percent garbage.
-            denom = max(peak_cum, abs(cumulative_pnl), 100.0)
-            dd = (cumulative_pnl - peak_cum) / denom
-            max_dd = min(max_dd, dd)
-        return max(max_dd, -1.0)
-
+    
     def _collect_execution_metrics(self) -> ExecutionMetrics:
         """Collect execution quality metrics."""
         paper_db = self.data_dir / "paper_trades.db"
@@ -235,19 +206,10 @@ class MetricsAggregator:
     def _collect_infrastructure_metrics(self) -> InfrastructureMetrics:
         """Collect infrastructure health metrics."""
         try:
-            # Per-market freshness, not binary "any heartbeat exists". A stale
-            # heartbeat must NOT vote 100%, and a missing one must not
-            # collapse the whole reading to 0%.
+            # Get heartbeat reliability
             heartbeats = get_all_heartbeats()
-            if heartbeats:
-                fresh = sum(
-                    1 for mkt in heartbeats
-                    if is_alive(mkt, max_age_seconds=120)
-                )
-                heartbeat_reliability = fresh / len(heartbeats)
-            else:
-                heartbeat_reliability = 0.0
-
+            heartbeat_reliability = 1.0 if heartbeats else 0.0
+            
             # Get dashboard sync health
             staleness_reports = check_all_markets()
             if staleness_reports:
@@ -258,7 +220,9 @@ class MetricsAggregator:
                 dashboard_sync_health = healthy_markets / len(staleness_reports)
             else:
                 dashboard_sync_health = 0.0
-
+            
+            # Calculate uptime (based on heartbeat history)
+            # For now, use heartbeat reliability as proxy
             uptime_percentage = heartbeat_reliability * 100.0
             
             return InfrastructureMetrics(
