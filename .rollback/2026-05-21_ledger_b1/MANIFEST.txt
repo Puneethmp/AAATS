@@ -1,0 +1,53 @@
+ROLLBACK BASELINE — 2026-05-21 unified positions ledger commit B1
+================================================================================
+
+Scope:
+  Workstream B1 from NEXT_PROMPT.md 2026-05-21 / Q1-Q4=A path.
+  Add the `positions` table schema + foundation/positions.py API + unit tests
+  WITHOUT touching any trading/*.py and WITHOUT introducing USE_UNIFIED_LEDGER
+  references yet. This commit is import-safe: the module creates the table
+  on first connection via `CREATE TABLE IF NOT EXISTS`, but no production code
+  imports it yet.
+
+Files added by B1:
+  + foundation/positions.py
+  + tests/foundation/__init__.py
+  + tests/foundation/test_positions.py
+  + .rollback/2026-05-21_ledger_b1/* (this manifest + paper_trades.db.pre)
+
+Files modified by B1:
+  (none)
+
+Pre-deploy state (workstation):
+  Branch HEAD SHA:                256f801  (docs(decisions): live-flip GO + ledger Q1-Q4 sign-off + runbook)
+  data/paper_trades.db tables:    paper_trades  (workstation mirror = v6 engine's DB)
+  data/paper_trades.db rows:      9 in paper_trades
+  positions table:                does not exist yet
+
+Expected post-deploy delta:
+  data/paper_trades.db gains a `positions` table (zero rows) only when a
+  caller invokes foundation.positions.<api>() at default db_path. Tests use
+  tmp_path so production data/paper_trades.db is not modified by `pytest`.
+
+Pydantic boundary (Q3=A):
+  All public API kwargs are validated by foundation.positions._PositionInput
+  (pydantic v2, extra="forbid"). metadata stored as opaque JSON TEXT.
+
+Composite key (spec section "Proposed schema"):
+  PRIMARY KEY (strategy, symbol) — two strategies may hold same symbol
+  concurrently.
+
+Rollback procedure:
+  Since no production code imports foundation.positions yet, rollback is:
+    1. git revert HEAD on the workstation
+    2. (Optional) DROP TABLE positions on the box DB if the migration
+       (workstream B2) is later applied and needs to be undone:
+         docker exec aaats-paper-crypto python -c "import sqlite3; \
+         c=sqlite3.connect('/app/data/paper_trades.db'); \
+         c.execute('DROP TABLE IF EXISTS positions'); c.commit()"
+  paper_trades table itself is untouched by this commit.
+
+Hard constraints honored:
+  - DO NOT touch trading/*.py — none modified.
+  - DO NOT add USE_UNIFIED_LEDGER references — none added.
+  - USE_UNIFIED_LEDGER stays OFF in production after this commit.
