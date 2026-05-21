@@ -1,3 +1,18 @@
+# 2026-05-22 NO-GO — live-flip mechanism not functional
+
+**Decision reversed 2026-05-21 evening (operator).** This document was authored
+as a PROVISIONAL GO. Pre-flight investigation discovered the live-flip
+mechanism is non-functional (see
+docs/known_issues/2026-05-21_live_flip_mechanism_gaps.md). The $25 first
+tranche on 2026-05-22 is CANCELLED. The rebuild sprint is the prerequisite.
+
+Original GO content preserved below for sprint-planning reference. The
+"three pre-flight verifications", "auto-revert criteria", and "execution
+amendment" sections all become void once the live mechanism is rebuilt and
+require redrafting from the new architecture.
+
+---
+
 # Live-Capital Readiness Decision — 2026-05-22 doctrine floor
 
 **Date authored:** 2026-05-21 (T-1 to doctrine minimum live date)
@@ -181,3 +196,18 @@ If all green: escalate to $50 tranche. If any red: revert to paper, document the
 - **"Defer 7 days, finish ledger first"** → I'll write the extend-paper memo and re-target 2026-05-29
 - **"Go full $100 tomorrow"** → I'll push back hard once with the reasoning above, then defer to your call
 - **"Other"** → Tell me what concerns I haven't addressed
+
+---
+
+## Tranche 1 outcome (2026-05-21)
+
+NOT EXECUTED. NO-GO declared after pre-flight investigation revealed:
+- risk state inherits paper drawdown (-13.1%) across mode boundary
+- PAPER_MODE env is not read by any consumer
+- SYSTEM__TRADING_MODE is compose-hardcoded and validate-gated to paper
+- no live trade loop exists
+
+Workstreams A (docs), B1/B2/B3 (unified ledger), C (live-flip scripts) shipped
+on 2026-05-21 and remain valid as foundation work. The flip scripts in
+scripts/ are kept for reference but will be rewritten in the rebuild sprint
+once the live trade loop exists for them to flip into.
