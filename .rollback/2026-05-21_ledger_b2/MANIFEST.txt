@@ -1,0 +1,56 @@
+ROLLBACK BASELINE — 2026-05-21 unified positions ledger commit B2
+================================================================================
+
+Scope:
+  Workstream B2 from NEXT_PROMPT.md 2026-05-21 / Q1-Q4=A path.
+  Add migration + flag-flip safety scripts and the initial
+  data/ledger_flag_history.json sentinel. No trading/*.py changes.
+  No production state files touched (the migration script renames
+  *_state.json -> *_state.json.migrated_2026-05-21 only when invoked
+  explicitly; B2 ships the code, does not execute the migration).
+
+Files added by B2:
+  + scripts/migrate_positions_to_db.py
+  + scripts/drain_positions.py
+  + scripts/deploy_ledger_flag.py
+  + data/ledger_flag_history.json   {"events": [], "current_value": false}
+  + tests/scripts/__init__.py
+  + tests/scripts/test_migrate_positions_to_db.py
+  + tests/scripts/test_drain_positions.py
+  + .rollback/2026-05-21_ledger_b2/*  (this manifest + paper_trades.db.pre)
+
+Files modified by B2:
+  (none)
+
+Pre-deploy state (workstation):
+  Branch HEAD SHA:                4ee97f3  (feat(foundation): unified positions ledger schema + API (Q1-Q4 commit 1/3))
+  Open positions in state files:  (Source A)
+    data/altcoin_reversion_state.json:  absent
+    data/bollinger_range_state.json:    {"BTC/USDT": 1 row}
+    data/stat_arb_state.json:           {}
+    data/momentum_state.json:           absent
+    data/funding_arb_state.json:        absent (C5b halted at source)
+  Open positions in positions table: 0 (table empty post-B1)
+
+Hard constraints honored:
+  - DO NOT touch trading/*.py — none modified.
+  - DO NOT add USE_UNIFIED_LEDGER references in trading code — none added.
+    (Flag references appear only in scripts/deploy_ledger_flag.py, which is
+    operator-invoked off the trade path.)
+  - USE_UNIFIED_LEDGER stays OFF in production.
+  - C5b funding_arb stays halted at source.
+
+Rollback procedure:
+  Since B2 only ADDS scripts and a sentinel JSON, rollback is:
+    git revert HEAD on the workstation
+  No state file renames or DB writes happen at commit time.
+
+  If the operator later RUNS scripts/migrate_positions_to_db.py and wants
+  to undo it:
+    1. Restore *_state.json from the *_state.json.migrated_2026-05-21 file
+       (the migration only renames, never deletes).
+    2. DROP and re-CREATE the positions table (it has no FK dependencies).
+
+deploy_ledger_flag.py refuses to flip the flag unless drain_positions.py
+exited 0 in the last 10 minutes — this Q4=A precondition makes the
+dual-write window structurally impossible.
