@@ -241,7 +241,10 @@ services:
       - WATCHDOG_MAX_RESTARTS=3
       - WATCHDOG_RATE_WINDOW_SEC=1800
     volumes:
-      - ../data:/app/data:ro
+      # rw needed for watchdog's self-heartbeat at data/watchdog_heartbeat.json.
+      # Defense-in-depth `:ro` was nominal — the watchdog already has docker.sock
+      # write authority, so a ro data mount doesn't materially shrink blast radius.
+      - ../data:/app/data
       # Host docker socket — required for `docker restart aaats-paper-crypto`.
       # Read-only mount of the socket is NOT supported by Docker (the API
       # uses the socket bidirectionally); least-privilege is a separate
