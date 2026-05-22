@@ -25,7 +25,6 @@ from typing import Any
 import pandas as pd
 
 from foundation.logger import get_logger
-from monitoring.heartbeat_monitor import emit_heartbeat
 from monitoring.realtime_state_manager import MarketState, PositionSnapshot, publish_state
 from risk.engine import RiskDecision, RiskEngine
 
@@ -279,27 +278,6 @@ def get_paper_summary(db_path: str) -> dict[str, Any]:
         "win_rate": float(win_rate),
         "markets": df["market"].value_counts().to_dict(),
     }
-
-
-def emit_cycle_heartbeat(
-    market: str,
-    cycle_count: int,
-    status: str = "RUNNING",
-    error: str = "",
-) -> None:
-    """
-    Emit a heartbeat for the current trading cycle.
-    
-    Should be called at the start/end of each trading cycle to signal
-    that the backend is alive and processing.
-    
-    Args:
-        market: Market identifier (us, india, crypto)
-        cycle_count: Current cycle number
-        status: Status string (RUNNING, IDLE, HALTED, ERROR, MARKET_CLOSED)
-        error: Error message if status is ERROR
-    """
-    emit_heartbeat(market, status, cycle_count, error, min_interval_seconds=15.0)
 
 
 def publish_cycle_state(

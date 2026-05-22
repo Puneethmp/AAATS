@@ -17,27 +17,37 @@ print("AAATS Monitoring Modules Test Suite")
 print("=" * 80)
 print()
 
-# Test 1: Heartbeat Monitor
+# Test 1: Heartbeat Monitor (FLAT schema; writer is the runner — we simulate it here)
 print("[1/5] Testing heartbeat_monitor...")
 try:
-    from monitoring.heartbeat_monitor import emit_heartbeat, get_heartbeat, get_all_heartbeats, is_alive
-    
-    # Emit test heartbeat
-    success = emit_heartbeat("crypto", "RUNNING", 1, "", min_interval_seconds=0.0)
-    print(f"  - Emit heartbeat: {'PASS' if success else 'FAIL'}")
-    
+    import json
+    from pathlib import Path
+    from monitoring.heartbeat_monitor import (
+        get_heartbeat, get_all_heartbeats, is_alive
+    )
+
+    # Simulate the runner's flat write (trading/live_paper_runner.py:1899-1904).
+    Path("data").mkdir(parents=True, exist_ok=True)
+    Path("data/heartbeat.json").write_text(json.dumps({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "cycle": 1,
+        "market": "crypto",
+        "cycle_duration_seconds": 12.0,
+    }))
+    print("  - Write heartbeat (flat schema): PASS")
+
     # Read heartbeat back
     hb = get_heartbeat("crypto")
     print(f"  - Read heartbeat: {'PASS' if hb and hb.market == 'crypto' else 'FAIL'}")
-    
+
     # Check if alive
     alive = is_alive("crypto", max_age_seconds=10.0)
     print(f"  - Is alive check: {'PASS' if alive else 'FAIL'}")
-    
+
     # Get all heartbeats
     all_hb = get_all_heartbeats()
     print(f"  - Get all heartbeats: {'PASS' if 'crypto' in all_hb else 'FAIL'}")
-    
+
     print("  STATUS: PASS")
 except Exception as e:
     print(f"  STATUS: FAIL - {e}")

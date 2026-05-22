@@ -65,15 +65,13 @@ def _seed_risk_state(state_dir: Path, peak: float, last_equity: float) -> None:
 
 
 def _seed_heartbeat(data_dir: Path, age_seconds: float, market: str = "crypto") -> None:
+    """Write the FLAT heartbeat schema (matches the runner's actual writer)."""
     ts = datetime.now(timezone.utc) - timedelta(seconds=age_seconds)
     payload = {
-        market: {
-            "timestamp": ts.isoformat(),
-            "market": market,
-            "status": "RUNNING",
-            "cycle_count": 71,
-            "error": "",
-        }
+        "timestamp": ts.isoformat(),
+        "cycle": 71,
+        "market": market,
+        "cycle_duration_seconds": 12.0,
     }
     (data_dir / "heartbeat.json").write_text(json.dumps(payload), encoding="utf-8")
 
