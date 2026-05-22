@@ -362,3 +362,72 @@ The `Action needed` field is the operator's single decision-trigger. If it's `NO
    - **BTC/ETH ledger drift root cause** — owned by the unified-ledger
      sprint, but the band-aid (`halt_on_critical=False`) is reversible
      in one line once the writer-side fix lands.
+
+- **2026-05-22 (session 4)** — D.2 box deploy + D.4 design memo. D-track
+  status: D.0/D.1/D.2/D.3 all CODE+TESTS+BOX complete; D.4 designed,
+  implementation queued; D.5 soak gate is now unblocked on the
+  reliability side (the daily digest + watchdog visibility are the
+  pre-requisites; D.5 starts the day digest fires cleanly).
+
+  **D.2 watchdog — SHIPPED TO BOX.** Operator approved `/var/run/docker.sock`
+  mount at session start. Deploy via `scripts/deploy_session4_d2_watchdog.py`.
+  Image `sha256:4a27584eb76f...` running; smokes A-F all green
+  (see [`2026-05-22_live_flip_rebuild_plan.md`](2026-05-22_live_flip_rebuild_plan.md)
+  §"Status log" 2026-05-22 (session 4) [0] for the full smoke table).
+
+  Two bug fixes shipped during deploy:
+    - `Dockerfile.watchdog`: Debian 13's `docker.io` package excludes
+      the CLI (in a separate `docker-cli` package). Switched to
+      `docker-cli` (libc6 dep only, ~30 MB). Commit `89d601e`.
+    - `docker-compose.yml`: data mount `:ro` → rw so the watchdog can
+      write its own `data/watchdog_heartbeat.json`. The `:ro` was
+      defense-in-depth nominal — the watchdog already has docker.sock
+      write authority. Commit `b947573`.
+
+  Deviated from prompt's `WATCHDOG_CYCLE_INTERVAL_SEC=10` smoke recipe
+  — would runaway-restart paper-crypto whose actual cycle is 15 min.
+  Safer protocol used: synthetic stale heartbeat in `/tmp` with
+  monkey-patched restart/alert (smoke D) + one true socket-driven
+  restart of paper-crypto via `docker exec watchdog docker restart`
+  (smoke E). Real-box 4-restart escalation loop is unit-tested only;
+  deferred to a maintenance-window follow-up.
+
+  **D.4 daily digest design memo — SHIPPED.** Memo at
+  [`2026-05-23_daily_digest_design.md`](2026-05-23_daily_digest_design.md).
+  Format LOCKED per Appendix A above. Data sources mapped per field
+  (paper_trades.db for P&L, state files for equity/exceptions/halts,
+  docker inspect RestartCount for container restarts, NEW `cycle_log`
+  table for canonical cycle attribution). **Dispatch decision:** inline
+  in the aaats-watchdog poll loop — cleaner than cron / Task Scheduler /
+  separate container; watchdog already paid the Telegram + data/ rw
+  cost. Dry-run plan + Telegram destination (existing alerts chat) +
+  Action-needed trigger matrix documented. Implementation is ~1 Sonnet
+  session.
+
+  **Cross-cutting findings:**
+    - Smoke E (`docker restart` via socket) showed RestartCount did
+      NOT increment. Docker's RestartCount only counts restart-policy
+      triggered restarts (e.g., container exited unexpectedly), not
+      explicit `docker restart`. The D.4 daily digest's
+      "auto: A, manual: M" attribution will need to derive auto-count
+      from `data/watchdog_heartbeat.json::restart_count_in_window`
+      rather than `docker inspect RestartCount`. Folded into the D.4
+      design memo.
+    - The "Docker `healthy` is a load-bearing lie" cross-cutting
+      finding from session 1 D.0 was reinforced: the watchdog's
+      `_emit_self_heartbeat` silently swallows file-write errors,
+      meaning a misconfigured mount produced a "running" container
+      with zero self-observability for ~75s during smoke F. The
+      session-4 deploy script now CHECKS for the self-heartbeat write
+      as a hard exit code — but the underlying pattern (silent OSError
+      swallow) is repeated across the codebase. Propose D.6: lint
+      rule that flags `except OSError: pass` and `except Exception:
+      pass` patterns in writer paths.
+
+  **Next D-track steps:**
+   - **D.4 implementation** — module + golden-output test + watchdog
+     loop wiring + `cycle_log` table. ~1 Sonnet session.
+   - **D.5 soak begin** — first day the digest fires cleanly with
+     `Action needed: NONE`.
+   - **D.6 (proposed)** — silent-except lint rule + the row-7/17/22
+     items from session-1 D.0 catalog. Operator-optional bundle.

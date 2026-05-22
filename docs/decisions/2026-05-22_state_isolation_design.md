@@ -140,3 +140,59 @@ Trade-off **not** chosen:
   pass criterion. Operator review of the compose change (per-mode named
   volumes + ENV interpolation) is the only hard gate before session-4
   implementation can land.
+
+- **2026-05-22 (session 4)** — Workstation-complete. Code, tests, compose,
+  and migration script shipped to repo; box deploy is the remaining
+  operator-gated step.
+
+  **Code (`risk/engine.py`):** `STATE_FILE = Path(os.environ.get(...))`
+  replaced by `_state_file_path()` + `STATE_FILE = _state_file_path()`.
+  Discriminator precedence per memo: AAATS_RISK_STATE_FILE > mode+DIR >
+  legacy. Unknown-mode values fall back to the legacy filename
+  (defense against typos like `Paper` or `LIVE-shadow`).
+
+  **Tests (`tests/test_state_isolation.py`):** 6 cases. 5/5 in the
+  memo's test plan + the additional unknown-mode fallback case. All
+  green:
+  ```
+  tests/test_state_isolation.py::TestStateFilePathDiscriminator::
+    test_paper_mode_writes_paper_state              PASSED
+    test_live_mode_writes_live_state                PASSED
+    test_paper_peak_survives_live_session           PASSED  (load-bearing)
+    test_legacy_default_when_no_mode_env            PASSED
+    test_explicit_override_wins                     PASSED
+    test_unknown_mode_falls_back_to_legacy          PASSED
+  ```
+  Regression on `tests/test_risk_engine_persistence.py` + `tests/test_risk/`
+  also green (41/41) — the existing `monkeypatch.setattr(..., "STATE_FILE", ...)`
+  pattern remains valid because `STATE_FILE` is still a module attribute.
+
+  **Compose (`deployment/docker-compose.yml`):** aaats-paper-crypto's
+  `state-crypto:/app/data/state` mount replaced with two per-mode mounts:
+  `state-crypto-paper:/app/data/state-paper` +
+  `state-crypto-live:/app/data/state-live`. New env var
+  `AAATS_RISK_STATE_DIR=/app/data/state-${SYSTEM__TRADING_MODE:-paper}`
+  interpolates the active mode. The legacy `state-crypto:` volume is
+  KEPT in the top-level `volumes:` block (no longer mounted) for
+  rollback. **OPERATOR REVIEW GATE** before box deploy.
+
+  **Migration (`scripts/migrate_state_to_per_mode.sh`):** one-time bash
+  script that (a) lists source contents, (b) `cp -a` state-crypto into
+  state-crypto-paper, (c) renames `risk_engine_state.json` to
+  `risk_engine_state.paper.json` so the per-mode discriminator finds it,
+  (d) lists destination contents. Idempotent; source volume untouched
+  for 7+ days as rollback baseline.
+
+  **Box deploy sequence (NOT THIS SESSION):**
+  1. Operator approves compose diff.
+  2. SCP `deployment/docker-compose.yml` + `risk/engine.py` to box
+     (`risk/engine.py` is image-baked so it goes in the rebuild path,
+     not bind-mount).
+  3. `docker stop aaats-paper-crypto`.
+  4. `bash scripts/migrate_state_to_per_mode.sh` on box.
+  5. `docker compose up -d --build --no-deps aaats-paper-crypto`.
+  6. Verify logs: "Risk engine peak loaded from
+     /app/data/state-paper/risk_engine_state.paper.json: $131.32"
+     (paper peak preserved).
+
+  Operator decision still queued.

@@ -814,6 +814,125 @@ this.
 
   Rollback baselines at `.rollback/2026-05-22_session3_d1_d3_heartbeat_box/MANIFEST.txt`.
 
+- **2026-05-22 (session 4)** — Five-track ship: [0] D.2 box deploy +
+  [1] A.1 IMPLEMENTATION (workstation) + [2] B.2 memo + [3] D.4 memo +
+  [4] BTC/ETH ledger drift memo.
+
+  **[0] D.2 watchdog box deploy — SHIPPED + smokes A-F green.**
+  Operator approved `/var/run/docker.sock` mount at session start.
+  `scripts/deploy_session4_d2_watchdog.py` atomic-swapped 4 files
+  (`health/__init__.py`, `health/watchdog.py`,
+  `deployment/Dockerfile.watchdog`, `deployment/docker-compose.yml`).
+  Image `sha256:4a27584eb76f...` running.
+
+  Smokes A-F deviated from the prompt's
+  `WATCHDOG_CYCLE_INTERVAL_SEC=10` recipe (would have runaway-restarted
+  paper-crypto whose actual cycle is 15 min). Safer protocol:
+  (A) State.Status==running, (B) `_read_heartbeat_ts(/app/data/
+  heartbeat.json)` returns float, (C) `docker ps` works via socket
+  from inside the watchdog, (D) synthetic stale heartbeat + monkey-patched
+  restart/alert → tick() returns `restart`, (E) `docker exec watchdog
+  docker restart aaats-paper-crypto` returns paper-crypto to running
+  within 20s, (F) 75s later `data/watchdog_heartbeat.json` shows
+  `"last_decision": "ok"`. All green. 4-restart escalation path is
+  unit-tested only (real-box loop deferred — needs ~45-min maintenance
+  window).
+
+  **Two bug fixes shipped to make D.2 actually work:**
+    - `Dockerfile.watchdog`: Debian 13's `docker.io` package only
+      ships the daemon (dockerd, docker-proxy); the CLI lives in a
+      separate `docker-cli` package excluded by `--no-install-recommends`.
+      Surfaced by smoke C (`exec: "docker": executable file not found
+      in $PATH`). Fix: install `docker-cli` (libc6 dep only, ~30 MB).
+      Commit `89d601e`.
+    - `docker-compose.yml` data mount `:ro` → rw: the watchdog's
+      `_emit_self_heartbeat` silently swallowed OSError on the read-only
+      mount, so `data/watchdog_heartbeat.json` was never written.
+      Defense-in-depth `:ro` was nominal (watchdog already has
+      docker.sock write authority). aaats-paper-crypto's data mount is
+      already rw. Commit `b947573`.
+
+  Rollback baseline at
+  `.rollback/2026-05-23_session4_d2_watchdog_box/MANIFEST.txt`.
+
+  **[1] A.1 state-isolation — WORKSTATION-COMPLETE, operator-gated for
+  box deploy.**
+    - `risk/engine.py:44-66`: `_state_file_path()` helper with the
+      memo's discriminator precedence (AAATS_RISK_STATE_FILE >
+      mode+DIR > legacy). Module-level `STATE_FILE` preserved as a
+      one-shot call at import time so existing
+      `monkeypatch.setattr(..., "STATE_FILE", ...)` tests still work.
+    - `tests/test_state_isolation.py`: 6/6 green (5 memo-listed +
+      1 unknown-mode-fallback). The load-bearing
+      test_paper_peak_survives_live_session validates that a write to
+      live-mode does NOT clobber the paper-mode peak.
+    - `deployment/docker-compose.yml`: per-mode named volumes
+      (`state-crypto-paper`, `state-crypto-live`) +
+      `AAATS_RISK_STATE_DIR=/app/data/state-${SYSTEM__TRADING_MODE:-paper}`.
+      Legacy `state-crypto` volume RETAINED in the top-level `volumes:`
+      block (no longer mounted) as rollback baseline.
+    - `scripts/migrate_state_to_per_mode.sh`: idempotent one-time
+      `cp -a` from `state-crypto` into `state-crypto-paper` plus
+      filename rename `risk_engine_state.json` →
+      `risk_engine_state.paper.json` so the per-mode discriminator
+      finds the preserved peak.
+    - Pytest **108/108 + 1 skipped** on touched + adjacent suites.
+    - **Operator gate:** compose change requires sign-off per the
+      autonomy contract (named-volume layout = "shared infrastructure"
+      scope). Box deploy sequence documented in
+      [`2026-05-22_state_isolation_design.md`](2026-05-22_state_isolation_design.md)
+      §"Status log".
+
+  **[2] B.2 paper-shadow validation memo — PROTOCOL LOCKED, re-eval
+  2026-05-29.** Memo at
+  [`docs/known_issues/2026-05-23_strategy_c3_post_b2.md`](../known_issues/2026-05-23_strategy_c3_post_b2.md).
+  Only ~3 hours of post-deploy data; zero post-patch C3 trades so far
+  (C3's pre-patch rate was ~5 trades/day; 3h is below noise floor).
+  Baseline frozen, pass/fail criteria defined. Backtest harness is the
+  fallback if 7-day shadow comes up underpowered.
+
+  **[3] D.4 daily digest memo — SHIPPED.** Memo at
+  [`docs/decisions/2026-05-23_daily_digest_design.md`](2026-05-23_daily_digest_design.md).
+  Format LOCKED per Appendix A of the Track D addendum. Data sources
+  mapped per field. **Dispatch decision:** inline in the aaats-watchdog
+  poll loop (60s polling already, +1 time-of-day branch at 09:00 IST).
+  Cleaner than cron-in-container or Windows Task Scheduler — watchdog
+  already has Telegram credentials + data/ rw + a self-heartbeat for
+  meta-observability. Implementation queue is ~1 Sonnet session.
+
+  **[4] BTC/ETH ledger drift triage — SHIPPED.** Memo at
+  [`docs/known_issues/2026-05-23_btc_eth_ledger_drift.md`](../known_issues/2026-05-23_btc_eth_ledger_drift.md).
+  Two converging bugs:
+    (a) Reconciler's Source-A loader expects flat
+        `entry_price/size_usd` per symbol (C3's schema); C1_stat_arb
+        writes pair-keyed `BTC/USDT_ETH/USDT → {shares_a/shares_b/
+        entry_price_a/b}`. C1 positions are silently skipped.
+    (b) Source-B SQL excludes `C5b_funding_arb` but NOT `C1_stat_arb`
+        — both are delta-neutral arb. C1's pair legs are summed into
+        Source B as if they were directional positions, exceeding the
+        $0.25 dust filter (BTC $6.94, ETH $7.54).
+  Three fix paths documented; **Option A** (one-line: add `C1_stat_arb`
+  to Source B's exclusion SQL) is the recommended next-reconciler-touching-session
+  patch. Real C1 drift detection requires Option C (unified ledger).
+  Band-aid (`halt_on_critical=False`) stays until Option A lands.
+
+  **Cross-cutting findings:**
+    - C1's FIRST entry of the rebuild landed at 2026-05-22T15:41:18Z —
+      the same day session 3 deployed `halt_on_critical=True`. The
+      restart loop was the predictable consequence of two changes
+      landing the same cycle. Going forward, any cross-strategy +
+      reconciler change should be sequenced at least one cycle apart.
+    - Deploy scripts that run on the Windows operator workstation MUST
+      be ASCII-only — cp1252 cannot encode `✓`, `→`, `×`, `—`. Session
+      4 burned two iterations on this.
+    - Operator's GitHub connectivity was intermittent during the
+      session; the end-of-session push is best-effort.
+
+  **Operator pings this session:**
+    - [0] docker.sock approval — ANSWERED (approved).
+    - [1] A.1 compose-change review — PENDING (queued for end-of-session
+      ask).
+
 ---
 
 ## B.1 triage table (decision merged 2026-05-22 session 2)
