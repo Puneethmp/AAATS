@@ -1,0 +1,17 @@
+ROLLBACK BASELINE - 2026-05-21 PF1 wrapper ship to box
+================================================================================
+
+Scope:
+  Ship scripts/evaluate_live_readiness.py to /home/aaats/aaats/scripts/
+  via paramiko atomic .tmp + mv -f. No rebuild (bind-mounted).
+
+Pre-deploy state:
+  Branch HEAD SHA:   271a577 (feat(scripts): evaluate_live_readiness wrapper)
+  Box file:          /home/aaats/aaats/scripts/evaluate_live_readiness.py
+                     (DID NOT EXIST -- ABSENT BASELINE)
+
+Rollback procedure:
+  ssh aaats@100.95.126.39 'rm /home/aaats/aaats/scripts/evaluate_live_readiness.py'
+
+This is additive only -- the file did not exist before; removing it
+returns the box to its pre-2026-05-21 state for this script.

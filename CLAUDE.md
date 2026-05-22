@@ -49,3 +49,34 @@ declares `networks: [default, aaats]` in `deployment/docker-compose.yml` and the
 top-level `networks:` block lists `aaats: external: true`. This survives container
 recreation. Do NOT run `docker network connect aaats aaats-metrics` manually —
 compose owns this attachment now.
+
+## Where to find what (doc layout)
+
+- **Invariants that never change across sessions** — this file (`CLAUDE.md`).
+- **"Why" behind each locked architecture choice** — `docs/decisions/*.md`. Before re-litigating any settled decision (broker choice, ledger spec, doctrine, sizing), grep this folder first. The latest decision wins; the earlier ones are kept for history with a SUPERSEDED tag.
+- **Rotating session scope (current sprint, exit criteria)** — `docs/sprints/*.md` and the active `docs/decisions/2026-05-21_next_session_prompt.md` (overwritten by each Claude Code session at end).
+- **Active autonomy contract** — `docs/decisions/2026-05-21_autonomy_contract.md`. Claude reads at session start; operator revokes/narrows by writing "autonomy contract revoked" in any Cowork chat.
+- **Known issues + bounded bugs** — `docs/known_issues/*.md`.
+- **Technical specs (schemas, runbooks)** — `docs/specs/*.md`, `docs/runbooks/*.md`.
+
+## Model tiering — match the task to the cheapest viable tier
+
+The AAATS rebuild is ~80% implementation work, which is Sonnet-grade. Defaulting to Opus on every session burns the monthly plan limit and rarely helps. Use this map:
+
+- **Opus** — broker abstraction design, risk-engine logic changes, ledger schema work, debugging non-obvious failures (memory leaks, race conditions, cross-container state corruption), Cowork architecture / strategy sessions where the question is "what should we do." Examples in AAATS: writing this doc; the 2026-05-21 NO-GO investigation; the unified-ledger Q1–Q4 design.
+- **Sonnet** — implementation of a decided design, pandas/SQLite transforms, broker adapter coding, test writing, paramiko SCP scripts, documentation, retry/backoff plumbing, schema-drift assertions. The vast majority of Track A/B/D execution lands here.
+- **Haiku** — log parsing, CSV cleanup, batch parameter-sweep result summarization (post-B.2), generating test fixtures, mechanical refactors. AAATS doesn't have much Haiku-grade work yet; will gain volume during B.2 sweeps.
+
+If a Sonnet session stalls on a genuinely non-obvious bug, escalate to Opus for that one session. Don't pre-emptively start every session on Opus "to be safe" — it's the most common way to run out of capacity mid-sprint.
+
+## Subagent usage
+
+The Agent tool (Task tool) lets a session dispatch read-only research, planning, or exploration in parallel without burning the main context. For AAATS this is highest leverage during:
+
+- B.0/B.0.5 strategy diagnostics (one Explore agent per strategy).
+- D.0-style catalog passes that read every `docs/known_issues/*.md`.
+- Cross-file consistency checks (Plan agent reviewing whether a schema change touches everything it should).
+
+**Known quirk (2026-05-21):** spawned Agents hit Write-tool permission denials on this workstation. Main-context Edit/Write work fine. **Pattern:** when delegating to subagents, instruct them to *return content in their reply*. The parent context writes the files. Do not have the subagent call Write/Edit/NotebookEdit directly — it will fail silently or noisily depending on tool.
+
+Parallelism rule: when independent agents are dispatched, send them in the SAME message (multiple Agent tool calls in one assistant turn). Serializing them defeats the purpose.
