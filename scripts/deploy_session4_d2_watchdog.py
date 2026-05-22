@@ -21,17 +21,17 @@ would runaway-restart paper-crypto whose real cycle is 15 min):
   B. Verify module resolves + can read /app/data/heartbeat.json.
   C. Verify docker.sock works: `docker ps -q` from inside the watchdog.
   D. Code-path smoke: synthetic stale heartbeat in /tmp + monkey-patched
-     restart/alert → verify tick() returns "restart".
-  E. True end-to-end socket→restart proof: pre-record paper-crypto
+     restart/alert -> verify tick() returns "restart".
+  E. True end-to-end socket->restart proof: pre-record paper-crypto
      RestartCount, then `docker exec aaats-watchdog docker restart
      aaats-paper-crypto`, verify RestartCount += 1 and paper-crypto is
      back to running (autostart by compose restart policy).
   F. Wait one watchdog poll interval (60s) and verify watchdog observed
-     the fresh post-restart heartbeat → last_decision == "ok".
+     the fresh post-restart heartbeat -> last_decision == "ok".
 
 The 4-restart escalation path is unit-tested
 (tests/test_watchdog.py::test_four_consecutive_stale_ticks_escalate_on_fourth)
-but a real-box 4×stale smoke requires a 45-min+ maintenance window and
+but a real-box 4xstale smoke requires a 45-min+ maintenance window and
 is deferred to a follow-up session.
 
 Captures pre/post image SHAs into
@@ -191,7 +191,7 @@ def main() -> int:
         "alerts SHA",
     )
     if "MISSING" in alerts_sha:
-        print("       FATAL: observability/alerts.py missing on box — watchdog needs it for Telegram.")
+        print("       FATAL: observability/alerts.py missing on box -- watchdog needs it for Telegram.")
         client.close()
         return 3
 
@@ -269,7 +269,7 @@ def main() -> int:
         client.close()
         return 7
 
-    # D. Code-path smoke: synthetic stale heartbeat → tick() == "restart".
+    # D. Code-path smoke: synthetic stale heartbeat -> tick() == "restart".
     d_py = (
         "from pathlib import Path; "
         "import json, time; "
@@ -289,7 +289,7 @@ def main() -> int:
     rc, d_out = _run(
         client,
         f"docker exec aaats-watchdog python -c \"{d_py}\" 2>&1",
-        "smoke D: synthetic stale → restart",
+        "smoke D: synthetic stale -> restart",
     )
     if rc != 0 or "verb= restart" not in d_out:
         print("       FAIL smoke D")
@@ -325,7 +325,7 @@ def main() -> int:
     if int(post_e_restart.strip() or 0) <= int(pre_paper_restart.strip() or 0):
         print(
             "       WARN smoke E: RestartCount did not increment "
-            f"({pre_paper_restart} → {post_e_restart}). "
+            f"({pre_paper_restart} -> {post_e_restart}). "
             "May indicate `docker restart` was a fast-recreate that didn't bump the counter; "
             "treat as advisory not blocker."
         )
@@ -372,7 +372,7 @@ def main() -> int:
         lines.append(f"  {rel:50s} : {post_shas.get(rel, '?')}")
     lines.append("")
     lines.append("Smoke results (steps A-F all passed if exit code 0):")
-    lines.append(f"  D. synthetic stale heartbeat → verb=restart : {d_out!r}")
+    lines.append(f"  D. synthetic stale heartbeat -> verb=restart : {d_out!r}")
     lines.append(f"  F. watchdog self-heartbeat after socket restart:")
     for line in f_out.splitlines()[:20]:
         lines.append(f"     {line}")

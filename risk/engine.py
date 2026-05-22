@@ -41,9 +41,32 @@ PER_TRADE_MAX_LOSS = -0.02        # -2% per trade from entry
 
 # Persisted drawdown-peak state. Restarts must NOT lose the high-water mark,
 # otherwise a halt-triggering drawdown silently resets to 0% on every reboot.
-STATE_FILE = Path(
-    os.environ.get("AAATS_RISK_STATE_FILE", "/app/data/state/risk_engine_state.json")
-)
+#
+# Per-mode isolation (A.1, 2026-05-23): the state file path is chosen by the
+# discriminator below so paper-mode and live-mode peaks/drawdowns do NOT
+# inherit across a mode flip. See docs/decisions/2026-05-22_state_isolation_design.md.
+def _state_file_path() -> Path:
+    """Return the per-mode risk-engine state file path.
+
+    Discriminator precedence (highest first):
+      1. ``AAATS_RISK_STATE_FILE`` -- fully-qualified path override (wins).
+      2. ``SYSTEM__TRADING_MODE`` + ``AAATS_RISK_STATE_DIR`` -- composed
+         per-mode path (``risk_engine_state.<mode>.json``).
+      3. Legacy default ``/app/data/state/risk_engine_state.json`` -- no
+         mode suffix, preserved for callers (tests, local scripts) that
+         do not set ``SYSTEM__TRADING_MODE``.
+    """
+    explicit = os.environ.get("AAATS_RISK_STATE_FILE")
+    if explicit:
+        return Path(explicit)
+    mode = os.environ.get("SYSTEM__TRADING_MODE")
+    state_dir = Path(os.environ.get("AAATS_RISK_STATE_DIR", "/app/data/state"))
+    if mode in ("paper", "live"):
+        return state_dir / f"risk_engine_state.{mode}.json"
+    return state_dir / "risk_engine_state.json"
+
+
+STATE_FILE = _state_file_path()
 
 Action = Literal["ALLOW", "REDUCE", "HALT_MARKET", "HALT_ALL", "CLOSE_POSITION"]
 

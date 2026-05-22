@@ -1,0 +1,35 @@
+ROLLBACK BASELINE - 2026-05-23 Session 4 D.2 watchdog deploy
+================================================================================
+
+DEPLOYED_AT_UTC          = 2026-05-22T17:53:38Z
+PRE_WATCHDOG_STATUS      = running
+POST_WATCHDOG_IMAGE_SHA  = sha256:4a27584eb76f901214ee326e8aa8223ba5929582d75654c1a79e9601ae775011
+POST_WATCHDOG_STATUS     = running
+PRE_PAPER_IMAGE_SHA      = sha256:8bf3cfcc61e6aa80391c4e29750b59707e3be869fd150283bef9984d23955b04
+PRE_PAPER_RESTART_COUNT  = 0
+POST_PAPER_RESTART_COUNT = 0
+POST_PAPER_STATUS        = running
+OBSERVABILITY_ALERTS_SHA = 1f6bab77a415b343f62a6d15135200ef628158327b64069d105a6f819b05f428
+
+Pre-deploy file SHAs (box, captured immediately before swap):
+  health/__init__.py                                 : a38a0c6041d2455db6ff1b3c8797d77029cf49d14d2375558581f48ccc9f2cf9
+  health/watchdog.py                                 : 6dd020a626366851be8da03b14c08742121021bdc6169a188ebd3b5442a336f5
+  deployment/Dockerfile.watchdog                     : 7c3a3fc0eaa804c2f4232a243c652921ee3b5dec872268dda6d9178e3fb51df1
+  deployment/docker-compose.yml                      : e16b6c9acf57ca98e4754bd86e360cf7835d259435f021bb8f7275a23a4606b2
+  observability/alerts.py                            : 1f6bab77a415b343f62a6d15135200ef628158327b64069d105a6f819b05f428
+
+Post-deploy file SHAs (box, after rebuild):
+  health/__init__.py                                 : a38a0c6041d2455db6ff1b3c8797d77029cf49d14d2375558581f48ccc9f2cf9
+  health/watchdog.py                                 : 6dd020a626366851be8da03b14c08742121021bdc6169a188ebd3b5442a336f5
+  deployment/Dockerfile.watchdog                     : 7c3a3fc0eaa804c2f4232a243c652921ee3b5dec872268dda6d9178e3fb51df1
+  deployment/docker-compose.yml                      : dbcc34c19c8de5ee2a70722289d9138ae947955ef620d04e2ea38b0acd12f8ad
+
+Smoke results (steps A-F all passed if exit code 0):
+  D. synthetic stale heartbeat -> verb=restart : 'watchdog tick: restart (heartbeat age=7200s)\nverb= restart'
+  F. watchdog self-heartbeat after socket restart:
+     {
+       "timestamp": "2026-05-22T17:52:39.572025+00:00",
+       "last_decision": "ok",
+       "restart_count_in_window": 0,
+       "target": "aaats-paper-crypto"
+     }

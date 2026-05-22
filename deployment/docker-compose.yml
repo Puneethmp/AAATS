@@ -78,6 +78,12 @@ services:
       - SYSTEM__TRADING_MODE=paper
       - MARKET=crypto
       - PYTHONPATH=/app
+      # A.1 (2026-05-23): per-mode risk-engine state directory. Compose-level
+      # ${SYSTEM__TRADING_MODE} interpolation routes paper-mode writes to
+      # /app/data/state-paper and live-mode writes to /app/data/state-live,
+      # so a paper-to-live mode flip cannot inherit the other mode's
+      # peak/drawdown high-water marks. risk/engine.py reads this var.
+      - AAATS_RISK_STATE_DIR=/app/data/state-${SYSTEM__TRADING_MODE:-paper}
     volumes:
       - ../logs:/app/logs
       - ../data:/app/data
@@ -85,7 +91,13 @@ services:
       # patches) take effect on container restart without rebuilding the image.
       # Trades a tiny amount of immutability for a huge iteration-speed win.
       - ../scripts:/app/scripts
-      - state-crypto:/app/data/state
+      # A.1 (2026-05-23): per-mode risk-engine state volumes. The legacy
+      # `state-crypto:/app/data/state` mount has been retired; that volume
+      # is preserved at the docker level for rollback (`docker volume ls`)
+      # but no longer mounted -- the per-mode engine writes here instead.
+      # See scripts/migrate_state_to_per_mode.sh for the one-time cutover.
+      - state-crypto-paper:/app/data/state-paper
+      - state-crypto-live:/app/data/state-live
     # 2026-05-13: entrypoint runs DB migration before main loop. init_db
     # is idempotent (CREATE TABLE IF NOT EXISTS) so safe on every start.
     # Exec-form list to avoid YAML folded-scalar newline quirk.
@@ -281,7 +293,12 @@ services:
 volumes:
   state-us:
   state-india:
+  # state-crypto (legacy, pre-A.1) -- retained for rollback. No longer
+  # mounted by aaats-paper-crypto. Contents migrated to state-crypto-paper
+  # via scripts/migrate_state_to_per_mode.sh on 2026-05-23 cutover.
   state-crypto:
+  state-crypto-paper:
+  state-crypto-live:
   prometheus-data:
   grafana-data:
 
