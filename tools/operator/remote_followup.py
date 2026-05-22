@@ -10,9 +10,15 @@ import json
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-HOST = "100.95.126.39"
-USER = "aaats"
-PASSWORD = "Puneeth1234"
+import os
+HOST = os.environ.get("AAATS_SSH_HOST", "100.95.126.39")
+USER = os.environ.get("AAATS_SSH_USER", "aaats")
+PASSWORD = os.environ.get("AAATS_SSH_PASSWORD")
+if not PASSWORD:
+    raise SystemExit(
+        "AAATS_SSH_PASSWORD env var not set. "
+        "Copy .env.example to .env, fill in the password, and re-run."
+    )
 
 def ssh_connect():
     client = paramiko.SSHClient()
@@ -164,7 +170,10 @@ def main():
     # ================================================================
     # D. Grafana API (with verbose)
     # ================================================================
-    out, err, rc = run_cmd(client, "curl -v -u admin:1ZZ6lgHOMED237XTUWD348Y7 http://localhost:3000/api/datasources 2>&1")
+    _gp = os.environ.get("AAATS_GRAFANA_PASSWORD")
+    if not _gp:
+        raise SystemExit("AAATS_GRAFANA_PASSWORD env var not set; see .env.example")
+    out, err, rc = run_cmd(client, f"curl -v -u admin:{_gp} http://localhost:3000/api/datasources 2>&1")
     sec("D1. Grafana datasources (verbose)", out[:3000], err)
 
     out, err, rc = run_cmd(client, "curl -s http://localhost:3000/api/health 2>&1")

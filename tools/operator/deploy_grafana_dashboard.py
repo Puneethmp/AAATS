@@ -8,10 +8,19 @@ import json
 import paramiko
 import time
 
-SSH_HOST = "100.95.126.39"
-SSH_USER = "aaats"
-SSH_PASS = "Puneeth1234"
-GRAFANA   = "http://admin:1ZZ6lgHOMED237XTUWD348Y7@100.95.126.39:3000"
+import os
+SSH_HOST = os.environ.get("AAATS_SSH_HOST", "100.95.126.39")
+SSH_USER = os.environ.get("AAATS_SSH_USER", "aaats")
+SSH_PASS = os.environ.get("AAATS_SSH_PASSWORD")
+_GRAFANA_USER = os.environ.get("AAATS_GRAFANA_USER", "admin")
+_GRAFANA_PASS = os.environ.get("AAATS_GRAFANA_PASSWORD")
+_GRAFANA_HOST = os.environ.get("AAATS_GRAFANA_HOST", "100.95.126.39:3000")
+if not SSH_PASS or not _GRAFANA_PASS:
+    raise SystemExit(
+        "AAATS_SSH_PASSWORD and AAATS_GRAFANA_PASSWORD must both be set. "
+        "Copy .env.example to .env and fill in the rotated values."
+    )
+GRAFANA = f"http://{_GRAFANA_USER}:{_GRAFANA_PASS}@{_GRAFANA_HOST}"
 
 DS = {"type": "prometheus", "uid": "aaats-prom"}
 

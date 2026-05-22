@@ -10,9 +10,15 @@ except ImportError:
 
 import tarfile, io, pathlib, time
 
-HOST     = "100.95.126.39"
-USER     = "aaats"
-PASSWORD = "Puneeth1234"
+import os
+HOST     = os.environ.get("AAATS_SSH_HOST", "100.95.126.39")
+USER     = os.environ.get("AAATS_SSH_USER", "aaats")
+PASSWORD = os.environ.get("AAATS_SSH_PASSWORD")
+if not PASSWORD:
+    raise SystemExit(
+        "AAATS_SSH_PASSWORD env var not set. "
+        "Copy .env.example to .env, fill in the password, and re-run."
+    )
 REMOTE   = "/home/aaats/aaats"
 
 # Missing modules not in original upload

@@ -20,7 +20,12 @@ if ENV_FILE.exists():
 
 HOST     = _env.get("CONTABO__TAILSCALE_IP", "100.95.126.39")
 USER     = _env.get("CONTABO__SSH_USER",     "aaats")
-PASSWORD = _env.get("CONTABO__SSH_PASSWORD", "Puneeth1234")
+PASSWORD = _env.get("CONTABO__SSH_PASSWORD") or os.environ.get("AAATS_SSH_PASSWORD")
+if not PASSWORD:
+    raise SystemExit(
+        "CONTABO__SSH_PASSWORD (or AAATS_SSH_PASSWORD) not set. "
+        "Copy .env.example to .env and fill in the rotated password."
+    )
 
 try:
     import paramiko
@@ -148,7 +153,10 @@ log()
 
 # ── 8. Grafana datasource ─────────────────────────────────────────────────
 log("── GRAFANA DATASOURCE ───────────────────────────────────────")
-out, _ = run("curl -s -u admin:1ZZ6lgHOMED237XTUWD348Y7 http://localhost:3000/api/datasources 2>&1")
+_gp = os.environ.get("AAATS_GRAFANA_PASSWORD")
+if not _gp:
+    raise SystemExit("AAATS_GRAFANA_PASSWORD env var not set; see .env.example")
+out, _ = run(f"curl -s -u admin:{_gp} http://localhost:3000/api/datasources 2>&1")
 log(out if out else "(failed)")
 log()
 

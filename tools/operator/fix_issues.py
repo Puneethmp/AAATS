@@ -12,9 +12,15 @@ import json
 import sys
 import time
 
-HOST = "100.95.126.39"
-USER = "aaats"
-PASS = "Puneeth1234"
+import os
+HOST = os.environ.get("AAATS_SSH_HOST", "100.95.126.39")
+USER = os.environ.get("AAATS_SSH_USER", "aaats")
+PASS = os.environ.get("AAATS_SSH_PASSWORD")
+if not PASS:
+    raise SystemExit(
+        "AAATS_SSH_PASSWORD env var not set. "
+        "Copy .env.example to .env, fill in the password, and re-run."
+    )
 
 def ssh_run(client, cmd, timeout=30):
     stdin, stdout, stderr = client.exec_command(cmd, timeout=timeout)

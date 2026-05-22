@@ -10,9 +10,15 @@ import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-HOST = "100.95.126.39"
-USER = "aaats"
-PASSWORD = "Puneeth1234"
+import os
+HOST = os.environ.get("AAATS_SSH_HOST", "100.95.126.39")
+USER = os.environ.get("AAATS_SSH_USER", "aaats")
+PASSWORD = os.environ.get("AAATS_SSH_PASSWORD")
+if not PASSWORD:
+    raise SystemExit(
+        "AAATS_SSH_PASSWORD env var not set. "
+        "Copy .env.example to .env, fill in the password, and re-run."
+    )
 PORT = 22
 
 def ssh_connect():
@@ -65,7 +71,10 @@ def main():
     print_section("1d. prometheus.yml (inside container)", out, err)
 
     # 1e. grafana datasources
-    out, err, rc = run_cmd(client, "curl -s -u admin:1ZZ6lgHOMED237XTUWD348Y7 http://localhost:3000/api/datasources 2>&1")
+    _gp = os.environ.get("AAATS_GRAFANA_PASSWORD")
+    if not _gp:
+        raise SystemExit("AAATS_GRAFANA_PASSWORD env var not set; see .env.example")
+    out, err, rc = run_cmd(client, f"curl -s -u admin:{_gp} http://localhost:3000/api/datasources 2>&1")
     print_section("1e. Grafana datasources API", out, err)
 
     # 1f. cloudflared env

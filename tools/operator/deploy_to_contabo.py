@@ -46,7 +46,12 @@ _env = load_env(PROJECT_ROOT / ".env")
 
 HOST       = _env.get("CONTABO__TAILSCALE_IP",  "100.95.126.39")
 USER       = _env.get("CONTABO__SSH_USER",     "aaats")
-PASSWORD   = _env.get("CONTABO__SSH_PASSWORD", "Puneeth1234")
+PASSWORD   = _env.get("CONTABO__SSH_PASSWORD") or os.environ.get("AAATS_SSH_PASSWORD")
+if not PASSWORD:
+    raise SystemExit(
+        "CONTABO__SSH_PASSWORD (or AAATS_SSH_PASSWORD) not set. "
+        "Copy .env.example to .env and fill in the rotated password."
+    )
 REMOTE_DIR = _env.get("CONTABO__REMOTE_DIR",   "/home/aaats/aaats")
 TAILSCALE  = _env.get("CONTABO__TAILSCALE_IP", "100.95.126.39")
 GRAFANA_PW = _env.get("CONTABO__GRAFANA_PASSWORD", "")
