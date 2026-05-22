@@ -1,0 +1,26 @@
+# D.2 heartbeat-watchdog sidecar
+# Minimal image: python3 + docker CLI (for `docker restart`).
+# Mounts the host docker socket; mounts ../data read-only.
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install docker CLI only — no Python deps beyond what observability.alerts
+# pulls in (python-telegram-bot via requirements.txt is the only one we use).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    docker.io \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir python-telegram-bot
+
+# Copy only the modules we need (keeps the image small).
+COPY health/ /app/health/
+COPY observability/ /app/observability/
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONPATH=/app
+
+CMD ["python", "health/watchdog.py"]

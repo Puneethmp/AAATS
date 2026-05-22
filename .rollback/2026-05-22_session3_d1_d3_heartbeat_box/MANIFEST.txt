@@ -1,0 +1,32 @@
+ROLLBACK BASELINE - 2026-05-22 Session 3 D.1 + D.3 + heartbeat deploy
+================================================================================
+
+DEPLOYED_AT_UTC        = 2026-05-22T17:10:52Z
+PRE_REBUILD_IMAGE_SHA  = sha256:bfa9e64fc087d3f0dd923972a657f947a3fffd201ec78fa8526a9bda2eb29bec
+POST_REBUILD_IMAGE_SHA = sha256:9b39144e56fc4517889fb65e21b35691f8c221b9ff3965bbcfdc87b11704b520
+PRE_RESTART_COUNT      = 125
+POST_RESTART_COUNT     = 0
+POST_STATUS            = running
+
+Pre-deploy file SHAs (box, captured immediately before swap):
+  monitoring/heartbeat_monitor.py                    : e7ddc14b4988e035fcf202c29e61ac0cf26fe1222334f1978048e81819e27c6b
+  monitoring/metrics_exporter.py                     : 1400b0e904637483903a9bca2afcb877b033d11b3157956dd580aa3e60a5d633
+  trading/live_paper_runner.py                       : 7d48a501ad2a85f7200a2f0aee4121727a78314e56108a2e6d409b3eda7553dc
+  trading/strategy_isolation.py                      : ABSENT
+  risk/strategy_halt.py                              : ABSENT
+  state/__init__.py                                  : ABSENT
+  state/schemas.py                                   : ABSENT
+
+Post-deploy file SHAs (box, after rebuild):
+  monitoring/heartbeat_monitor.py                    : b8fe844d133eb14c06242c48ca4c5b1b0002784688ede757ea369e4c78566d2b
+  monitoring/metrics_exporter.py                     : c3409f24846b1ba02b1fa067c5b4ab076dbe7dd541a651ed6d8bffd2955acc3a
+  trading/live_paper_runner.py                       : ea73a64e771454624d7797ca05173ed10eed3932d906737f23a2e05180b6ffc3
+  trading/strategy_isolation.py                      : 4a9e6c97bcab924a4dbd7013f43246d4b23b165e29683b83de23aaa7b2b70c85
+  risk/strategy_halt.py                              : 4e8621ad87353ea31790e7cfb9fa09ca926f47f40de9ec5f7c5ed6ab2c3492d7
+  state/__init__.py                                  : 9be0a6263d108c780c6be85368bea592aa442397e4d491b579b5bada1ef21a6f
+  state/schemas.py                                   : da0d19fb23bb5958e6c5e485404e7fe482ae6516c37c0e5dcb4ae633cdbebe6f
+
+Smoke results (inside container):
+  heartbeat reader : flat-reader-resolvable ['crypto']
+  strategy_halt    : halted: []
+  schema smoke     : Error response from daemon: Container 7611cf5f006ea8cf222f74ef0e915c68a828a046247226b4a88496a13dc3e78e is restarting, wait until the container is running

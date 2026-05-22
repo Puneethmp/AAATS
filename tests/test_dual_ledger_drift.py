@@ -117,6 +117,18 @@ def test_dual_ledger_drift_bounded(data_root: Path):
     if not db_path.exists():
         pytest.skip(f"{db_path} not present — bound has nothing to check")
 
+    # If the positions file isn't present we can't compute drift against it.
+    # This is the expected steady state for `runtime/` post-2026-05-22 (the
+    # workstation-only scratch file was deleted per the 1.a memo); the
+    # canonical comparison is `data/paper_positions.json`, which the
+    # parametrized "data" case still exercises.
+    if not positions_path.exists():
+        pytest.skip(
+            f"{positions_path} not present — drift baseline only meaningful "
+            "when both ledgers exist (canonical comparison still runs against "
+            "data/paper_positions.json)"
+        )
+
     open_buys = _open_buy_symbols(db_path)
     if not open_buys:
         return  # no open BUYs → no drift possible

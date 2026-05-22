@@ -75,6 +75,17 @@ LOOKBACK_BARS   = 60         # bars for rolling z-score (60H = 2.5 days on 1H ba
 TIME_STOP_HOURS = 24         # max hold time regardless of z-score
 BTC_RSI_MIN     = 35         # BTC RSI floor — skip entries in BTC freefall
 BTC_DOM_FAST_RISE = 0.008    # skip if BTC dominance rising >0.8% since last cycle
+                             # (units: fraction, NOT percentage points — 0.008 == 0.8%-pt
+                             #  jump in BTC.D since the previous cycle's cached reading).
+
+# Persistent loss-leader denylist (B.2 patch, 2026-05-22).
+# Top-5 worst-PNL C3 symbols over the 9-day diagnostic window
+# (docs/known_issues/2026-05-21_strategy_c3_altcoin_reversion_diagnostic.md §5).
+# 0/8 SELL win rate combined; account for -$4.42 / -$5.63 = ~78% of total C3 loss.
+# Skip applies to ENTRY only — held positions can still exit cleanly.
+DENYLIST_SYMBOLS = frozenset({
+    "OP/USDT", "ARB/USDT", "PUMP/USDT", "FET/USDT", "LUNC/USDT",
+})
 
 # Z_TARGET as a hard-cap for extreme overshoot. Most exits happen via trailing.
 # Set high enough that it rarely fires; primary exit is now trailing logic below.
@@ -99,6 +110,7 @@ COOLDOWN_HOURS  = 24
 
 STATE_FILE = _ROOT / "data" / "altcoin_reversion_state.json"
 COOLDOWN_FILE = _ROOT / "data" / "altcoin_reversion_cooldown.json"
+BTC_DOM_CACHE_FILE = _ROOT / "data" / "c3_btc_dom_cache.json"
 DB_PATH    = str(_ROOT / "data" / "paper_trades.db")
 
 # Unified positions ledger wiring (Q1-Q4=A, ledger commit 3/3 2026-05-21).
@@ -182,6 +194,31 @@ def _set_cooldown(symbol: str, cooldown: dict[str, str], hours: float = COOLDOWN
     """Place symbol on the bench for `hours`. Modifies cooldown dict in place."""
     until = datetime.now(timezone.utc) + timedelta(hours=hours)
     cooldown[symbol] = until.isoformat()
+
+
+# ── BTC.D delta cache (B.2 patch, 2026-05-22) ────────────────────────────────
+def _load_btc_dom_cache() -> float | None:
+    """Last cycle's BTC dominance reading (or None on first run / unreadable)."""
+    try:
+        if BTC_DOM_CACHE_FILE.exists():
+            raw = json.loads(BTC_DOM_CACHE_FILE.read_text(encoding="utf-8"))
+            v = raw.get("prev_btc_dom")
+            return float(v) if v is not None else None
+    except Exception as exc:
+        log.warning("[c3] btc_dom cache unreadable (%s) — first-run semantics", exc)
+    return None
+
+
+def _save_btc_dom_cache(btc_dom: float) -> None:
+    """Persist the current BTC.D reading for next cycle's delta computation."""
+    BTC_DOM_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "prev_btc_dom": float(btc_dom),
+        "prev_ts": datetime.now(timezone.utc).isoformat(),
+    }
+    tmp = BTC_DOM_CACHE_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp.replace(BTC_DOM_CACHE_FILE)
 
 
 def _prune_cooldown(cooldown: dict[str, str]) -> bool:
@@ -311,10 +348,22 @@ def _compute_z_score(alt_df: pd.DataFrame, btc_df: pd.DataFrame,
 
 
 # ── Entry/exit logic ─────────────────────────────────────────────────────────
-def _entry_allowed(btc_df: pd.DataFrame, regime: str) -> bool:
+def _entry_allowed(
+    btc_df: pd.DataFrame,
+    regime: str,
+    btc_dom_delta: float | None = None,
+) -> bool:
     """
     Pre-flight checks before any C3 entry.
     Returns False if macro conditions are unfavourable.
+
+    Args:
+        btc_dom_delta: BTC dominance change since the previous cycle, as a
+            percentage-point delta (so 0.8 means BTC.D rose 0.8 pp). When
+            >= BTC_DOM_FAST_RISE * 100, refuse entry — BTC.D fast-rise is
+            the documented "alt season over" signal (constant declared at
+            :77 but never read pre-2026-05-22). None disables the check
+            (e.g. first cycle after a restart, or test paths).
     """
     # BTC RSI floor
     btc_rsi = _rsi(btc_df["close"], period=14)
@@ -325,6 +374,17 @@ def _entry_allowed(btc_df: pd.DataFrame, regime: str) -> bool:
     # Regime guard — no entries in BEAR
     if "BEAR" in regime.upper():
         log.debug("[c3] regime=%s — skip entry", regime)
+        return False
+
+    # BTC dominance fast-rise: "alt season over" filter.
+    # BTC_DOM_FAST_RISE is declared as a fraction (0.008 == 0.8 pp); the
+    # caller-supplied delta is in percentage points, so we compare against
+    # BTC_DOM_FAST_RISE * 100.
+    if btc_dom_delta is not None and btc_dom_delta >= (BTC_DOM_FAST_RISE * 100):
+        log.info(
+            "[c3] BTC.D rising fast (+%.3f pp >= %.3f pp) — skip entry",
+            btc_dom_delta, BTC_DOM_FAST_RISE * 100,
+        )
         return False
 
     return True
@@ -416,6 +476,7 @@ def run_altcoin_reversion_crypto(
     symbols: list[str] | None = None,
     full_positions: dict | None = None,
     full_portfolio: dict | None = None,
+    btc_dom_now: float | None = None,
 ) -> None:
     """
     Main entry point called from live_paper_runner.py each crypto cycle.
@@ -431,6 +492,11 @@ def run_altcoin_reversion_crypto(
                         (test/back-compat callers), the gate is bypassed.
         full_portfolio: Full portfolio dict {"crypto": {...}, "india": {...}}.
                         Same role as full_positions.
+        btc_dom_now:    Current cycle's BTC dominance reading (percentage,
+                        e.g. 56.3). Used with the persisted previous-cycle
+                        cache to compute btc_dom_delta and gate entries via
+                        BTC_DOM_FAST_RISE. None disables the check (test /
+                        back-compat callers; first cycle after restart).
     """
     # Resolve kill-switch helper once per cycle. Imported lazily to avoid the
     # circular trading.live_paper_runner <-> trading.altcoin_reversion edge
@@ -448,6 +514,17 @@ def run_altcoin_reversion_crypto(
     changed  = False
     cooldown_changed = _prune_cooldown(cooldown)
     capital  = portfolio.get("capital", 0.0)
+
+    # BTC.D delta vs previous cycle (B.2 patch, 2026-05-22).
+    # None semantics: first cycle after a (re)deploy, no cache → no delta →
+    # _entry_allowed treats this as "no signal", filter disabled. Subsequent
+    # cycles compute a real delta and gate accordingly.
+    btc_dom_delta: float | None = None
+    if btc_dom_now is not None:
+        _prev_btc_dom = _load_btc_dom_cache()
+        if _prev_btc_dom is not None:
+            btc_dom_delta = float(btc_dom_now) - _prev_btc_dom
+        _save_btc_dom_cache(btc_dom_now)
 
     # Fetch BTC bars once — needed for z-score and RSI check
     btc_df = fetch_hourly_fn(BTC_SYMBOL)
@@ -582,6 +659,13 @@ def run_altcoin_reversion_crypto(
 
             # ── Check entry ───────────────────────────────────────────────────
             else:
+                # Persistent denylist (B.2 patch, 2026-05-22). Skip ENTRY
+                # only — already-open positions still take the manage-open
+                # branch above, so SELLs are unimpeded.
+                if sym in DENYLIST_SYMBOLS:
+                    log.info("[c3] %s: SKIP entry — denylisted (B.2 loss-leader)", sym)
+                    continue
+
                 if current_z > Z_ENTRY:
                     log.debug("[c3] %s: z=%.3f > %.1f threshold — no entry", sym, current_z, Z_ENTRY)
                     continue
@@ -592,7 +676,7 @@ def run_altcoin_reversion_crypto(
                     log.info("[c3] %s: SKIP entry — cooldown %.1fh remaining", sym, hours_left)
                     continue
 
-                if not _entry_allowed(btc_df, btc_regime):
+                if not _entry_allowed(btc_df, btc_regime, btc_dom_delta=btc_dom_delta):
                     continue
 
                 # 2026-05-13 v2: vol-adjusted sizing. Equalizes per-position

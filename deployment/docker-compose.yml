@@ -218,6 +218,42 @@ services:
           cpus: '0.5'
           memory: 256M
 
+  # ── Heartbeat watchdog (D.2, 2026-05-22) ──────────────────────────────────
+  # Tails data/heartbeat.json (FLAT schema). Restarts aaats-paper-crypto on
+  # stale heartbeat (age > 3 × cycle interval = 2700s), rate-limited to 3
+  # restarts per 30 minutes (4th detection escalates Telegram-only). Reads
+  # are decoupled from Docker healthchecks — the trading heartbeat file is
+  # the authoritative liveness signal.
+  aaats-watchdog:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.watchdog
+    container_name: aaats-watchdog
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      - PYTHONPATH=/app
+      - AAATS_DATA=/app/data
+      - WATCHDOG_TARGET=aaats-paper-crypto
+      - WATCHDOG_CYCLE_INTERVAL_SEC=900
+      - WATCHDOG_POLL_INTERVAL_SEC=60
+      - WATCHDOG_MAX_RESTARTS=3
+      - WATCHDOG_RATE_WINDOW_SEC=1800
+    volumes:
+      - ../data:/app/data:ro
+      # Host docker socket — required for `docker restart aaats-paper-crypto`.
+      # Read-only mount of the socket is NOT supported by Docker (the API
+      # uses the socket bidirectionally); least-privilege is a separate
+      # follow-up (docker-in-docker, BuildKit secrets, or a dedicated
+      # restart-only proxy).
+      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 64M
+
   # ── Telegram command bot ──────────────────────────────────────────────────
   aaats-telegram-bot:
     build:
