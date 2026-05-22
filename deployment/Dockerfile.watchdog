@@ -6,10 +6,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install docker CLI only — no Python deps beyond what observability.alerts
-# pulls in (python-telegram-bot via requirements.txt is the only one we use).
+# Install docker CLI only (no daemon). On Debian 13 the CLI is shipped in a
+# separate `docker-cli` package; the `docker.io` package only installs the
+# daemon (dockerd, docker-proxy) and excludes the client. docker-cli depends
+# only on libc6, so this stays lean (~30 MB) and gives us /usr/bin/docker.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    docker.io \
+    docker-cli \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
