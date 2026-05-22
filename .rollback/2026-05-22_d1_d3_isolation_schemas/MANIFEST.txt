@@ -1,0 +1,80 @@
+ROLLBACK BASELINE - 2026-05-22 Session 2 D.1 + D.3 ship
+================================================================================
+
+Scope:
+  Phase D.1 (per-strategy exception isolation) + Phase D.3 (schema-drift
+  assertions on startup). Workstation commit lands first; box ship is
+  a follow-up (no SCP this session — box-side D.1/D.3 wiring requires
+  next session's deploy step).
+
+Files added (new):
+  state/__init__.py
+  state/schemas.py
+  risk/strategy_halt.py
+  trading/strategy_isolation.py
+  tests/test_state_schemas.py
+  tests/test_strategy_isolation.py
+  docs/known_issues/2026-05-22_paper_positions_writer_drift.md
+  docs/known_issues/2026-05-22_share_equality_alert_chain.md
+
+Files modified (in-place edits, NOT bind-mounted; affect future image rebuild):
+  trading/live_paper_runner.py
+    - Added import: from trading.strategy_isolation import run_strategy_with_isolation
+    - 5 strategy-dispatch call sites converted from try/except to
+      run_strategy_with_isolation envelope (N1, C1, C2, C3, C6)
+    - Added D.3 validate_all_state_files() startup smoke in main()
+  monitoring/metrics_exporter.py
+    - Added collect_strategy_exceptions() function
+    - Added it to the _scrape_all() collector list
+
+Pre-session SHAs (box, captured 2026-05-22 pre-deploy):
+  trading/live_paper_runner.py     : 7d48a501ad2a85f7200a2f0aee4121727a78314e56108a2e6d409b3eda7553dc
+  monitoring/metrics_exporter.py   : 1400b0e904637483903a9bca2afcb877b033d11b3157956dd580aa3e60a5d633
+  production_readiness/metrics_aggregator.py : baab72511b714363ec3d958cc7510fc0c93b43eb4a28dcbf0314efa9217e5757
+    (this last SHA is the A.0 fix shipped earlier this session — for
+    reference only; it is not part of D.1/D.3 rollback)
+
+Pre-session SHA (workstation, pre-D.1/D.3):
+  trading/live_paper_runner.py     : (captured pre-edit by git working tree;
+                                       see `git show HEAD:trading/live_paper_runner.py` after rollback)
+  monitoring/metrics_exporter.py   : (same — pre-edit tree)
+
+Rollback procedure (workstation only, since box has NOT been redeployed
+post-D.1/D.3):
+  git revert <session-2 commit SHA>     # reverts D.1/D.3 + memos
+  pytest tests/test_live_readiness_scorer.py tests/test_dual_ledger_drift.py
+  # Confirm 8/8 pass — A.0 (shipped earlier this session) is independent and
+  # remains in place.
+
+Rollback procedure (box, only if D.1/D.3 has been re-deployed via SCP +
+docker compose rebuild — NOT this session):
+  1. SCP previous-image-SHA copies of:
+       trading/live_paper_runner.py
+       monitoring/metrics_exporter.py
+       (and remove state/ and risk/strategy_halt.py, trading/strategy_isolation.py)
+  2. docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-paper-crypto
+  3. Verify: docker exec aaats-paper-crypto python -c "import trading.live_paper_runner; print('OK')"
+
+State files created at runtime (NOT in the rollback baseline — written
+by the running container the first time the helpers fire; safe to
+delete on rollback):
+  data/strategy_halt_state.json       — risk/strategy_halt writer
+  data/strategy_exception_state.json  — trading/strategy_isolation writer
+
+Test evidence (workstation pre-commit):
+  tests/test_state_schemas.py          16 passed (D.3 schemas)
+  tests/test_strategy_isolation.py      7 passed (D.1 helper + halt)
+  tests/test_dual_ledger_drift.py       2 passed (A.0 regression input)
+  tests/test_live_readiness_scorer.py   6 passed (A.0 regression)
+  Total: 31 passed in 2.07s
+
+Caveats:
+  - D.3 startup smoke at trading/live_paper_runner.py main() refuses to
+    start the container on any INVALID schema. The current production
+    state on box validates clean (verified by per-schema fixtures); the
+    smoke is safe to enable.
+  - D.1 isolation helper changes the failure semantics of 5
+    strategy-dispatch sites. The new behaviour is strictly stricter
+    than the prior try/except (still continues the cycle on exception,
+    but now also tracks consecutive count + auto-halts on 3rd). No
+    behavior change on the success path.

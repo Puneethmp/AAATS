@@ -578,6 +578,138 @@ this.
   in `test_india/test_angel_one_integration.py` (live broker creds).
   None caused by A.0 work — those files were not touched this session.
 
+- **2026-05-22 (session 2)** — Five-track ship: C1 cache invalidation +
+  A.0 box deployment + B.1 confirmation + D.1 + D.3 all green.
+
+  **[0] C1 stat_arb cache invalidation — SHIPPED + observed.** Deleted
+  `/app/data/stat_arb_health.json` on box (rollback backup at
+  `/tmp/stat_arb_health.json.bak_2026-05-21_session2`). Next cycle at
+  `2026-05-22T03:54:39Z` recomputed the cache cleanly:
+  `eg_pvalue=0.0181, corr_14d=0.971, pair_healthy=True`. **The
+  silent-strategy audit's diagnosed mechanism was partially stale.**
+  The pre-deletion cache was `eg_pvalue=0.39, corr_14d=0.92,
+  pair_healthy=False` — failing the cointegration gate (`eg_p < 0.05`
+  at `trading/stat_arb.py:344`), NOT failing the correlation gate.
+  Audit's quoted `corr14d=0.000` value matched an older state. After
+  invalidation, the new cache passes both gates; C1 gate is OPEN. Spread
+  z at observed cycle was −0.116 (below the `entry_z=1.8` threshold),
+  so C1 honestly skipped this cycle — exactly the expected, gate-honest
+  behaviour. C1 reclassified from `regressed-silent` → `gate-honest`
+  pending z > 1.8. No further C1 work this session.
+
+  **[1] A.0 box deployment — SHIPPED.** `production_readiness/metrics_aggregator.py`
+  SCP'd to box via atomic `.tmp` + `mv -f`; image rebuilt with
+  `docker compose -f deployment/docker-compose.yml up -d --build --no-deps
+  aaats-paper-crypto`. Pre-deploy box SHA `56342edbdb17…`, post-deploy
+  SHA `baab72511b71…` (matches workstation). Post-deploy PF1 verified:
+
+  ```
+  Score: 69.7%
+  Blockers:
+    - Win Rate: 28.8% (minimum: 45.0%)
+    - Maximum Drawdown: -22.8% (threshold: -15.0%)
+    - Infrastructure Uptime: 0.0% (minimum: 95.0%)
+  ```
+
+  Drawdown math fixed (real −22.8% from `risk_engine_state.json`
+  peak/last_equity vs the previous −781% arithmetic garbage). PF1 now
+  reports real metrics; Win Rate / Trades reflect actual paper state.
+  **Uptime still 0%** — surfaced a NEW bug at
+  `monitoring/heartbeat_monitor.py:142` (`Heartbeat(**hb_data)` — the
+  reader expects a nested-per-market dict, but the runner writes a flat
+  schema directly at `trading/live_paper_runner.py:1873-1882`). This is
+  catalog row 1 verbatim and is what D.3 (also shipped this session)
+  catches on startup. Fix is to remove the legacy nested reader path
+  (or update it to match the flat writer); deferred to next session.
+
+  **[1.a] paper_positions writer drift — DOCUMENTED.** Memo at
+  `docs/known_issues/2026-05-22_paper_positions_writer_drift.md`.
+  `runtime/paper_positions.json` is a workstation-only scratch file
+  (the box host has no `runtime/`); production canonical is
+  `data/paper_positions.json`. No production-code writer to `runtime/`
+  was found. Recommended next action: delete the workstation
+  `runtime/paper_positions.json` (deferred so memo can be reviewed first).
+
+  **[1.b] share-equality alert chain audit — CLEAN.** Memo at
+  `docs/known_issues/2026-05-22_share_equality_alert_chain.md`. Box
+  `data/share_equality_mismatches.json` is `{}` with mtime
+  `2026-05-16 08:26` (pre-session-1). Session 1's TON/FET-counter
+  finding likely cited a workstation-side copy, not box production.
+  Alert-chain end-to-end was validated by the 2026-05-16 synthetic
+  test (per `CLAUDE.md`) and remains intact. **No new D-track row
+  added; no catalog change.**
+
+  **[2] B.1 triage confirmation block — MERGED (this commit).** See the
+  block immediately below. C3 verdict revised to "PARAM-TUNE +
+  symbol-halt (combined)" per session-1 symbol-halt math; C1 verdict
+  revised to `KEEP (gate-honest after [0])`; other strategies as
+  drafted in the silent-strategy audit's Phase B.1 table.
+
+  **[3] D.1 per-strategy exception isolation — SHIPPED.** New
+  helper `trading/strategy_isolation.py::run_strategy_with_isolation`
+  + per-strategy halt state `risk/strategy_halt.py` writing to
+  `data/strategy_halt_state.json`. The five strategy-dispatch call
+  sites in `trading/live_paper_runner.py` (N1, C1, C2, C3, C6) replaced
+  the bare try/except with the isolation envelope. Three consecutive
+  same-strategy exceptions → auto-halt via the helper + Telegram alert;
+  successful run resets the streak. Counter exposed by
+  `monitoring/metrics_exporter.py::collect_strategy_exceptions` as
+  `aaats_strategy_exception_total{strategy=...}` plus
+  `aaats_strategy_consecutive_exceptions{...}` and
+  `aaats_strategy_halted{...}`. Tests at
+  `tests/test_strategy_isolation.py` cover all 7 cases (success
+  resets, single exception no-halt, 3-consecutive auto-halt with
+  sibling-still-runs, Telegram alert on halt, success-after-failure
+  resets streak, already-halted skips dispatch, reset re-enables).
+
+  **[4] D.3 schema-drift assertions — SHIPPED.** New module
+  `state/schemas.py` with pydantic v2 models for the 5 state files
+  (heartbeat / halt_state / risk_engine_state / paper_positions /
+  share_equality_mismatches). Validating I/O helpers `load_validated`
+  / `save_validated` route writers and readers through the schema.
+  Startup smoke in `trading/live_paper_runner.py::main` calls
+  `validate_all_state_files(data_dir)` and refuses-to-start on any
+  `INVALID` result (`SystemExit` with the offending file). Tests at
+  `tests/test_state_schemas.py` cover all 5 schemas (16 cases incl.
+  production-state-shaped fixtures from the 2026-05-22 box snapshot,
+  legacy-shape rejection, extra-key rejection, malformed-JSON failure
+  path, and the cross-cutting `validate_all_state_files` reporter).
+
+  **Pytest:** 31/31 new + regression tests green:
+
+  ```
+  tests/test_state_schemas.py          16 passed
+  tests/test_strategy_isolation.py      7 passed
+  tests/test_dual_ledger_drift.py       2 passed
+  tests/test_live_readiness_scorer.py   6 passed
+  ```
+
+  Rollback baseline at `.rollback/2026-05-22_d1_d3_isolation_schemas/`.
+
+---
+
+## B.1 triage table (decision merged 2026-05-22 session 2)
+
+The Phase B.1 triage table drafted in
+[`docs/known_issues/2026-05-21_silent_strategy_audit.md`](../known_issues/2026-05-21_silent_strategy_audit.md)
+§"Triage table for Phase B.1" is hereby confirmed with two revisions
+from this session:
+
+| Strategy | Verdict | Rationale | Next action (file:line scope; NO code edits this session) |
+|---|---|---|---|
+| `C1_stat_arb` | **KEEP (gate-honest)** | After 2026-05-22 cache invalidation, gate passes (`eg_p=0.0181, corr_14d=0.971`). Strategy honestly skipped current cycle on z=−0.116 < `entry_z=1.8`. Monitor for z > 1.8 next 7d. | `trading/stat_arb.py:478` — add `apply_kill_switch_gate` call site to parity with C3/C6 (deferred to session 3 B.2). |
+| `C2_momentum_breakout` | **KEEP (gate-honest)** | Gate at `trading/momentum_breakout.py:200-201` honestly refusing on `regime=BEAR_TREND` AND `F&G < 40`. No action until regime+sentiment flip. | None. Re-fires automatically. |
+| `C3_altcoin_reversion` | **PARAM-TUNE + symbol-halt (combined)** | Per [`docs/known_issues/2026-05-21_strategy_c3_altcoin_reversion_diagnostic.md`](../known_issues/2026-05-21_strategy_c3_altcoin_reversion_diagnostic.md) §5. Combined-verdict math (session 1): residual P&L without top-5 = −$1.216/9d vs full −$5.63/9d. Reversible. | (a) Wire `BTC_DOM_FAST_RISE` at `trading/altcoin_reversion.py:_entry_allowed` (lines 314-330; constant declared at :77, never read); (b) extend the symbol deny-list to include `OP/USDT, ARB/USDT, PUMP/USDT, FET/USDT, LUNC/USDT` at `trading/altcoin_reversion.py:487` per-cycle universe loop. Sweep in B.2. |
+| `C5b_funding_arb` | **HALT (existing)** | Already commented out at `trading/live_paper_runner.py:1666-1670` since 2026-05-15. Re-enable only after unified-ledger Q1–Q4 resolves $25/leg vs $50/round-trip asymmetry. | None. Per `docs/known_issues/2026-05-15_c5b_halt.md` re-enable checklist. |
+| `C6_bollinger_range` | **KEEP (insufficient data)** | Per [`docs/known_issues/2026-05-21_strategy_c6_bollinger_range_diagnostic.md`](../known_issues/2026-05-21_strategy_c6_bollinger_range_diagnostic.md): 5 SELLs / −$0.128 is below noise floor. Re-evaluate after 4 weeks B.3 soak with ≥30 SELLs OR a >1% weekly loss. | None this session. |
+| `N1_stat_arb_india` | **OUT OF SCOPE** | Container runs `--market crypto`; NSE side dormant until week 7+ per doctrine. | None. |
+| `N2–N7` | **OUT OF SCOPE** | No source files exist; design-time labels only at `docs/operator/aaats_strategy_universe.md`. | None. |
+
+The B.2 phase (parameter sweeps on the C3 PARAM-TUNE candidates) consumes
+this table as input. The C3 wire+denylist patch is the only behavior
+change anticipated for B.2 — it's reversible and reduces realized loss
+by ~78% per the session-1 symbol-halt math.
+
 ---
 
 ## What this plan does NOT cover

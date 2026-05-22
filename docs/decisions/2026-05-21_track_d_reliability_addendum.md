@@ -181,3 +181,111 @@ The `Action needed` field is the operator's single decision-trigger. If it's `NO
   **Next D-track step:** D.1 (per-strategy exception isolation) +
   D.3 (schema-drift assertions on startup). Both depend on D.0 catalog
   (now merged). D.2 (heartbeat watchdog) is parallel-safe with D.1/D.3.
+
+- **2026-05-22 (session 2)** — **D.1 + D.3 SHIPPED.**
+
+  **D.1 — Per-strategy exception isolation.** New helper module
+  `trading/strategy_isolation.py::run_strategy_with_isolation` wraps
+  each strategy call with: (a) skip if `risk/strategy_halt.is_strategy_halted`,
+  (b) on exception increment `total_exceptions` and `consecutive_exceptions`
+  counters in `data/strategy_exception_state.json` and log with
+  `strategy_id`, (c) at `consecutive_exceptions >= 3` auto-halt via
+  `risk/strategy_halt.halt_strategy` (writes `data/strategy_halt_state.json`)
+  plus best-effort `observability.alerts.send_alert` Telegram, (d) on
+  success reset the consecutive streak. The 5 strategy-dispatch call
+  sites in `trading/live_paper_runner.py` (N1 stat-arb-india, C1
+  stat-arb-crypto, C2 momentum, C3 altcoin reversion, C6 bollinger
+  range) were converted from bare `try/except → log.error` to the
+  isolation envelope. Prometheus counter
+  `aaats_strategy_exception_total{strategy=...}` plus the gauges
+  `aaats_strategy_consecutive_exceptions{...}` and
+  `aaats_strategy_halted{...}` exposed by
+  `monitoring/metrics_exporter.py::collect_strategy_exceptions` (added
+  to the `_scrape_all` collector list). Tests at
+  `tests/test_strategy_isolation.py` cover the 7 cases mandated by
+  the session-2 prompt + edge cases.
+
+  **D.3 — Schema-drift assertions on startup.** New `state/` package
+  with pydantic v2 models in `state/schemas.py` for the 5 JSON state
+  files:
+
+  - `HeartbeatSchema` — FLAT shape (timestamp / cycle / market /
+    cycle_duration_seconds) — matches the runner's actual writer at
+    `trading/live_paper_runner.py:1873-1882`; the legacy nested-per-market
+    shape used by `monitoring/heartbeat_monitor.HeartbeatMonitor` is
+    explicitly rejected. This catches catalog row 1 (the heartbeat
+    writer/reader drift bug) at startup. **The drift is real and active**
+    — PF1's post-deploy `evaluate_live_readiness.py` run on 2026-05-22
+    surfaced `Failed to read heartbeats: Heartbeat() argument after **
+    must be a mapping, not str` at `monitoring/heartbeat_monitor.py:142`,
+    which is the nested reader trying to consume the flat writer's
+    output. The legacy reader code path needs removal next session (the
+    runner writes the canonical flat shape directly; the legacy reader
+    is on a dead code path but still hit by PF1).
+  - `HaltStateSchema` — `{us, india, crypto}` bool, extra forbidden so
+    a typo like `cyrpto` fails fast.
+  - `RiskEngineStateSchema` — `peak / last_update_ts / last_equity /
+    market_peaks{crypto,india,us}`. Note: lives behind the
+    `deployment_state-crypto` named Docker volume at
+    `/app/data/state/risk_engine_state.json`; host bind-mount path is
+    empty (see plan doc §"Diagnostic appendix" 2026-05-22 update).
+  - `PaperPositionsSchema` — `{india, crypto}` empty-per-market dicts
+    accepted with extra forbidden; per-symbol position dicts also
+    accepted (canonical shape, see writer-drift memo).
+  - `ShareEqualityMismatchesSchema` — bare dict `[str, int]` keyed by
+    `strategy|symbol` → counter. Empty `{}` (current box state) and
+    populated forms both supported; missing `|` separator or negative
+    counts fail fast.
+
+  Validating I/O helpers `load_validated(path, schema)` and
+  `save_validated(path, model)`. Startup smoke
+  `validate_all_state_files(data_dir)` runs all 5 reads at runner
+  `main()` entry and refuses to start (`SystemExit`) on any INVALID
+  result. MISSING / MISSING_OPTIONAL are tolerated (the runner is the
+  writer for several files and re-creates them on the first cycle).
+
+  **Test coverage:** 31/31 new + regression tests pass:
+
+  ```
+  tests/test_state_schemas.py          16 passed (D.3)
+  tests/test_strategy_isolation.py      7 passed (D.1)
+  tests/test_dual_ledger_drift.py       2 passed (regression — A.0 input)
+  tests/test_live_readiness_scorer.py   6 passed (regression — A.0)
+  ```
+
+  **Cross-cutting findings folded back into the catalog:**
+
+  - Catalog row 1 (heartbeat writer/reader schema drift) — now caught
+    on startup by `HeartbeatSchema`. The active production bug at
+    `monitoring/heartbeat_monitor.py:142` remains as a separate cleanup
+    item — the reader code path is dead but still invoked by PF1 / the
+    readiness scorer. Track this as "D.1+D.3 catches the schema, the
+    legacy nested-reader is on the next-session cleanup list" rather
+    than as an open detector gap. **D.3 closes catalog row 1's detection
+    gap; the legacy code-path removal closes the active bug.**
+  - Catalog row 12 (engine-vs-state drawdown disagreement) is now bounded
+    by `RiskEngineStateSchema` requiring `peak > 0` and `last_update_ts >
+    0`. Engine-emit-vs-state-write disagreement is a separate (Track A)
+    issue; D.3 catches the state-file half of the pathology.
+  - Sub-task 1.b (share-equality alert chain) — alert chain is **intact**
+    (validated by 2026-05-16 synthetic test). Production state is
+    correctly empty (`{}`); session 1's TON/FET-counter finding was a
+    transient workstation observation, not a production state. Memo at
+    `docs/known_issues/2026-05-22_share_equality_alert_chain.md`. **No
+    new D-track row added; catalog unchanged.**
+
+  **Next D-track steps:**
+   - **D.2 (heartbeat watchdog)** — uses the FLAT heartbeat schema D.3
+     defined; sidecar container that tails `data/heartbeat.json`,
+     auto-restarts the trading container on stale heartbeat, rate-limits
+     to 3 restarts / 30 min. Parallel-safe with B.2.
+   - **Heartbeat legacy reader removal** — `monitoring/heartbeat_monitor.py`
+     `HeartbeatMonitor.get_heartbeat` / `get_all_heartbeats` /
+     `is_alive` rewrite for the flat schema. Touches every caller of
+     `is_alive(market, ...)`, including
+     `production_readiness/metrics_aggregator.py:241-246` (A.0 fix
+     site) — at that point the PF1 uptime check should start returning
+     non-zero.
+   - **D.4 (daily digest)** — depends on D.3 schemas so the digest can
+     read state files without defensive `.get(..., default)` everywhere.
+   - **D.5 (30-day soak)** — once D.2 + D.4 land.

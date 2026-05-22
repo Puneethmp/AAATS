@@ -1072,6 +1072,47 @@ def collect_paper_executor() -> list[str]:
     return out
 
 
+def collect_strategy_exceptions() -> list[str]:
+    """Per-strategy exception counter (D.1).
+
+    Reads data/strategy_exception_state.json (writer:
+    trading/strategy_isolation._record_exception). One series per
+    strategy_id with the running total. Auto-halt fires at 3 consecutive
+    via the isolation helper; halt status is surfaced separately as
+    aaats_strategy_halted.
+    """
+    out = []
+    state = _read_json(ROOT / "data" / "strategy_exception_state.json")
+    halt_state = _read_json(ROOT / "data" / "strategy_halt_state.json")
+    if not isinstance(state, dict) or not state:
+        # Emit one zero-valued default series so the alert evaluator has a
+        # baseline rather than No-Data (same pattern as collect_share_equality).
+        out.append(_c("aaats_strategy_exception_total", 0.0,
+                      {"strategy": "_none"},
+                      "Per-strategy cycle-exception count (D.1)"))
+    else:
+        for strategy_id, entry in state.items():
+            if not isinstance(entry, dict):
+                continue
+            total = float(entry.get("total_exceptions", 0) or 0)
+            consec = float(entry.get("consecutive_exceptions", 0) or 0)
+            out.append(_c("aaats_strategy_exception_total", total,
+                          {"strategy": strategy_id},
+                          "Per-strategy cycle-exception count (D.1)"))
+            out.append(_g("aaats_strategy_consecutive_exceptions", consec,
+                          {"strategy": strategy_id},
+                          "Consecutive cycle-exceptions for the strategy (resets on success)"))
+    if isinstance(halt_state, dict):
+        for strategy_id, entry in halt_state.items():
+            if not isinstance(entry, dict):
+                continue
+            halted = 1.0 if entry.get("halted") else 0.0
+            out.append(_g("aaats_strategy_halted", halted,
+                          {"strategy": strategy_id},
+                          "Strategy halted at the strategy layer (1=halted)"))
+    return out
+
+
 def collect_share_equality() -> list[str]:
     """SELL/BUY share-equality WARN counter (post-INSERT detector in paper_trader).
 
@@ -1142,6 +1183,7 @@ def _scrape_all():
                collect_killall,
                collect_paper_executor,
                collect_share_equality,
+               collect_strategy_exceptions,
                ]:
         try: parts.extend(fn())
         except Exception as e: log.warning(f"{fn.__name__} failed: {e}")

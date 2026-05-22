@@ -1,100 +1,157 @@
-# Next Claude Code session — pre-written prompt
+# Next Claude Code session prompt (session 3)
 
 **Purpose:** Per `feedback_respond_as_prompt.md` — operator pastes the block below into the next Claude Code session. No further decisions needed before work starts.
 
-**Updated:** 2026-05-21 evening (Cowork review of session 1 ship report; three surfaced findings folded into session 2 scope — see § "Surfaced from session 1" inside the block below).
+**Updated:** 2026-05-22 (post session 2 — A.0 box + C1 cache + B.1 + D.1 + D.3 all shipped).
 
 ---
 
-## Paste this into the next Claude Code session
+## Paste this block into the next Claude Code session
 
 ```
-Context: AAATS rebuild sprint, session 2. Session 1 shipped A.0 + B.0 + B.0.5 + D.0 on the workstation; not yet deployed to the box. Status logs are in docs/decisions/2026-05-22_live_flip_rebuild_plan.md and docs/decisions/2026-05-21_track_d_reliability_addendum.md (search "2026-05-21 (session 1)").
+Context: AAATS rebuild sprint, session 3. Session 2 shipped everything in its prompt
+(C1 cache invalidation, A.0 box deploy, B.1 triage confirmation, D.1 per-strategy
+isolation, D.3 schema-drift assertions, plus the 1.a + 1.b memos). The status
+logs at docs/decisions/2026-05-22_live_flip_rebuild_plan.md and
+docs/decisions/2026-05-21_track_d_reliability_addendum.md have full session 2
+ship reports under "2026-05-22 (session 2)". The D.1+D.3 code is on the
+workstation only — box still runs the pre-session-2 image of
+trading/live_paper_runner.py and monitoring/metrics_exporter.py (A.0 metrics_aggregator
+fix IS on box).
 
-Surfaced from session 1 (folded into session 2 scope, do NOT re-investigate from scratch — read the session 1 status logs first):
-- NEW dual-ledger drift: runtime/paper_positions.json vs data/paper_positions.json — two writers, two file paths, contents disagree. Pre-existing dual_equity_ledger_debt was data/paper_positions.json vs paper_trades.db; this adds a third file to the picture. Quick identify-and-document task in A.0 box-deploy follow-up.
-- share_equality_mismatches.json is NOT empty in production (C3 TON/FET counters, pre-existing). The 2026-05-21 NO-GO doc claimed it was clean; that was wrong. Audit the alert chain: did Telegram fire for those counters? If the chain is broken, that's a Track D row not previously flagged.
-- C1 stat_arb (silent strategy) is the highest-leverage near-term action: poisoned `corr14d=0.000` cache despite z=+4.74 signal. One-file-delete fix. Promoted from "if time permits" to FIRST ACTION ITEM of session 2.
-- C3 PARAM-TUNE input: `BTC_DOM_FAST_RISE` constant declared but never read in `_entry_allowed`. Symbol-halt math: residual without top-5 losers (OP, ARB, PUMP, FET, LUNC) = -$1.216/9d (vs -$5.63/9d as-is). Recommended B.1 verdict: PARAM-TUNE + symbol-halt combined, reversible.
+Surfaced from session 2 (folded into session 3 scope, do NOT re-investigate from scratch):
+- ACTIVE BUG: monitoring/heartbeat_monitor.py:142 `Heartbeat(**hb_data)` reads the
+  legacy nested-per-market schema, but the runner writes the flat schema directly
+  at trading/live_paper_runner.py:1873-1882. PF1 uptime is stuck at 0% because of
+  this. D.3 catches the *schema* on startup; this session removes the *legacy reader*
+  so PF1 uptime reports correctly. Scope: rewrite get_heartbeat / get_all_heartbeats /
+  is_alive on the flat schema. Caller audit: production_readiness/metrics_aggregator.py
+  is the only caller (verified session 2). One-file fix, deferred to this session.
+- C3 PARAM-TUNE + symbol-halt is decided (B.1 table merged in plan doc). The actual
+  patch is B.2 scope. File:line scope already documented in the B.1 table — pick it
+  up directly.
+- Box has NOT been redeployed with D.1+D.3 yet. SCP + rebuild needed once the
+  legacy-heartbeat-reader fix lands (so all three changes flow in one rebuild).
+- runtime/paper_positions.json is workstation-only debug scratch; delete it (memo
+  at docs/known_issues/2026-05-22_paper_positions_writer_drift.md has the case).
 
 Read first, in this order:
-1. docs/decisions/2026-05-21_autonomy_contract.md — full technical autonomy still active. Do not ask for library / schema / retry / log format / test scaffolding picks. Do ask before money / risk / doctrine / broker / mode changes.
-2. docs/decisions/2026-05-22_live_flip_rebuild_plan.md — read the "Status log" appendix entry for 2026-05-21 (session 1) before doing anything else.
-3. docs/decisions/2026-05-21_track_d_reliability_addendum.md — same: read the latest Status log entry first.
-4. docs/specs/reliability_failure_modes.md — D.0 catalog, 23 rows. D.1 and D.3 use this as the input set.
-5. docs/known_issues/2026-05-21_strategy_c3_altcoin_reversion_diagnostic.md, _c6_bollinger_range_diagnostic.md, _silent_strategy_audit.md — B.0/B.0.5 verdicts. B.1 triage decisions are already drafted in the silent-strategy audit's "Phase B.1" table; B.1 confirms them.
-6. CLAUDE.md — deploy discipline still binding. Bind mounts: scripts/, data/, logs/ only.
+1. docs/decisions/2026-05-21_autonomy_contract.md — full technical autonomy still
+   active.
+2. docs/decisions/2026-05-22_live_flip_rebuild_plan.md — read the "Status log" entry
+   for 2026-05-22 (session 2) AND the B.1 triage table immediately after.
+3. docs/decisions/2026-05-21_track_d_reliability_addendum.md — read the 2026-05-22
+   (session 2) entry for D.1+D.3 details.
+4. docs/known_issues/2026-05-22_paper_positions_writer_drift.md — 1.a memo.
+5. docs/known_issues/2026-05-22_share_equality_alert_chain.md — 1.b memo (no action
+   needed; chain is healthy).
+6. CLAUDE.md — deploy discipline still binding.
 
-Goal of this session: execute (in order of leverage) [0] C1 cache invalidation → [1] A.0 box deployment + dual-ledger drift identification + share_equality alert-chain audit → [2] B.1 triage confirmation with C3 combined verdict → [3] D.1 per-strategy exception isolation → [4] D.3 schema-drift assertions. Items [1] and [3]+[4] are parallel-safe; B.1 is read-only and can interleave.
+Goal of this session: execute (in order of leverage):
+  [0] Legacy heartbeat reader removal (one-file fix; unblocks PF1 uptime > 0%).
+  [1] SCP-deploy D.1 + D.3 + heartbeat-reader fix to box in one rebuild.
+      Verify with `docker exec aaats-paper-crypto python scripts/evaluate_live_readiness.py`
+      — expect uptime > 0% (real value, not 0% arithmetic).
+  [2] B.2 — execute the C3 PARAM-TUNE + symbol-halt patch (file:line scope is in
+      the B.1 table). One-file edit in trading/altcoin_reversion.py. Run a 7-day
+      backtest if extant; otherwise paper-shadow.
+  [3] D.2 (heartbeat watchdog) — new sidecar container that tails data/heartbeat.json
+      and auto-restarts the trading container on stale heartbeat. Parallel-safe with
+      B.2. Specs in docs/decisions/2026-05-21_track_d_reliability_addendum.md §"Phase D.2".
+  [4] A.1 — state isolation prep (per-mode risk_engine_state files). Read-only design
+      task this session; implementation in session 4.
 
-[0] C1 cache invalidation (FIRST ACTION ITEM — cheapest, highest-leverage):
-  - On box: `docker exec aaats-paper-crypto rm -f /app/data/stat_arb_health.json` (verify path with `docker exec aaats-paper-crypto ls /app/data/stat_arb*`).
-  - Tail container logs for the next recompute cycle (interval is in trading/paper_loop.py — likely 5 min): `docker logs -f --tail 100 aaats-paper-crypto | grep -iE "stat_arb|c1|corr14d"`.
-  - Verify: corr14d in the next state-write is non-zero; C1 either trades (z=+4.74 should fire) or honestly skips with a logged reason that is NOT the corr14d=0.000 false-floor.
-  - If C1 trades within 60 minutes: capture the trade row, halt this sub-task, proceed to [1]. If not: document the skip reason in docs/known_issues/2026-05-21_c1_post_cache_invalidation.md and continue.
-  - Exit: C1 cache cleared, behaviour observed, finding logged.
+[0] Legacy heartbeat reader removal (FIRST ACTION ITEM):
+  - File: monitoring/heartbeat_monitor.py
+  - Rewrite get_heartbeat / get_all_heartbeats / is_alive to read the FLAT schema
+    matching state/schemas.HeartbeatSchema. The flat shape is what the runner has been
+    writing since 2026-05-15+; the nested form has been dead code since then.
+  - Touch points:
+    * production_readiness/metrics_aggregator.py:241-246 — caller. Confirm it still
+      returns a sensible reliability ratio post-fix (single-market freshness check).
+    * heartbeat_monitor.HeartbeatMonitor.emit_heartbeat at lines 80-100 — REMOVE.
+      Runner writes the flat shape directly; the dataclass-emit path is dead.
+    * Any remaining caller of emit_heartbeat — grep first; deprecate cleanly.
+  - Tests: tests/test_heartbeat_monitor.py — round-trip on the flat schema; assert
+    is_alive returns True within max_age_seconds of a fresh write.
+  - Exit: PF1 uptime > 0% in the deployment_decision.json output on box post-rebuild.
 
-[1] A.0 box deployment (closes Phase A.0 fully — currently workstation-only):
-  - Workstation already has the fix to production_readiness/metrics_aggregator.py (commit from session 1), MANIFEST + .pre snapshot at .rollback/2026-05-21_A0_readiness_scorer/.
-  - Action: paramiko SCP the file to box (.tmp + mv -f), then `docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-paper-crypto` per CLAUDE.md.
-  - This is NOT bind-mounted (production_readiness/ is image-baked) so it requires the rebuild step.
-  - Verify on box: `ssh aaats@100.95.126.39 'docker exec aaats-paper-crypto python scripts/evaluate_live_readiness.py'` — expect drawdown in [-15%, 0%] and uptime > 0%. Capture deployment_decision.json post-fix and confirm the -781% / 0% lines are gone.
-  - SUB-TASK 1.a — runtime/ vs data/ paper_positions.json drift identification:
-      * grep workstation tree for writers: `rg --no-heading -n "paper_positions" --type py` and classify each hit as runtime/ writer, data/ writer, or reader. Output: docs/known_issues/2026-05-21_paper_positions_writer_drift.md with the call graph.
-      * Do NOT fix in this session — that's a Track A.0 follow-up that needs to land alongside D.3 schema work. Just identify, document, and decide which path is canonical (recommendation surfaces in the memo).
-  - SUB-TASK 1.b — share_equality_mismatches.json alert-chain audit:
-      * Cat the file on box; record current C3 TON/FET counter values.
-      * Check Grafana alert history (`docs/known_issues/` may have a runbook; otherwise query the Grafana API) for `share_equality_mismatch` rule fires in the last 9 days.
-      * If no Telegram alerts were sent despite non-zero counters: add a new row to docs/specs/reliability_failure_modes.md ranked S1 ("share-equality alert chain broken in production despite synthetic test passing 2026-05-16"). This is a new D-track input that D.0 missed.
-      * If alerts WERE sent and operator missed them: document in the same memo as an operator-cognition issue (D.4 daily digest covers this — note the link).
-  - Exit: PF1 can run clean on the metrics it controls; remaining blockers reflect real state (Win Rate, Total Trades), not arithmetic garbage. Two new docs/known_issues memos exist.
+[1] SCP + rebuild box with D.1 + D.3 + [0]:
+  - paramiko SCP (or scp + ssh mv -f) for each of:
+      trading/live_paper_runner.py
+      monitoring/metrics_exporter.py
+      monitoring/heartbeat_monitor.py
+      production_readiness/metrics_aggregator.py  (already on box from session 2; SCP only if changed by [0])
+      state/__init__.py, state/schemas.py (new tree)
+      risk/strategy_halt.py (new)
+      trading/strategy_isolation.py (new)
+  - docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-paper-crypto
+  - Verify: docker exec aaats-paper-crypto python scripts/evaluate_live_readiness.py
+    — expect drawdown in [-30%, 0%] (state's actual), uptime > 0%, all 3 blockers
+    showing real numbers (not arithmetic garbage).
+  - Verify D.3 smoke: docker logs aaats-paper-crypto 2>&1 | grep state-smoke
+    — expect 4 OK + 1 OK (risk_engine_state) lines on a healthy container.
+  - Verify D.1: docker exec aaats-paper-crypto python -c "from risk.strategy_halt import list_halted_strategies; print(list_halted_strategies())"
+    — expect [] (no halts).
 
-[2] B.1 triage confirmation:
-  - Silent-strategy audit's Phase B.1 draft: C1=FIX (already executed in [0]), C2=KEEP, C3=PARAM-TUNE, C5b=HALT, C6=KEEP, N1–N7=OUT-OF-SCOPE.
-  - REVISE C3 verdict to "PARAM-TUNE + symbol-halt (combined)": (a) wire BTC_DOM_FAST_RISE into _entry_allowed (file:line scope only — no code edit in this session, that's B.2); (b) add OP/USDT, ARB/USDT, PUMP/USDT, FET/USDT, LUNC/USDT to C3 symbol deny-list (residual = -$1.216/9d per session 1's symbol-halt math). Reversible; safer than full C3 HALT.
-  - Append "B.1 decision" block to docs/decisions/2026-05-22_live_flip_rebuild_plan.md with each strategy → decision → rationale → next action (file:line + diff scope for FIX/PARAM-TUNE).
-  - Exit: B.1 table merged; C1 status from [0] documented in the same block.
+[2] B.2 — C3 PARAM-TUNE + symbol-halt patch:
+  - File: trading/altcoin_reversion.py
+  - (a) Wire BTC_DOM_FAST_RISE filter into _entry_allowed (lines 314-330; constant
+        at :77 currently unread). Pass btc_dom_delta from the caller in
+        run_altcoin_reversion_crypto (line ~459-463) — the runner already has
+        btc_dom at trading/live_paper_runner.py:1625.
+  - (b) Extend symbol deny-list at trading/altcoin_reversion.py:487 (per-cycle
+        universe loop) to include OP/USDT, ARB/USDT, PUMP/USDT, FET/USDT, LUNC/USDT.
+        Justification: 0/8 SELL win rate on these 5 over 9 days; residual C3 P&L
+        without them = -$1.216/9d (session 1 symbol-halt math).
+  - Tests: tests/test_altcoin_reversion_btc_dom_filter.py — synthetic high-BTC.D-rise
+    test asserts entry is refused; synthetic deny-listed-symbol test asserts skip.
+  - Backtest: scripts/backtest_c3_param_sweep.py (if extant; otherwise run paper-shadow
+    for 7d).
+  - Exit: pre-patch realized P&L curve vs post-patch projection documented; tests
+    green; SCP-deploy patch as a separate rebuild AFTER [1] has been verified.
 
-[3] D.1 (per-strategy exception isolation):
-  - Read docs/specs/reliability_failure_modes.md row 2 + addendum §"Phase D.1".
-  - Wrap each strategy call in trading/paper_loop.py (and any sibling crypto runner) in its own try/except. On exception: log with strategy_id + cycle_id, increment a new Prometheus counter `strategy_exception_total{strategy=...}`, continue the cycle. Three consecutive exceptions in the same strategy → auto-HALT that strategy only (write to halt_state.json with reason).
-  - Tests required: synthetic strategy that raises on cycle 3 — assert other strategies run on that cycle and after; assert auto-HALT on the 3rd consecutive exception; assert Telegram fires (mock the sender).
-  - The trading/ tree is behavior-changing: write the failing test first per CLAUDE.md.
-  - Exit: D.1 tests green; manual smoke on box shows the synthetic strategy halted alone.
+[3] D.2 — Heartbeat watchdog (sidecar container):
+  - See addendum §"Phase D.2" for full spec.
+  - new health/watchdog.py + Dockerfile.watchdog + compose service `aaats-watchdog`.
+  - Detect: now - heartbeat.timestamp > 3 * CYCLE_INTERVAL_SEC (= 3 * 900 = 2700s).
+  - Recovery: docker restart aaats-paper-crypto, rate-limited to 3 in 30min.
+  - Tests: manual kill of aaats-paper-crypto → watchdog detects, Telegram fires,
+    container restarts; repeat 4x → 4th attempt skipped + escalation message.
+  - This depends on [0] (the watchdog reads the FLAT heartbeat schema).
 
-[4] D.3 (schema-drift assertions on startup):
-  - Add pydantic models in state/schemas.py for the 5 JSON state files: heartbeat.json, halt_state.json, risk_engine_state.json, paper_positions.json, share_equality_mismatches.json.
-  - IMPORTANT (session 1 finding): share_equality_mismatches.json is non-empty in production (C3 TON/FET counters). The schema must support a non-empty mismatches map (likely a Dict[str, int] keyed by "symbol_a|symbol_b" → count). Do NOT model it as an empty-only sentinel.
-  - paper_positions.json schema must accommodate the runtime/ vs data/ writer drift from sub-task 1.a — if [1] concludes there are two distinct shapes, model both and assert the canonical path matches the canonical shape; flag the other path as legacy in a docstring.
-  - Writers validate before write; readers validate after read; startup smoke runs all 5 reads and asserts. Mismatch → container refuses to start with a clear field-level error (not silent corruption).
-  - Tests required: synthetic corrupted JSON → container fails fast; round-trip test per schema; explicit round-trip with the production share_equality_mismatches.json captured in [1.b] as a fixture.
-  - This closes ~9 of 23 catalog rows by construction (per the D.0 cross-cutting observation #2). High leverage.
-  - Exit: every state file has a schema; CI runs a "schema sweep" test; production share_equality fixture round-trips clean.
+[4] A.1 — State isolation prep (read-only design):
+  - Per-mode risk_engine_state files (risk_engine_state.paper.json vs
+    risk_engine_state.live.json). Today's STATE_FILE at risk/engine.py:44-46 is a
+    single path.
+  - Write a design memo at docs/decisions/2026-05-22_state_isolation_design.md with
+    the proposed env-var discriminator + named-volume implications. NO code edits.
+  - Implementation deferred to session 4.
 
-Constraints (unchanged from session 1):
+Constraints (unchanged from sessions 1+2):
   - No SCP deploy from dirty tree.
   - Push to GitHub at end of session.
-  - No behavior change in trading/, execution/, risk/ paper paths without failing-then-passing test.
-  - Keep paper-crypto running. If a container rebuild is needed, `--no-deps aaats-paper-crypto` only.
-  - PAPER_MODE env var stays unused (Track A.1).
+  - No behavior change in trading/, execution/, risk/ paper paths without
+    failing-then-passing test.
+  - Keep paper-crypto running. Use `--no-deps aaats-paper-crypto` only.
+  - PAPER_MODE env var stays unused (still A.1+ scope).
 
 Reporting at session end:
-  - Append to "Status log" in docs/decisions/2026-05-22_live_flip_rebuild_plan.md (A.0 box ship + B.1 + C1 cache outcome + dual-ledger drift finding).
-  - Append to "Status log" in docs/decisions/2026-05-21_track_d_reliability_addendum.md (D.1 + D.3 + share-equality alert-chain audit outcome).
-  - If [1.b] surfaced a broken alert chain: add the new row to docs/specs/reliability_failure_modes.md and note it in the addendum status log.
-  - Overwrite docs/decisions/2026-05-21_next_session_prompt.md with the prompt for session 3 (likely D.2 watchdog + B.2 parameter sweeps on the C3 tune + A.1 state-isolation prep + paper_positions writer-drift fix if 1.a's recommendation is approved).
+  - Append to "Status log" in docs/decisions/2026-05-22_live_flip_rebuild_plan.md
+    ([0]+[1]+[2] ship report + verify outputs).
+  - Append to "Status log" in docs/decisions/2026-05-21_track_d_reliability_addendum.md
+    ([0] heartbeat reader fix + [3] D.2 + [4] A.1 design memo links).
+  - Overwrite docs/decisions/2026-05-21_next_session_prompt.md with session 4 prompt.
   - Commit + push.
-  - Ping operator only if something requires money/risk/doctrine decision. Specifically: do NOT ping for [0]/[1]/[1.a]/[1.b]/[2]/[3]/[4] outcomes unless one of them surfaces a kill-switch event (drawdown > -15%, share-equality delta > $0.50, or container failing to start after rebuild).
+  - Ping operator only on kill-switch events (drawdown more negative than -30%
+    measured by state file, share-equality delta > $0.50, or container failing
+    to start after rebuild). Otherwise no ping needed.
 
-Start with [0] C1 cache invalidation — cheapest, highest-leverage, sets up B.1 verdict on C1. Then dispatch [1] (sequential: SCP → rebuild → verify → 1.a + 1.b sub-tasks), [3] D.1, and [4] D.3 in parallel. B.1 confirmation is read-only and can interleave between blockers. Use Sonnet for the implementation work in [3] and [4]; [1] is also Sonnet-grade. Only escalate to Opus if a non-obvious bug appears.
+Start with [0] legacy heartbeat reader removal — small, cheap, unblocks PF1
+uptime > 0%. Then [1] SCP + rebuild box. Then [2] + [3] + [4] are parallel-safe.
 
-KNOWN SUB-AGENT QUIRK from session 1: spawned Agents (via the Agent tool) hit Write-tool permission denials this workstation; main-context Edit/Write work fine. If you delegate to subagents, instruct them to return content in their reply, not call Write directly — the parent context will write the files.
+KNOWN SUB-AGENT QUIRK (still active 2026-05-22): spawned Agents (via the Agent
+tool) may hit Write-tool permission denials on this workstation; main-context
+Edit/Write work fine. If you delegate to subagents, instruct them to return
+content in their reply, not call Write directly.
 ```
-
----
-
-## Why this is pre-written
-
-Operator's standing rule `feedback_respond_as_prompt`: session reports + actionable follow-up should be delivered AS the next prompt, decisions baked in, no "want me to draft it?" round-trip. This file is that prompt for the next Claude Code session.
-
-When that session finishes, it will overwrite this file with the prompt for the session after, so the chain is self-sustaining.

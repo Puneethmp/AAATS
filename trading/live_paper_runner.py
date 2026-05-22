@@ -54,6 +54,7 @@ from risk.engine import RiskEngine, RiskDecision
 from risk.position_sizer import PositionSizer
 from observability.alerts import send_alert
 from config.doctrine import LOCKED_STARTING_EQUITY
+from trading.strategy_isolation import run_strategy_with_isolation
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DB_PATH        = str(_ROOT / "data" / "paper_trades.db")
@@ -1557,11 +1558,11 @@ def run_india(positions: dict, portfolio: dict) -> None:
             log.error("  NSE %s error: %s", sym, exc, exc_info=True)
 
     # Statistical arbitrage: HDFCBANK / ICICIBANK pair
-    try:
-        from trading.stat_arb import run_stat_arb_india
-        run_stat_arb_india(portfolio, fetch_nse_hourly)
-    except Exception as exc:
-        log.error("  NSE stat_arb error: %s", exc, exc_info=True)
+    from trading.stat_arb import run_stat_arb_india
+    run_strategy_with_isolation(
+        "N1_stat_arb_india", run_stat_arb_india,
+        portfolio, fetch_nse_hourly,
+    )
 
     save_positions(positions)
     save_portfolio(portfolio)
@@ -1652,11 +1653,11 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
             log.error("  Crypto %s error: %s", sym, exc, exc_info=True)
 
     # Statistical arbitrage: BTC/ETH spread
-    try:
-        from trading.stat_arb import run_stat_arb_crypto
-        run_stat_arb_crypto(portfolio, fetch_crypto_hourly)
-    except Exception as exc:
-        log.error("  Crypto stat_arb error: %s", exc, exc_info=True)
+    from trading.stat_arb import run_stat_arb_crypto
+    run_strategy_with_isolation(
+        "C1_stat_arb", run_stat_arb_crypto,
+        portfolio, fetch_crypto_hourly,
+    )
 
     # Funding rate arbitrage: BTC/ETH delta-neutral (C5b)
     # HALTED 2026-05-15: see docs/known_issues/2026-05-15_c5b_halt.md
@@ -1670,11 +1671,11 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
     #     log.error("  Funding arb error: %s", exc, exc_info=True)
 
     # 4H Momentum Breakout: BTC/ETH only (C2)
-    try:
-        from trading.momentum_breakout import run_momentum_breakout_crypto
-        run_momentum_breakout_crypto(portfolio["crypto"], fetch_crypto_hourly)
-    except Exception as exc:
-        log.error("  Momentum breakout error: %s", exc, exc_info=True)
+    from trading.momentum_breakout import run_momentum_breakout_crypto
+    run_strategy_with_isolation(
+        "C2_momentum_breakout", run_momentum_breakout_crypto,
+        portfolio["crypto"], fetch_crypto_hourly,
+    )
 
     # ──────────────────────────────────────────────────────────────────
     # SCANNER-FIRST PIPELINE (2026-05-12)
@@ -1744,16 +1745,14 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
     if _skip_c3:
         log.info("  C3 SKIPPED this cycle (sentiment gate: extreme greed)")
     else:
-        try:
-            from trading.altcoin_reversion import run_altcoin_reversion_crypto
-            run_altcoin_reversion_crypto(
-                portfolio["crypto"], fetch_crypto_hourly,
-                symbols=c3_picks,
-                full_positions=positions,
-                full_portfolio=portfolio,
-            )
-        except Exception as exc:
-            log.error("  Altcoin reversion error: %s", exc, exc_info=True)
+        from trading.altcoin_reversion import run_altcoin_reversion_crypto
+        run_strategy_with_isolation(
+            "C3_altcoin_reversion", run_altcoin_reversion_crypto,
+            portfolio["crypto"], fetch_crypto_hourly,
+            symbols=c3_picks,
+            full_positions=positions,
+            full_portfolio=portfolio,
+        )
 
     # Bollinger Range Trader: scanner picks or hardcoded SYMBOLS (C6)
     # Fires when regime=RANGE_BOUND and %B<0.15 + RSI<32. Direct
@@ -1761,18 +1760,16 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
     if _skip_c6:
         log.info("  C6 SKIPPED this cycle (sentiment gate: extreme greed)")
     else:
-        try:
-            from trading.bollinger_range import run_bollinger_range_crypto
-            run_bollinger_range_crypto(
-                portfolio["crypto"],
-                fetch_crypto_hourly,
-                open_positions=positions.get("crypto", {}),
-                symbols=c6_picks,
-                full_positions=positions,
-                full_portfolio=portfolio,
-            )
-        except Exception as exc:
-            log.error("  Bollinger range error: %s", exc, exc_info=True)
+        from trading.bollinger_range import run_bollinger_range_crypto
+        run_strategy_with_isolation(
+            "C6_bollinger_range", run_bollinger_range_crypto,
+            portfolio["crypto"],
+            fetch_crypto_hourly,
+            open_positions=positions.get("crypto", {}),
+            symbols=c6_picks,
+            full_positions=positions,
+            full_portfolio=portfolio,
+        )
 
     save_positions(positions)
     save_portfolio(portfolio)
@@ -1798,6 +1795,31 @@ def main(market: str = "crypto") -> None:
     log.info("  Cycle    : %d seconds (15 min)", CYCLE_INTERVAL_SEC)
     log.info("  ML       : XGBoost confidence gating")
     log.info("  Strategies: C1 stat-arb, C2 momentum, C3 alt-reversion, C5b funding-arb")
+
+    # D.3 — Schema-drift smoke at startup. Refuse-to-start on INVALID; tolerate
+    # MISSING / MISSING_OPTIONAL because the runner is the writer for several
+    # of these files and can re-create them mid-cycle (e.g. heartbeat.json on
+    # the first cycle write). The runner has historically silently coexisted
+    # with a corrupted reader (catalog row 1 — heartbeat writer/reader drift);
+    # a single fail-fast at boot is preferable to days of silent staleness.
+    try:
+        from state.schemas import validate_all_state_files
+        smoke = validate_all_state_files(_ROOT / "data")
+        for key, status in smoke.items():
+            if status.startswith("INVALID"):
+                log.error("  STATE FILE SCHEMA FAIL  %s : %s", key, status)
+            else:
+                log.info("  state-smoke  %s : %s", key, status)
+        invalid = [k for k, v in smoke.items() if v.startswith("INVALID")]
+        if invalid:
+            raise SystemExit(
+                f"D.3 startup schema validation FAILED: {invalid}. "
+                f"Refusing to start. Inspect data/ and re-deploy."
+            )
+    except SystemExit:
+        raise
+    except Exception as exc:
+        log.warning("D.3 startup schema smoke skipped (%s)", exc)
 
     # Load persistent state
     positions = load_positions()
