@@ -686,6 +686,134 @@ this.
 
   Rollback baseline at `.rollback/2026-05-22_d1_d3_isolation_schemas/`.
 
+- **2026-05-22 (session 3)** — Four-track ship: [0] heartbeat reader +
+  [1] box deploy of D.1/D.3/heartbeat + [2] B.2 C3 patch + [3] D.2
+  watchdog + [4] A.1 design memo. PF1 score 80.6% → 100.2%; Infrastructure
+  Uptime cleared from blockers.
+
+  **[0] Legacy heartbeat reader removal — SHIPPED.**
+  `monitoring/heartbeat_monitor.py` rewritten for the FLAT schema
+  (catalog row 1). Dataclass mirrors `state.schemas.HeartbeatSchema`
+  (`timestamp/cycle/market/cycle_duration_seconds`); `emit_heartbeat` +
+  the legacy `HeartbeatMonitor.emit_heartbeat` removed (runner is sole
+  writer); `get_heartbeat / get_all_heartbeats / is_alive` rewritten for
+  flat shape. `"--market both"` fans out to crypto+india. Dead path
+  cleanup: `trading/paper_loop.py::emit_cycle_heartbeat` removed (no
+  callers). `tools/operator/test_monitoring_modules.py` updated to
+  simulate the runner's flat write directly. `tests/test_heartbeat_monitor.py`
+  added (11 tests: flat round-trip + legacy-shape rejection + edge cases).
+  `tests/test_live_readiness_scorer.py::_seed_heartbeat` migrated to flat.
+  `runtime/paper_positions.json` deleted per the 1.a memo.
+
+  **[1] SCP-deploy D.1 + D.3 + heartbeat-reader fix — SHIPPED + verified.**
+  `scripts/deploy_session3_d1_d3_heartbeat.py` (new) atomic-swapped 7
+  files (D.1 new tree + D.3 new tree + heartbeat-reader fix). First
+  rebuild surfaced a residual `from monitoring.heartbeat_monitor import
+  emit_heartbeat` in `trading/paper_loop.py` (production entry point
+  delegates to `trading/live_paper_runner.py::main()` at :350) →
+  ImportError → restart loop. Follow-up swap shipped the cleaned-up
+  `paper_loop.py`. Container stable, cycle 1 completed in 13.2s with
+  fresh heartbeat write. PF1 post-verify:
+
+  ```
+  Score: 100.2%
+  Blockers:
+    - Win Rate: 28.3% (minimum: 45.0%)
+    - Maximum Drawdown: -33.4% (threshold: -15.0%)
+  ```
+
+  **Infrastructure Uptime cleared** (was 0.0% / a blocker in sessions
+  1+2). Remaining 2 blockers are real strategy-state values; the
+  drawdown is per the canonical `risk_engine_state.json` (peak=$131.32,
+  last_equity≈$87.45). Rollback baseline at
+  `.rollback/2026-05-22_session3_d1_d3_heartbeat_box/MANIFEST.txt`.
+
+  **Pre/post-deploy box SHAs (live_paper_runner.py):**
+  pre=`7d48a501ad2a85f7…` → post=`72f675535632e89a…` (includes the
+  post-deploy halt_on_critical band-aid swap + B.2 btc_dom_now wiring).
+
+  **[1].a — production entry point clarified.** Sessions 1+2's repeated
+  reference to `trading/live_paper_runner.py` as "the runner" was
+  partially correct: `live_paper_runner.py:main()` is the loop, but the
+  container's compose CMD is `python trading/paper_loop.py --market crypto`.
+  `paper_loop.py:350-370` is a thin arg-parser shim that delegates to
+  `live_paper_runner.main()`. D.3 startup smoke fires correctly because
+  the delegation invokes the runner's main. The session-2 catalog
+  references to "runner main" remain valid; the entry-point label was
+  the only ambiguity.
+
+  **[1].b — kill-trigger band-aid (operator-approved).** Session-2's
+  `d1b7feb` set `halt_on_critical=True` at
+  `trading/live_paper_runner.py:1881`. The box was running the
+  pre-d1b7feb image until this session's deploy. Post-deploy the
+  reconciler HALTed every cycle on a real ~$7 BTC/ETH drift
+  (`symbol_present_in_only_one_source`) — restart-loop fingerprint
+  (RestartCount 6→14 in 5min). Operator approved reverting to
+  `halt_on_critical=False` (band-aid) and deferring the BTC/ETH ledger
+  drift to the unified-ledger sprint. Reconciler still WARNs every
+  cycle; the WARN is now the surfaced signal, not a HALT. Container
+  stable post-revert (cycle 1 completed in 13.2s).
+
+  **[2] B.2 — C3 PARAM-TUNE + symbol-halt — SHIPPED + deployed.**
+  `trading/altcoin_reversion.py`:
+    - (a) `BTC_DOM_FAST_RISE` wired into `_entry_allowed` (declared at
+      :77 but unread since 2026-05-12). New `data/c3_btc_dom_cache.json`
+      persists the previous cycle's BTC.D reading; the runner passes
+      `btc_dom_now=btc_dom` and altcoin_reversion computes the
+      percentage-point delta. Filter refuses entry when delta ≥ 0.8 pp.
+    - (b) `DENYLIST_SYMBOLS = {OP/USDT, ARB/USDT, PUMP/USDT, FET/USDT,
+      LUNC/USDT}` short-circuits the ENTRY branch. Held positions take
+      the manage-open branch and exit cleanly (SELL is NOT impeded).
+    - First-cycle semantics: no cache → delta=None → filter inactive
+      (gate-honest first cycle after a (re)deploy).
+  `trading/live_paper_runner.py`:
+    - Pass `btc_dom_now=btc_dom` into the C3 dispatch site (the
+      isolation envelope from session 2 already accepts kwargs).
+  Tests: `tests/test_altcoin_reversion_btc_dom_filter.py` 9/9 green
+  (5 filter semantics + 2 denylist + 2 cache round-trip). Deployed in
+  the same SCP swap as the halt_on_critical band-aid revert.
+
+  **[3] D.2 — Heartbeat watchdog sidecar — CODE + TESTS shipped, BOX
+  DEPLOY DEFERRED to operator approval (compose-level change).**
+  `health/watchdog.py`: pure-logic `WatchdogState.classify` decision
+  machine (verbs: ok / restart / restart_missing / escalate),
+  IO-shell `Watchdog.tick`. Detects via `now - heartbeat.timestamp >
+  3 × CYCLE_INTERVAL_SEC = 2700s`. Restart rate-limited to 3 in
+  30 min; 4th detection escalates Telegram-only. Self-heartbeat at
+  `data/watchdog_heartbeat.json`. `deployment/Dockerfile.watchdog`:
+  python:3.11-slim + docker CLI + python-telegram-bot. Compose entry
+  for `aaats-watchdog` mounts `/var/run/docker.sock` (full rw — Docker
+  socket doesn't support ro mounts; least-privilege deferred). Tests
+  at `tests/test_watchdog.py` (11/11 green): state-machine 6 + tick
+  integration 5 (incl. 4th-tick escalation + docker-restart-failure
+  follow-up alert). Manual end-to-end on box deferred to a follow-up
+  rebuild (the docker.sock mount is a privileged change; operator
+  approval queued for next session — flagged in next_session_prompt).
+
+  **[4] A.1 — State isolation design (memo only) — SHIPPED.**
+  `docs/decisions/2026-05-22_state_isolation_design.md` (new): proposes
+  env-var discriminator + per-mode named-volume layout for
+  `risk_engine_state.{paper,live}.json`. Code at `risk/engine.py:44-46`
+  already supports `AAATS_RISK_STATE_FILE` override; the memo adds a
+  `SYSTEM__TRADING_MODE`-driven path resolution + per-mode named volumes
+  (`state-crypto-paper`, `state-crypto-live`). NO code edits this
+  session. Operator review gate on the compose change. Implementation
+  queued for session 4.
+
+  **Pytest:** 61/61 + 1 cleanly skipped:
+
+  ```
+  tests/test_heartbeat_monitor.py                11 passed (new)
+  tests/test_altcoin_reversion_btc_dom_filter.py  9 passed (new)
+  tests/test_watchdog.py                         11 passed (new)
+  tests/test_state_schemas.py                    16 passed (regression)
+  tests/test_strategy_isolation.py                7 passed (regression)
+  tests/test_live_readiness_scorer.py             6 passed (regression)
+  tests/test_dual_ledger_drift.py                 1 passed + 1 skip (runtime/ absent per 1.a memo)
+  ```
+
+  Rollback baselines at `.rollback/2026-05-22_session3_d1_d3_heartbeat_box/MANIFEST.txt`.
+
 ---
 
 ## B.1 triage table (decision merged 2026-05-22 session 2)

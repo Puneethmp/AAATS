@@ -289,3 +289,76 @@ The `Action needed` field is the operator's single decision-trigger. If it's `NO
    - **D.4 (daily digest)** — depends on D.3 schemas so the digest can
      read state files without defensive `.get(..., default)` everywhere.
    - **D.5 (30-day soak)** — once D.2 + D.4 land.
+
+- **2026-05-22 (session 3)** — Legacy heartbeat reader removed (closes
+  catalog row 1 ACTIVE bug) + D.2 watchdog code shipped + A.1 design memo.
+
+  **Heartbeat legacy reader removal — SHIPPED + box-deployed.**
+  Closes the ACTIVE production bug `monitoring/heartbeat_monitor.py:142`
+  flagged in session 2 ("argument after ** must be a mapping, not str").
+  `monitoring/heartbeat_monitor.py` rewritten for the FLAT schema; the
+  legacy nested-per-market `HeartbeatMonitor.emit_heartbeat` is gone.
+  Dead callers of the old emitter cleaned (`trading/paper_loop.py::emit_cycle_heartbeat`
+  had no real callers; deleted). Post-deploy PF1 verification ran clean:
+  `Infrastructure Uptime` is **no longer in the blockers list** (was 0.0%
+  the whole sprint; now reads non-zero per-market freshness). Tests at
+  `tests/test_heartbeat_monitor.py` (11 cases) + the prod-shape fixture
+  in `tests/test_state_schemas.py` (D.3 schema-drift assertion) form the
+  combined guard.
+
+  **D.2 — Heartbeat watchdog — CODE + TESTS shipped, box deploy deferred.**
+  Per the §"Phase D.2" spec:
+    - Detect: `now - heartbeat.timestamp > 3 × CYCLE_INTERVAL_SEC = 2700s`.
+    - Recovery: `docker restart aaats-paper-crypto`, rate-limited to 3
+      in 30 min; 4th detection escalates Telegram-only.
+    - File: `health/watchdog.py` with a clean policy/IO split
+      (`WatchdogState.classify` is pure logic; `Watchdog.tick` is the
+      shell with file IO + docker CLI + Telegram via
+      `observability.alerts.send_alert`).
+    - Self-heartbeat at `data/watchdog_heartbeat.json` for
+      meta-observability (catches the "watchdog is itself broken" case).
+    - Sidecar: `deployment/Dockerfile.watchdog` (python:3.11-slim +
+      docker CLI + python-telegram-bot only) + `aaats-watchdog` compose
+      service mounting `/var/run/docker.sock` and `../data:ro`.
+  Tests at `tests/test_watchdog.py` (11/11 green). Manual end-to-end
+  smoke on box deferred to a follow-up rebuild (the docker.sock mount
+  is operator-approval gated; queued for session 4).
+
+  **A.1 — State isolation design memo — SHIPPED.**
+  `docs/decisions/2026-05-22_state_isolation_design.md`. Read-only
+  design; implementation queued for session 4 after operator review of
+  the compose change (per-mode named volumes).
+
+  **Cross-cutting findings folded back into the catalog:**
+    - Catalog row 1 is now **CLOSED** at the code level: D.3 catches
+      schema drift on startup, D.2 catches stale heartbeats at runtime,
+      and the legacy nested reader (the producer of "argument after **
+      must be a mapping, not str") has been removed. The drift class is
+      structurally extinct, not just guarded against.
+    - **New** finding: the production entry point is `trading/paper_loop.py`
+      (a thin shim that delegates to `live_paper_runner.main()`), NOT
+      `live_paper_runner.py` directly. Sessions 1+2's "runner main"
+      references remain valid because the delegation path invokes the
+      same `main()`, but the file-name label was the bug that surfaced
+      this session as an unexpected `ImportError` on first rebuild.
+    - **Box-side surprise**: `halt_on_critical=True` (set in session 2's
+      `d1b7feb`) was not in effect on box until this session's deploy
+      activated it. Post-deploy the reconciler HALTed every cycle on a
+      pre-existing BTC/ETH ~$7 dust drift — restart-loop fingerprint.
+      Operator approved reverting to `halt_on_critical=False` (band-aid)
+      and deferring the BTC/ETH ledger drift root-cause to the
+      unified-ledger sprint. This pattern (kill-trigger activates only
+      when image rebuilds) is itself worth a catalog row — propose D.7
+      ("kill-trigger config drift between workstation and box") at the
+      operator's option; not auto-added.
+
+  **Next D-track steps:**
+   - **D.2 box deploy** — operator review of the docker.sock mount,
+     then `docker compose up -d --build aaats-watchdog`. End-to-end
+     test (kill `aaats-paper-crypto` → watchdog detects → Telegram
+     fires → container restarts) per the §"Phase D.2" spec.
+   - **D.4 (daily digest)** — depends on D.3 schemas (now landed +
+     deployed). Implementation in a future session.
+   - **BTC/ETH ledger drift root cause** — owned by the unified-ledger
+     sprint, but the band-aid (`halt_on_critical=False`) is reversible
+     in one line once the writer-side fix lands.
