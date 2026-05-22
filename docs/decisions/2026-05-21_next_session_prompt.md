@@ -128,8 +128,13 @@ Goal of this session: execute (in order of leverage):
     the proposed env-var discriminator + named-volume implications. NO code edits.
   - Implementation deferred to session 4.
 
-Constraints (unchanged from sessions 1+2):
+Constraints (unchanged from sessions 1+2, with one addition):
   - No SCP deploy from dirty tree.
+  - **`git pull --rebase` BEFORE every push.** The Contabo box auto-pushes
+    `data/`+`logs/` snapshots to origin/main every 15 minutes; a long session
+    will see 30-60 of those commits land while you work. Rebase is conflict-free
+    because the auto-cron only touches data/ + logs/, but a non-rebased push
+    will be rejected. (Surfaced session 2; standing rule going forward.)
   - Push to GitHub at end of session.
   - No behavior change in trading/, execution/, risk/ paper paths without
     failing-then-passing test.

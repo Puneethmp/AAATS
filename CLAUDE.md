@@ -17,6 +17,8 @@ repo**. Code is shipped from a Windows workstation via `paramiko` over SSH:
 
 Deploy scripts refuse uncommitted manifest files; use `--allow-dirty` in genuine emergencies only and commit immediately after.
 
+**Box auto-cron pushes to origin/main every 15 minutes** (surfaced 2026-05-22 session 2). A cron job on the Contabo box commits `data/` + `logs/` snapshots and pushes them. A typical Claude Code session will see 30–60 of these commits land on origin/main mid-session. Every push from the workstation must `git pull --rebase` first. Conflicts are not expected because the auto-cron only touches `data/` and `logs/` — workstation work touches `trading/`, `monitoring/`, `state/`, `risk/`, `docs/`, etc.
+
 Compose layout: `aaats-paper-crypto` belongs to project `deployment` (config under `/home/aaats/aaats/deployment/`); Grafana/Prometheus belong to project `aaats-base` (config under `/srv/aaats/compose/`). A `compose down` from one path does not touch the other.
 
 ## Container has no `sqlite3` CLI
