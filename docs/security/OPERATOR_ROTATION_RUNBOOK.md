@@ -7,18 +7,24 @@ commits of history and still valid on the box / on Grafana / on Telegram.
 
 ## ⚠ Run-once setup before you start
 
-Generate one new value for each leaked secret. The session that authored
-this runbook generated the following candidates — **use these or pick your
-own**, but use the same value consistently across all the commands below.
+Generate ONE new value for each leaked secret you need to rotate. **Do not
+commit these to the repo.** Save them to your gitignored workstation `.env`
+or a password manager.
 
-| Secret | Suggested new value | Where to store |
+Per-secret generator (40-char alphanumeric, suitable for everything below):
+
+```bash
+./venv/Scripts/python.exe -c "import secrets,string; print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(40)))"
+```
+
+Run it once per credential. Use the same value consistently across all the
+commands for that credential.
+
+## Already-rotated credentials (2026-05-22)
+
+| Secret | Status | Stored at |
 |---|---|---|
-| `AAATS_SSH_PASSWORD` (box `aaats` user) | `Lp01DZ4cByajPInoQtJ-ivp5_XmTj5q7` | `.env` (workstation) + `passwd` (box) |
-| `AAATS_GRAFANA_PASSWORD` (Grafana admin) | `j5si-Fjx4wIJo9RJc_fNW7vO1bX5DWmb` | `.env` (workstation) + Grafana API |
-
-(These are 32-char, alphanumeric + `_-`. Generated with
-`python -c "import secrets,string; print(''.join(secrets.choice(string.ascii_letters+string.digits+'_-') for _ in range(32)))"`.
-Discard them after this rotation; don't reuse.)
+| `AAATS_GRAFANA_PASSWORD` (Grafana admin) | ✅ Rotated this session via `grafana cli admin reset-admin-password` | `.env` (workstation, gitignored) + backup at `~/grafana_admin_pw_2026-05-22.txt` |
 
 ## 1. Rotate the SSH password — operator hands required
 
@@ -57,31 +63,29 @@ echo 'AAATS_SSH_PASSWORD=<new value>' >> .env
 
 ## 2. Rotate the Grafana admin password
 
-Grafana is Tailscale-only, but the leaked admin token gives anyone on the
-tailnet full admin. Rotate via the API from the box (curl works inside
-the box without sudo since Grafana is a Docker container):
+**Already done 2026-05-22** — see the rotation table at the top of this
+runbook. The procedure used was `docker exec aaats-grafana grafana cli
+admin reset-admin-password <NEW_PW>` (the CLI variant works even when the
+existing admin password is unknown or compromised). The new password is in
+the workstation `.env` and a backup at `~/grafana_admin_pw_2026-05-22.txt`.
+
+If you ever need to rotate again, use the same CLI variant:
 
 ```bash
-# One-liner — runs from your workstation, executes via SSH on the box:
-ssh aaats@100.95.126.39 'curl -s -X PUT \
-  -u admin:1ZZ6lgHOMED237XTUWD348Y7 \
-  -H "Content-Type: application/json" \
-  -d "{\"oldPassword\":\"1ZZ6lgHOMED237XTUWD348Y7\",\"newPassword\":\"<NEW VALUE>\",\"confirmNew\":\"<NEW VALUE>\"}" \
-  http://localhost:3000/api/user/password'
+# Generate the new password locally:
+NEW_PW=$(./venv/Scripts/python.exe -c "import secrets,string; print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(40)))")
+# Apply on the box:
+ssh aaats@100.95.126.39 "docker exec aaats-grafana grafana cli admin reset-admin-password $NEW_PW"
+# Save to your gitignored .env:
+echo "AAATS_GRAFANA_PASSWORD=$NEW_PW" >> .env
+# Verify:
+ssh aaats@100.95.126.39 "curl -s -o /dev/null -w '%{http_code}\n' -u admin:$NEW_PW http://100.95.126.39:3000/api/datasources"
+# Expect: 200
 ```
 
-Replace `<NEW VALUE>` with your chosen new Grafana password (the suggested
-`j5si-Fjx4wIJo9RJc_fNW7vO1bX5DWmb` works).
-
-Expected response: `{"message":"User password changed"}`. If you get a 401,
-the leaked password is no longer current (someone else rotated, or it was
-already changed) — investigate before continuing.
-
-Then update workstation `.env`:
-
-```bash
-echo 'AAATS_GRAFANA_PASSWORD=<new value>' >> .env
-```
+If you prefer the API endpoint instead (requires knowing the current
+password): `curl -X PUT -u admin:<CURRENT> -H "Content-Type: application/json"
+-d '{"password":"<NEW>"}' http://100.95.126.39:3000/api/admin/users/1/password`.
 
 ## 3. Rotate the Telegram bot token
 

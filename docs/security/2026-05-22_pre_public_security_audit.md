@@ -11,7 +11,7 @@
 | 0 | Rotate SSH password on Contabo box; disable password auth | **Operator** | **BEFORE going public** |
 | 0 | Rotate Telegram bot token | **Operator** | Before going public |
 | 0 | Rotate any broker API keys ever stored in `.env` | **Operator** | Before going public |
-| 0 | Rotate Grafana admin password (separate from SSH password — also leaked) | **Operator** | Before going public |
+| 0 | Rotate Grafana admin password (separate from SSH password — also leaked) | ✅ DONE 2026-05-22 via `grafana cli admin reset-admin-password`; new value in workstation `.env` + `~/grafana_admin_pw_2026-05-22.txt` | — |
 | 1 | Replace hardcoded SSH password in 11 ops scripts (7 SSH + 4 Grafana-curl) with env-var pattern | DONE this commit | — |
 | 1 | Add `.env.example`, `SECURITY.md`, `.pre-commit-config.yaml` with gitleaks | DONE this commit | — |
 | 2 | Decide repo-public path (new clean repo vs sanitize-this-repo vs portfolio-only) | **Operator** | Decision required |
