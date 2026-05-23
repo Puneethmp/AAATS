@@ -1,0 +1,42 @@
+ROLLBACK BASELINE - 2026-05-23 Session 11 [hotfix] phantom-position
+================================================================================
+
+DEPLOYED_AT_UTC               = 2026-05-23T15:08:14Z
+ARCHIVE_TS_SUFFIX             = .pre_hotfix_20260523T150612Z
+PRE_PAPER_IMAGE_SHA           = sha256:ddbba66310e3a13e6f6ca98a0c67bbd63592e6fb68cdfd305b351f32e3b3612d
+POST_PAPER_IMAGE_SHA          = sha256:7001c5e9233fcf08e5738c43973735a704c2c3d8596fb7484bacdcfd45801bc4
+PRE_WATCHDOG_IMAGE_SHA        = sha256:653fbdb892f4eca432c61b0dae4e1f8eb7036226aac63601f874c17e9298ef3d
+POST_WATCHDOG_IMAGE_SHA       = sha256:1faac514d6e7cea97f76a9c6395157c5b787e5ffbde77610a5310fc355dabf17
+POST_PAPER_STATUS             = running health=healthy restart=0
+POST_WATCHDOG_STATUS          = running
+GATE_PAPER_RUNNING            = True
+GATE_WATCHDOG_RUNNING         = True
+GATE_OPERATOR_HALT_CLEAR      = True
+GATE_D5_MARKER_PRESERVED      = True
+GATE_RECONCILER_CLEAN         = True
+GATE_SCHEMA_COMPLETE          = True
+PRE_HALT_STATE                = {
+  "us": true,
+  "india": true,
+  "crypto": true
+}
+POST_HALT_STATE               = {"us": true, "india": true, "crypto": false}
+
+Pre-deploy file SHAs:
+  scripts/init_db.py                                 : 07399331b145ae7bb0769bdb54cfdaef604e7cef22bd30ee40e5aa3a7b0d70ea
+  execution/paper_trader.py                          : 42b256f0b4bc73447916ec5860830022ed4c60dd39a33e0fb60d93aba9450644
+  trading/altcoin_reversion.py                       : 091a23f97b44ebecc8eb74d9d2a942074dc5009f162786c55c120c446c5dd0fa
+  trading/bollinger_range.py                         : 5a608ae98fe0c1b588af09c74bedf2b813e62e51512dd4fa3a866de27d8b6faa
+  trading/stat_arb.py                                : b6fa3eaf36d4c1889e232f8622bd9479c37760b3ce1b059385e4134e5d4989f6
+
+Post-deploy file SHAs:
+  scripts/init_db.py                                 : b6a7e868a7d1865f54ad4e42c77814617ee25e2223b62bd4f7fa87d9b3ecb47b
+  execution/paper_trader.py                          : 68e6adefe0de8fe771ead76562e6b840312d1b5aa8a731cc03dc4fcf48cc4f31
+  trading/altcoin_reversion.py                       : 08ead79d44a6a25d0160c87ba0bf9a971ca47c3340f1add766cc390eac0b6ecd
+  trading/bollinger_range.py                         : 4fbbbb3b7f1b16fa954b1248f557ead84fcac655a8bda1275bee82beae5514a9
+  trading/stat_arb.py                                : b94b1fd1ee3126c816a9d0b82f06320af8f4baaa440fb3732e65a27409d27660
+
+Reconciler tail (post-rebuild):
+  [32m15:07:46[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter (drift): TON/USDT drift_shares=0.000000 notional<$0.25 ? skip
+  [32m15:07:46[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | reconciler: filtered 1 dust drift entries (notional < $0.25)
+  [32m15:07:46[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | Reconciliation clean | checked=1 positions across crypto
