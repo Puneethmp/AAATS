@@ -192,16 +192,20 @@ def execute_reset(
     """
     started_at = now_fn()
 
-    # (d) stop paper-crypto AND watchdog. Both mount deployment_state-crypto-paper
-    # (paper-crypto rw, watchdog ro), so leaving watchdog up makes the
-    # `docker volume rm` step fail with "volume is in use".
+    # (d) stop AND remove paper-crypto + watchdog. Both mount
+    # deployment_state-crypto-paper (paper-crypto rw, watchdog ro);
+    # `docker volume rm` refuses if any container EXISTS (running or
+    # exited) that references the volume, so a plain `stop` is
+    # insufficient — `rm -f` is the explicit remove step.
     rc, _ = box.run(
-        f"cd {remote_dir}/deployment && docker compose stop aaats-paper-crypto aaats-watchdog",
-        "docker compose stop aaats-paper-crypto + aaats-watchdog",
+        f"cd {remote_dir}/deployment && "
+        "docker compose stop aaats-paper-crypto aaats-watchdog && "
+        "docker compose rm -f -s aaats-paper-crypto aaats-watchdog",
+        "docker compose stop + rm aaats-paper-crypto + aaats-watchdog",
     )
     if rc != 0:
         return 3, build_failure_marker(
-            "docker compose stop (paper-crypto + watchdog) failed", started_at,
+            "docker compose stop/rm (paper-crypto + watchdog) failed", started_at,
         )
 
     # (e)(f) volume rm + create.
