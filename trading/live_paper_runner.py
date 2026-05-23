@@ -1878,17 +1878,11 @@ def main(market: str = "crypto") -> None:
             if market in ("india", "both"):
                 _markets_to_check.append("india")
             if _markets_to_check:
-                # 2026-05-22 (session 3): band-aid back to halt_on_critical=False.
-                # Session-2's d1b7feb set this True, but post-deploy the
-                # reconciler HALTs every cycle on a real BTC/ETH ~$7 dust
-                # drift (symbol_present_in_only_one_source) — container
-                # restart-loops. Root-cause is a ledger writer mismatch
-                # (BTC/ETH show in one ledger but not the other); proper
-                # fix is in the unified-ledger sprint. Until then, the
-                # reconciler still WARNs but does not break the loop.
-                # Operator-approved 2026-05-22 (autonomy contract: kill
-                # trigger change requires sign-off).
-                _rec = reconcile_now(markets=_markets_to_check, halt_on_critical=False)
+                # 2026-05-23 (session 5): re-enabled halt_on_critical=True after
+                # shipping Option A in scripts/reconcile_intracycle.py:323
+                # (C1_stat_arb now excluded from Source B, parity with C5b).
+                # Root cause + fix in docs/known_issues/2026-05-23_btc_eth_ledger_drift.md.
+                _rec = reconcile_now(markets=_markets_to_check, halt_on_critical=True)
                 if _rec.halted:
                     log.critical(
                         "RECONCILIATION HALTED | issues=%d | "

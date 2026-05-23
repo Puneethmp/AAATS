@@ -309,7 +309,9 @@ def _compute_positions_from_db() -> dict[str, dict[str, float]]:
 
     Returns {market: {symbol: net_shares}}.
     Net = sum(BUY shares) - sum(SELL shares) per (market, symbol).
-    Excludes funding_arb (delta-neutral so net = 0 by design).
+    Excludes delta-neutral arb strategies whose per-leg trades net non-zero
+    by design (C5b_funding_arb perp/spot legs; C1_stat_arb long-A/short-B
+    legs). Their canonical position state lives in *_state.json (Source A).
     """
     if not DB_PATH.exists():
         return {"india": {}, "crypto": {}}
@@ -320,7 +322,12 @@ def _compute_positions_from_db() -> dict[str, dict[str, float]]:
         rows = conn.execute(
             "SELECT market, symbol, action, SUM(shares) as total "
             "FROM paper_trades "
-            "WHERE strategy != 'C5b_funding_arb' "    # exclude delta-neutral arb
+            # 2026-05-23: add C1_stat_arb (parity with C5b). C1's pair-keyed
+            # state file does not surface as a per-symbol position in Source A,
+            # so leaving its leg trades in Source B caused symbol_present_in_only_one_source
+            # HALTs on every cycle once halt_on_critical=True. Option A of
+            # docs/known_issues/2026-05-23_btc_eth_ledger_drift.md.
+            "WHERE strategy NOT IN ('C5b_funding_arb', 'C1_stat_arb') "
             "GROUP BY market, symbol, action"
         ).fetchall()
         conn.close()
