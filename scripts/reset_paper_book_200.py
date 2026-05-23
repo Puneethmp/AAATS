@@ -62,6 +62,29 @@ INDIA_STARTING_EQUITY_INR = 25000.0
 DIGEST_POLL_WINDOW_SEC = 20 * 60     # 20 minutes
 DIGEST_POLL_INTERVAL_SEC = 30
 
+# State files in the bind-mounted data/ tree that the digest's
+# compute_action_needed reads. Wiping the docker volume only resets
+# the risk-engine peak; these files survive a volume rm because they
+# live in the bind mount and must be explicitly archived for the
+# post-reset digest to reach Action needed: NONE.
+#
+# Archive (rename to .pre_reset_<ts>) — do NOT delete; gives the
+# operator a forensic trail if anything looks off post-reset.
+RESET_ARCHIVED_FILES = [
+    "paper_trades.db",                  # historical pnl — doctrine wipe
+    "alerts_log.json",                  # open alerts count -> 0
+    "strategy_halt_state.json",         # halted strategies -> none
+    "strategy_exception_state.json",    # consec exception streaks -> 0
+    "share_equality_mismatches.json",   # share-eq counter -> 0
+    "paper_positions.json",             # any stale open positions
+    "altcoin_reversion_state.json",     # C3 strategy state
+    "altcoin_reversion_cooldown.json",  # C3 cooldown timer
+    "bollinger_range_state.json",       # C6 strategy state
+    "stat_arb_state.json",              # C1 strategy state
+    "funding_arb_state.json",           # C5b strategy state
+    "digest_log.json",                  # digest-sent-today log
+]
+
 
 # ── Pure-logic helpers (testable without SSH) ─────────────────────────────
 
@@ -242,6 +265,22 @@ def execute_reset(
             "rollback: start paper-crypto + watchdog after volume rm failure",
         )
         return 3, build_failure_marker("volume rm/create failed", started_at)
+
+    # (e.5) Archive bind-mounted state files that survive a volume rm
+    # and would keep the post-reset digest from reaching NONE (open
+    # alerts, halted strategies, share-eq counters, historical trade pnl).
+    archive_ts = started_at.strftime("%Y%m%dT%H%M%SZ")
+    for rel in RESET_ARCHIVED_FILES:
+        # Each archive runs independently — a missing source file is
+        # NOT an error (e.g. fresh box never had funding_arb_state.json).
+        box.run(
+            f"if [ -e {remote_dir}/data/{rel} ]; then "
+            f"  mv -f {remote_dir}/data/{rel} "
+            f"     {remote_dir}/data/{rel}.pre_reset_{archive_ts}; "
+            f"  echo archived; "
+            f"else echo absent; fi",
+            f"archive data/{rel}",
+        )
 
     # (g) Seed $200 portfolio JSON and ensure state-paper exists.
     portfolio_json = json.dumps(seed_payload, indent=2)
