@@ -1,0 +1,64 @@
+ROLLBACK BASELINE - 2026-05-24 Session 9 HOTFIX state_bridge
+================================================================================
+DEPLOYED_AT_UTC               = 2026-05-23T11:17:45Z
+PRE_PAPER_IMAGE_SHA           = sha256:064483a2bfaa35cdd2b223fa1fc4072448e608ad3cae3173385b5b8f2496515e
+POST_PAPER_IMAGE_SHA          = sha256:1d3a7ffadd385c77688724b43d6511d7cb821ca88c7a562c56a131b8877dc16b
+POST_PAPER_STATUS             = running
+IMPORTS_OK                    = False
+NO_IMPORT_ERROR_IN_LOGS       = True
+NO_RUN_CRYPTO_ERROR_IN_LOGS   = True
+
+Pre-deploy file SHAs:
+  foundation/positions.py                            : ABSENT
+  foundation/state_bridge.py                         : ABSENT
+
+Post-deploy file SHAs:
+  foundation/positions.py                            : a161628f4d01c4e5ab86804bdace9786e12209067380c4f4d1b3bbe5e61fb65d
+  foundation/state_bridge.py                         : f9d9429b9a9d723b759eaa433c363fc9ef29f20545a146ce73c350d2dd1e9139
+
+Imports + ledger flag output:
+  Traceback (most recent call last):
+    File "<string>", line 1, in <module>
+  ImportError: cannot import name '_exit_gate_check' from 'trading.altcoin_reversion' (/app/trading/altcoin_reversion.py)
+
+Recent log tail:
+  [32m11:17:20[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT CRYPTO ? CRYPTO drawdown -33.4% breached -15% halt threshold
+  2026-05-23T11:17:20Z  INFO     paper_runner      ML gate: conf=0.394 -> SKIP HOLD
+  2026-05-23T11:17:20Z  INFO     trading.stat_arb    [BTC/USDT/ETH/USDT] spread=3.6051 z=+1.564 prices=(74798.8600, 2033.4100)
+  2026-05-23T11:17:22Z  INFO     markets.crypto.universe  [universe] fetched 3593 raw tickers from Binance
+  2026-05-23T11:17:22Z  INFO     markets.crypto.universe  [universe] kept=48  rejected_by={quote:2927, low:505, leveraged:52, denylist:24, crashing:18}  top3=[SOL/USDT, USD1/USDT, NEAR/USDT]
+  2026-05-23T11:17:22Z  INFO     paper_runner  [scanner] universe size=48  top5=['SOL/USDT', 'USD1/USDT', 'NEAR/USDT', 'SUI/USDT', 'MEGA/USDT']
+  2026-05-23T11:17:24Z  WARNING  paper_runner    GENIUS/USDT: insufficient bars
+  2026-05-23T11:17:26Z  WARNING  paper_runner    OPG/USDT: insufficient bars
+  2026-05-23T11:17:28Z  INFO     markets.crypto.scanner  [scanner] universe=48 fetched=46 skipped=2  candidates: c3=17, c6=8
+  2026-05-23T11:17:28Z  INFO     markets.crypto.scanner  [scanner] c3 top3: BCH/USDT(-3.340), CHZ/USDT(-2.802), AAVE/USDT(-2.665)
+  2026-05-23T11:17:28Z  INFO     markets.crypto.scanner  [scanner] c6 top3: AAVE/USDT(-0.267), BCH/USDT(-0.254), CHZ/USDT(-0.247)
+  2026-05-23T11:17:28Z  INFO     markets.crypto.allocator  [allocator] capital=$72.87  open=0/6  per_strategy_counts={}
+  2026-05-23T11:17:28Z  INFO     markets.crypto.allocator  [allocator] c3 picks (top 3): BCH/USDT, CHZ/USDT, AAVE/USDT
+  2026-05-23T11:17:28Z  INFO     markets.crypto.allocator  [allocator] c6 picks (top 3): AVAX/USDT, TIA/USDT, PENDLE/USDT
+  2026-05-23T11:17:29Z  INFO     markets.crypto.sentiment  [sentiment] F&G=28 (Fear)
+  2026-05-23T11:17:29Z  INFO     paper_runner  [scanner] final plan: c3=['BCH/USDT', 'CHZ/USDT', 'AAVE/USDT']  c6=['AVAX/USDT', 'TIA/USDT', 'PENDLE/USDT']  fg=28  skip_c3=False  skip_c6=False
+  2026-05-23T11:17:29Z  INFO     trading.altcoin_reversion  [c3] also evaluating 1 held position(s) outside picks: ['ADA/USDT']
+  [32m11:17:29[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT ALL MARKETS ? Portfolio drawdown -33.4% breached -20% halt threshold
+  2026-05-23T11:17:29Z  WARNING  paper_runner    ? RISK HALT_ALL blocks exit [crypto ADA/USDT]: Portfolio drawdown -33.4% breached -20% halt threshold
+  2026-05-23T11:17:29Z  INFO     trading.altcoin_reversion  [c3] ADA/USDT: SKIP SELL ? HALT_ALL active (Portfolio drawdown -33.4% breached -20% halt threshold)
+  [32m11:17:29[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT CRYPTO ? CRYPTO drawdown -33.4% breached -15% halt threshold
+  2026-05-23T11:17:29Z  INFO     trading.bollinger_range  [c6] AVAX/USDT  price=8.9110  %B=0.136  RSI=16.1  regime=RANGE_BOUND
+  2026-05-23T11:17:29Z  INFO     trading.bollinger_range  [c6] AVAX/USDT: trade size $4.37 < min $5.00 ? skip
+  2026-05-23T11:17:29Z  INFO     trading.bollinger_range  [c6] TIA/USDT  price=0.4006  %B=0.139  RSI=17.3  regime=RANGE_BOUND
+  2026-05-23T11:17:29Z  INFO     trading.bollinger_range  [c6] TIA/USDT: trade size $4.37 < min $5.00 ? skip
+  2026-05-23T11:17:30Z  INFO     trading.bollinger_range  [c6] PENDLE/USDT  price=1.7400  %B=0.115  RSI=22.6  regime=RANGE_BOUND
+  2026-05-23T11:17:30Z  INFO     trading.bollinger_range  [c6] PENDLE/USDT: trade size $4.37 < min $5.00 ? skip
+  2026-05-23T11:17:30Z  INFO     paper_runner  == Crypto cycle done | capital=USD 72.87 ==
+  [32m11:17:30[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter: TON/USDT residual_shares=-0.072334 notional<$0.25 ? skip
+  [32m11:17:30[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter: FET/USDT residual_shares=-0.587088 notional<$0.25 ? skip
+  [32m11:17:30[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter: EUR/USDT residual_shares=-0.014611 notional<$0.25 ? skip
+  [32m11:17:30[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter: SOL/USDT residual_shares=-0.000092 notional<$0.25 ? skip
+  [32m11:17:30[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter: TAO/USDT residual_shares=-0.000114 notional<$0.25 ? skip
+  [32m11:17:30[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter: ETH/USDT residual_shares=-0.000025 notional<$0.25 ? skip
+  [32m11:17:30[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter (drift): ADA/USDT drift_shares=0.000000 notional<$0.25 ? skip
+  [32m11:17:30[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | reconciler: filtered 7 dust drift entries (notional < $0.25)
+  [32m11:17:30[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | reconciler: skipped 2 deny-list symbols this cycle: crypto:LUNC/USDT, crypto:PENGU/USDT
+  [32m11:17:30[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | Reconciliation clean | checked=7 positions across crypto
+  2026-05-23T11:17:30Z  INFO     paper_runner    Cycle 1 done in 13.5s ? sleeping 886s
+  2026-05-23T11:17:30Z  INFO     paper_runner  [runner] cycle 1 complete: C1=hold(1) C2=idle C3=hold(1,picks=3) C5b=halted_src C6=idle(picks=3)

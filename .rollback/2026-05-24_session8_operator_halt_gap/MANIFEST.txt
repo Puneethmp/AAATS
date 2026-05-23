@@ -1,0 +1,96 @@
+ROLLBACK BASELINE - 2026-05-24 Session 9 [0] session-8 box deploy
+================================================================================
+
+DEPLOYED_AT_UTC               = 2026-05-23T11:14:03Z
+PRE_PAPER_IMAGE_SHA           = sha256:4905e304f6886d1999d91bc5bbea334d05de6b3dbe0b75fc2391bab8bcf91e85
+POST_PAPER_IMAGE_SHA          = sha256:064483a2bfaa35cdd2b223fa1fc4072448e608ad3cae3173385b5b8f2496515e
+POST_PAPER_STATUS             = running
+SMOKE_A_NEW_WORDING           = True
+SMOKE_B_EXIT_GATE_IMPORT      = True
+SMOKE_C_DIGEST_EQUITY         = True
+SMOKE_D_STRATEGY_IMPORTS      = False
+PRE_HALT_STATE                = {
+  "us": true,
+  "india": true,
+  "crypto": true
+}
+
+Pre-deploy file SHAs:
+  trading/live_paper_runner.py                       : b9928fc2938d30089c49e4139f6d1d61cc58b9f0175ecdca4ea7f1482bebaf4c
+  trading/altcoin_reversion.py                       : 6d37c445caea1179ba577145b3457671fd8a71a9ad99973fd0dc762a0ab75d1a
+  trading/bollinger_range.py                         : 4066e30eeed17e4af46519398335138f3de9b3098406a8bcbba90724e79f5817
+  trading/stat_arb.py                                : 9d7dc6c5da0ce232d88376ca2b0c845f258d31793d133ebe27d6fc55fbec997a
+  execution/paper_trader.py                          : 0926a0fee50426fd825581c98d87d35742937c9dad5c2d5e8dee8d61a6824fba
+  execution/status_db.py                             : a5ea1bf540c55b74f8fd2f96df3ed0565eef9c531f4bad9fd309b4c05e2e2962
+  foundation/mode_manager.py                         : a4d5923a26d2616f77cfd795174aa91ed0cfe90eaf69edf67b4412940e632ba0
+  diagnostics/d2_ml_dist.py                          : 1cfc0e45d8b0fe98f0ecb51e15293815607e62b8030046d19b4ea89ab6c3df01
+  tools/lint/silent_except_baseline.txt              : 456b865a92955909827b4f3b174c31473d80b384257d2650067f87f478a12cd5
+
+Post-deploy file SHAs:
+  trading/live_paper_runner.py                       : 9a3c4188e85e752ce62358ae25690445a01571b8e0a39410e348e7fc7b396b0f
+  trading/altcoin_reversion.py                       : 091a23f97b44ebecc8eb74d9d2a942074dc5009f162786c55c120c446c5dd0fa
+  trading/bollinger_range.py                         : 5a608ae98fe0c1b588af09c74bedf2b813e62e51512dd4fa3a866de27d8b6faa
+  trading/stat_arb.py                                : b6fa3eaf36d4c1889e232f8622bd9479c37760b3ce1b059385e4134e5d4989f6
+  execution/paper_trader.py                          : 42b256f0b4bc73447916ec5860830022ed4c60dd39a33e0fb60d93aba9450644
+  execution/status_db.py                             : e626b7fe471012b0ae96b0521ba9ed2875e06cb356b28967c7bcd9c1806ac089
+  foundation/mode_manager.py                         : 49ff024043d595370a81dd9c7231a04551ebd3386f5876a57970f63dbec8a96e
+  diagnostics/d2_ml_dist.py                          : d97920254dfc6c897a77382449d57be112a67b4cd71bfb68bde09328982ec45b
+  tools/lint/silent_except_baseline.txt              : 7866fc091c97be7c856aec6867a56611985a604fafb519d60486522785a84c8c
+
+Smoke (a) recent log tail:
+  2026-05-23T11:13:09Z  INFO     paper_runner    [AVAX/USDT] price=8.9210 | BTC.D=45.0%
+  2026-05-23T11:13:09Z  INFO     paper_runner      regime=RANGE_BOUND(0.99) votes={'BUY': 1, 'SELL': 0, 'HOLD': 5} ? HOLD (agree=0.83 conf=0.49)
+  [32m11:13:09[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT CRYPTO ? CRYPTO drawdown -33.4% breached -15% halt threshold
+  2026-05-23T11:13:09Z  INFO     paper_runner      ML gate: conf=0.388 -> SKIP HOLD
+  2026-05-23T11:13:09Z  ERROR    paper_runner  run_crypto error: cannot import name 'state_bridge' from 'foundation' (/app/foundation/__init__.py)
+  Traceback (most recent call last):
+    File "/app/trading/live_paper_runner.py", line 1988, in main
+      run_crypto(positions, portfolio)
+    File "/app/trading/live_paper_runner.py", line 1782, in run_crypto
+      from trading.stat_arb import run_stat_arb_crypto
+    File "/app/trading/stat_arb.py", line 66, in <module>
+      from foundation import state_bridge as _state_bridge
+  ImportError: cannot import name 'state_bridge' from 'foundation' (/app/foundation/__init__.py)
+  [32m11:13:09[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter: EUR/USDT residual_shares=-0.014611 notional<$0.25 ? skip
+  [32m11:13:09[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter (drift): ADA/USDT drift_shares=0.000000 notional<$0.25 ? skip
+  [32m11:13:09[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter: FET/USDT residual_shares=-0.587088 notional<$0.25 ? skip
+  [32m11:13:09[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter: SOL/USDT residual_shares=-0.000092 notional<$0.25 ? skip
+  [32m11:13:09[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter: ETH/USDT residual_shares=-0.000025 notional<$0.25 ? skip
+  [32m11:13:09[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter: TAO/USDT residual_shares=-0.000114 notional<$0.25 ? skip
+  [32m11:13:09[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter: TON/USDT residual_shares=-0.072334 notional<$0.25 ? skip
+  [32m11:13:09[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | reconciler: filtered 7 dust drift entries (notional < $0.25)
+  [32m11:13:09[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | reconciler: skipped 2 deny-list symbols this cycle: crypto:LUNC/USDT, crypto:PENGU/USDT
+  [32m11:13:09[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | Reconciliation clean | checked=7 positions across crypto
+  2026-05-23T11:13:09Z  INFO     paper_runner    Cycle 1 done in 3.5s ? sleeping 897s
+  2026-05-23T11:13:09Z  INFO     paper_runner  [runner] cycle 1 complete: C1=hold(1) C2=idle C3=hold(1) C5b=halted_src C6=idle
+
+Smoke (b) symbol import output:
+  <function apply_kill_switch_exit_gate at 0x7f9ad7eb1bc0>[32m11:13:56[0m | [36mdecision    [0m | [36mconsensus_voting    [0m | [1mINFO    [0m | Initialized consensus voting: agreement_threshold=0.45, veto_threshold=0.85
+
+Smoke (c) digest dry-run tail:
+  AAATS daily digest -- 2026-05-23 (T+11 since rebuild)
+  
+  P&L (24h)
+    Realized:   $+0.04
+    Unrealized: $+0.05
+    Equity:     $87.45  (peak $131.32, dd -33.4%)
+  
+  Operational
+    Cycles run:        24 (expected 96, 25.0% uptime)
+    Exceptions:        0  (0 auto-halted)
+    Container restarts: 0  (auto: 0, manual: 0)
+    Alerts fired:      1  (open: 1, resolved: 0)
+  
+  Strategies (24h)
+    Firing:   C1_stat_arb (10 trades)
+    Silent:   C2_momentum, C3_altcoin_reversion, C5b_funding_arb, C6_bollinger_range
+    Halted:   (none)
+  
+  Action needed: drawdown -33.4% past portfolio-kill threshold (-20%); all new entries blocked, open positions continue to mark-to-market
+
+Smoke (d) strategy imports output:
+  Traceback (most recent call last):
+    File "<string>", line 1, in <module>
+    File "/app/trading/altcoin_reversion.py", line 118, in <module>
+      from foundation import state_bridge as _state_bridge
+  ImportError: cannot import name 'state_bridge' from 'foundation' (/app/foundation/__init__.py)

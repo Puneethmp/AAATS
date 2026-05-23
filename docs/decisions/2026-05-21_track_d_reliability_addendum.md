@@ -776,3 +776,48 @@ The `Action needed` field is the operator's single decision-trigger. If it's `NO
       181 loguru-printf).
     - Loguru-rule refinement still queued for a Haiku session.
     - Runner-halt-stops-MTM semantic gap — CLOSED this session.
+
+- **2026-05-23 (session 9)** — Session-8 code shipped to box +
+  state_bridge hotfix; D-track items DEFERRED to session 10.
+
+  D-track had no scheduled item in session 9 (queue was [0] box deploy,
+  [0b] state probe, [1] B.1.5 backtest, [3] PF5 only if time, [5] lint
+  filler only). Session-9 time was consumed by deploy + hotfix + 60d
+  backtest, leaving no slack for D-track chip-away. Status quo:
+
+  - **D.5 day-1** — Still PARKED. Conditions unchanged: crypto under
+    operator halt + drawdown -33.4%. Day-1 clock starts only after
+    halt clears AND drawdown improves above the session-7 band wording
+    threshold. Session 11 reset will clear both gates in one step
+    (volume reinit at $200 floor → drawdown reset to 0, halt cleared).
+  - **D.6 chip-away** — silent-except still at 71; loguru-printf still
+    at 181. No work this session.
+  - **D.1 auto-halt isolation (PF5.6)** — DEFERRED. Spec unchanged;
+    session 10 picks it up as the lowest-blast-radius PF5 starter
+    (pure monkeypatch).
+  - **Loguru-only scoping** — still DEFERRED.
+
+  **State-bridge gap (cross-cutting Track D finding).** Session-9
+  deploy revealed that `foundation/state_bridge.py` and
+  `foundation/positions.py` (committed 2026-05-21 in 464bf7e, behind
+  `USE_UNIFIED_LEDGER` flag) had never been SCP'd to the box. The
+  strategy modules shipped this session import them at top-level, so
+  the box hit `ImportError` on every crypto cycle until the hotfix
+  landed. Reliability implication: the deploy-discipline doctrine
+  (`docs/conventions/deploy_discipline.md`) should be augmented with
+  an "import graph" check that walks the shipped manifest's local
+  imports and asserts every reachable local module is either in-manifest
+  or already on the box. Filing this as a session-10 D-track candidate
+  (low blast radius, augments existing
+  `tools/operator/_dirty_tree_guard.py`).
+
+  **Backtest harness as a Track D reliability tool.** The new
+  `tools/backtest/` package is technically a Track B (B.1.5)
+  deliverable, but it is now a permanent fixture that future Track D
+  reliability work can lean on: any candidate strategy gate-tweak can
+  be A/B'd on 60d of historical data before paper deployment. Worth
+  noting in the D-track inventory.
+
+  **Operator pings this session:** the B.1.5 PARTIAL recommendation
+  (see `live_flip_rebuild_plan.md` status log session 9 for the full
+  ping body). No D-track-specific ping required.

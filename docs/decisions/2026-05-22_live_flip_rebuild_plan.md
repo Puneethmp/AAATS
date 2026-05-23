@@ -1531,6 +1531,138 @@ this.
   the documented option (a) recommendation from the prompt; no
   divergence from the design recommendation, no surprises.
 
+- **2026-05-23 (session 9)** — Session-8 code SHIPPED to box; B.1.5
+  backtest harness BUILT and RUN; result **PARTIAL**.
+
+  **[0] Session-8 box deploy — SHIPPED.** Built
+  [scripts/deploy_session8_operator_halt_gap.py](scripts/deploy_session8_operator_halt_gap.py),
+  shipped 9 files (`trading/live_paper_runner.py`, `trading/altcoin_reversion.py`,
+  `trading/bollinger_range.py`, `trading/stat_arb.py`, `execution/paper_trader.py`,
+  `execution/status_db.py`, `foundation/mode_manager.py`,
+  `diagnostics/d2_ml_dist.py`, `tools/lint/silent_except_baseline.txt`).
+  Image rebuilt to `sha256:064483a2bfaa…` (was `4905e304…`).
+  Smoke A (new OPERATOR HALT wording: green), B (`apply_kill_switch_exit_gate`
+  import: green), C (digest dry-run Equity line non-N/A: green) all passed
+  on first run.
+
+  **[0.5] HOTFIX state_bridge.py — REQUIRED ON DETECTION.** Smoke D
+  (strategy `_exit_gate_check` imports) failed and runner log showed
+  `ImportError: cannot import name 'state_bridge' from 'foundation'`.
+  Root cause: commit 464bf7e (2026-05-21) added
+  `foundation/state_bridge.py` and `foundation/positions.py` for the
+  unified positions ledger (USE_UNIFIED_LEDGER flag); both files were
+  NEVER SCP'd to the box. Sessions 7 and 8 didn't touch them and the
+  strategy files on the box were the OLD versions without the import.
+  Session-9's deploy of the NEW strategy files (which import
+  `state_bridge`) exposed the gap. Hotfix via
+  [c:/tmp/hotfix_state_bridge.py](c:/tmp/hotfix_state_bridge.py) SCP'd
+  both files and rebuilt `aaats-paper-crypto` to image `sha256:1d3a7ffadd38…`.
+  Post-hotfix logs show C3 evaluating ADA/USDT and the new exit gate
+  correctly blocking the SELL on HALT_ALL (contract behaving exactly as
+  designed: HALT_ALL blocks exits, HALT_MARKET / operator halt allow
+  them through). Smoke D's symbol-presence check was bogus
+  (`_exit_gate_check` is a function-local binding, not a module-level
+  export); the runtime evidence (clean import in cycle logs, gate
+  blocking ADA) is what matters and it is green. Rollback at
+  `.rollback/2026-05-24_session9_hotfix_state_bridge/MANIFEST.txt`.
+
+  **[0b] State file investigation — read-only probe done.** All of
+  `/app/data/risk_engine_state.paper.json`, `portfolio_state.paper.json`,
+  `equity_curve.json`, `/app/data/state/risk_engine_state.json`, and the
+  state/-prefixed paper variants are ABSENT inside `aaats-paper-crypto`.
+  The `/app/data/state/` directory itself does not exist. Runner is
+  re-deriving portfolio state every cycle from `paper_trades.db` — works
+  but no persistence. Filed at
+  [docs/known_issues/2026-05-23_state_persistence_paths_missing.md](../known_issues/2026-05-23_state_persistence_paths_missing.md).
+  Session 11 reset will wipe `state-crypto-paper` volume regardless, so
+  no further action this session. Post-reset re-investigation hooks
+  documented in the issue.
+
+  **[1] B.1.5 backtest harness — BUILT and RUN. Recommendation:
+  PARTIAL.** New [tools/backtest/](tools/backtest/) package: `__init__.py`,
+  `historical_data.py` (ccxt Binance OHLCV fetcher with parquet cache at
+  `data/historical/`), `c3_replay.py` (bar-by-bar replay engine reusing
+  C3's PURE helpers — `_compute_z_score`, `_rsi`, `_realized_daily_vol`,
+  `_compute_trade_size` — with a reimplemented entry/exit driver that
+  steps through historical bars deterministically), `run_b15_c3.py`
+  (orchestrator + recommendation logic).
+  - Headline 60d run (`SOL/LINK/AVAX/DOT` vs `BTC` on 1h Binance bars,
+    1440 aligned bars, starting capital $100, zero slippage):
+    **86 trades, +$5.43 P&L, Sharpe 1.52, 47.7% win rate.**
+  - 50bps slippage sensitivity: **-$5.72** (P&L flips sign; the strategy
+    edge is razor-thin and disappears under realistic transaction costs).
+    THIS is the criterion that demotes from GO to PARTIAL.
+  - Three regime windows (BTC realized vol low/mid/high):
+    `low_vol = +$2.53` (24h, 65% WR, Sharpe 2.72),
+    `mid_vol = -$0.36` (38t, 45% WR, Sharpe -0.45),
+    `high_vol = +$3.33` (27t, 41% WR, Sharpe 2.27).
+    **Profitable regimes: 2 of 3.**
+  - LIMITATIONS encoded in the `evidence` field of the JSON output:
+    replay disables BEAR regime gate (HMM not in replay) and BTC.D
+    fast-rise filter — both make replay PERMISSIVE (allows entries
+    production would skip). Result is therefore an upper bound.
+  - Tests: [tests/test_b15_backtest_harness.py](tests/test_b15_backtest_harness.py)
+    — 12/12 pass (synthetic dip-recover → fires + profitable SOL trade;
+    synthetic flat → zero trades + NO-GO; recommendation threshold rules
+    parametrized over 9 boundary cases + harness-failed short-circuit).
+  - JSON summary at
+    [data/backtest_results/c3_60d_summary.json](data/backtest_results/c3_60d_summary.json).
+
+  **Recommendation GATE for session 11 reset: PARTIAL.** Per the
+  session-9 hard-coded rule table, PARTIAL means pnl_usd > 0 (yes:
+  +$5.43) but at least one secondary criterion failed (here: 50bps
+  slippage flips P&L negative). The reset is NOT BLOCKED by NO-GO;
+  the operator should proceed with the session-11 reset but tighten
+  slippage assumptions in the post-reset C3 monitoring. Specifically:
+  if live C3 P&L over the first week of soak diverges from the
+  +0% line by >$2 in either direction, that's a signal the live
+  slippage is bigger than the harness modeled and the strategy
+  should re-halt for re-tuning.
+
+  **[2] Operator halt status — UNCHANGED.** `data/halt_state.json` at
+  `{us:true, india:true, crypto:true}` since 2026-05-22 15:41 UTC. Not
+  cleared this session per the prompt's "no autonomous reset". Session
+  11 reset script will handle halt clearing as part of the reset flow.
+
+  **[3] PF5 stress-test scaffolding — DEFERRED to session 10.** Time
+  budget consumed by the hotfix and the backtest run. PF5.6 (D.1 auto-
+  halt monkeypatch) and PF5.5 (slippage) move to session 10's queue per
+  the prompt's "if session 9 doesn't reach [3], session 10 picks it up".
+
+  **[4]/[5]/[6] — All correctly skipped per prompt.** [4] B.2 eligibility
+  opens 2026-05-29; [5] lint chip-away skipped (no slack after backtest);
+  [6] D.5 day-1 still parked behind operator halt + drawdown band.
+
+  **Cross-cutting findings:**
+    - The state_bridge gap (above) is a CLASS of bug worth a doctrine
+      note: when shipping a strategy file that imports a new foundation
+      module, the foundation module must be in the same SCP manifest.
+      The dirty-tree guard catches uncommitted-file deploys but not
+      this case (the new module IS committed locally; it just wasn't
+      shipped). Session 10 may want to add a "module import graph"
+      guard to `tools/operator/_dirty_tree_guard.py` that walks the
+      file manifest's imports and asserts every imported local module
+      is either (a) in the manifest or (b) already present on the box.
+    - The 50bps-slippage P&L flip on C3 is consistent with the strategy's
+      own post-mortem (2026-05-21 strategy diagnostic): C3's edge is
+      thin and depends on Binance's tight spreads continuing. If the
+      operator-away window sees a Binance maintenance event or a stress
+      day with widened spreads, C3 will underperform the backtest.
+
+  **Operator ping this session (REQUIRED per prompt):**
+
+    > B.1.5 backtest result: **PARTIAL**. 60d C3 replay against live
+    > Binance OHLCV produced +$5.43 P&L (Sharpe 1.52, 47.7% WR,
+    > 86 trades, 2/3 profitable regimes). 50bps slippage demotes to
+    > -$5.72 — strategy edge is razor-thin under realistic costs and
+    > that is what demotes from GO to PARTIAL. PARTIAL allows the
+    > session-11 reset to proceed per the hard-coded threshold rule;
+    > the operator-away soak begins on schedule. Recommend tightening
+    > slippage assumptions in post-reset monitoring (re-halt C3 if
+    > live P&L diverges from $0 line by >$2 in either direction over
+    > the first soak week, since divergence is the slippage-bigger-
+    > than-expected signal).
+
 ---
 
 ## B.1 triage table (decision merged 2026-05-22 session 2)
