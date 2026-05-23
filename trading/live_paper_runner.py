@@ -1909,6 +1909,29 @@ def main(market: str = "crypto") -> None:
             }))
         except Exception as _hb_exc:
             log.debug("heartbeat write failed: %s", _hb_exc)
+        # D.4 cycle_log: idempotent CREATE + INSERT per cycle. Feeds the
+        # daily digest's "Cycles run (last 24h)" line.
+        try:
+            import sqlite3 as _sql3
+            _db = _pl.Path("data/paper_trades.db")
+            if _db.exists():
+                _conn = _sql3.connect(str(_db))
+                try:
+                    _conn.execute(
+                        "CREATE TABLE IF NOT EXISTS cycle_log ("
+                        "timestamp TEXT NOT NULL, cycle INTEGER NOT NULL, "
+                        "market TEXT NOT NULL)"
+                    )
+                    _conn.execute(
+                        "INSERT INTO cycle_log (timestamp, cycle, market) VALUES (?, ?, ?)",
+                        (_dt.datetime.now(_dt.timezone.utc).isoformat(),
+                         int(cycle), market),
+                    )
+                    _conn.commit()
+                finally:
+                    _conn.close()
+        except Exception as _cl_exc:
+            log.debug("cycle_log write failed: %s", _cl_exc)
         log.info("  Cycle %d done in %.1fs — sleeping %.0fs", cycle, elapsed, sleep_sec)
         try:
             _emit_cycle_summary(cycle)

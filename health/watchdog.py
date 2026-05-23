@@ -35,7 +35,7 @@ import sys
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, time as _time_obj, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -53,6 +53,13 @@ RATE_LIMIT_WINDOW_SEC = int(os.environ.get("WATCHDOG_RATE_WINDOW_SEC", "1800"))
 DATA_DIR = Path(os.environ.get("AAATS_DATA", "/app/data"))
 HEARTBEAT_PATH = DATA_DIR / "heartbeat.json"
 WATCHDOG_HEARTBEAT_PATH = DATA_DIR / "watchdog_heartbeat.json"
+
+# D.4 daily digest dispatch: fire once per IST calendar day at >= DIGEST_HOUR_IST
+# (default 09:00 IST). Guard with a digest_log.json check so the watchdog's
+# 60-second poll only sends one message per day.
+IST = timezone(timedelta(hours=5, minutes=30))
+DIGEST_HOUR_IST = int(os.environ.get("WATCHDOG_DIGEST_HOUR_IST", "9"))
+DIGEST_DISABLED = os.environ.get("WATCHDOG_DIGEST_DISABLED", "0") in ("1", "true", "True")
 
 TARGET_CONTAINER = os.environ.get("WATCHDOG_TARGET", "aaats-paper-crypto")
 DOCKER_BIN = os.environ.get("DOCKER_BIN", "/usr/bin/docker")
@@ -235,6 +242,38 @@ class Watchdog:
         return verb
 
 
+def _maybe_dispatch_digest(now_utc: datetime | None = None) -> str | None:
+    """Fire the daily digest if it's after 09:00 IST and not yet sent today.
+
+    Returns the IST date string the digest was sent for, or None if no send
+    happened this tick (either too early in the day, or already sent).
+    Exceptions are swallowed — a digest failure must NEVER kill the watchdog.
+    """
+    if DIGEST_DISABLED:
+        return None
+    now_utc = now_utc if now_utc is not None else datetime.now(timezone.utc)
+    ist_now = now_utc.astimezone(IST)
+    if ist_now.hour < DIGEST_HOUR_IST:
+        return None
+    try:
+        from monitoring.daily_digest import (
+            DigestConfig, _digest_sent_today, build_and_send_digest,
+        )
+    except Exception as exc:
+        log.warning("daily_digest import failed: %s", exc)
+        return None
+    try:
+        cfg = DigestConfig.from_data_dir(DATA_DIR)
+        if _digest_sent_today(cfg, ist_now.date()):
+            return None
+        build_and_send_digest(data_dir=DATA_DIR, as_of=now_utc, dry_run=False)
+        log.info("[digest] sent %s", ist_now.date().isoformat())
+        return ist_now.date().isoformat()
+    except Exception as exc:
+        log.exception("daily digest dispatch failed: %s", exc)
+        return None
+
+
 def main() -> int:
     """Run forever, polling every POLL_INTERVAL_SEC."""
     logging.basicConfig(
@@ -242,19 +281,23 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     log.info(
-        "watchdog starting target=%s stale_threshold=%ds poll=%ds rate=%d/%ds",
+        "watchdog starting target=%s stale_threshold=%ds poll=%ds rate=%d/%ds "
+        "digest_hour_ist=%d digest_disabled=%s",
         TARGET_CONTAINER, STALE_THRESHOLD_SEC, POLL_INTERVAL_SEC,
         RATE_LIMIT_MAX_RESTARTS, RATE_LIMIT_WINDOW_SEC,
+        DIGEST_HOUR_IST, DIGEST_DISABLED,
     )
     wd = Watchdog()
     while True:
         try:
             verb = wd.tick()
+            digest_sent_for = _maybe_dispatch_digest()
             _emit_self_heartbeat({
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "last_decision": verb,
                 "restart_count_in_window": wd.state.restart_count_in_window(time.time()),
                 "target": TARGET_CONTAINER,
+                "last_digest_sent_for": digest_sent_for,
             })
         except Exception as exc:
             log.exception("watchdog tick raised: %s", exc)
