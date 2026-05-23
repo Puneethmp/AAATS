@@ -431,3 +431,104 @@ The `Action needed` field is the operator's single decision-trigger. If it's `NO
      `Action needed: NONE`.
    - **D.6 (proposed)** — silent-except lint rule + the row-7/17/22
      items from session-1 D.0 catalog. Operator-optional bundle.
+
+- **2026-05-23 (session 5)** — **D.4 SHIPPED + first live send confirmed.**
+
+  **Module `monitoring/daily_digest.py`.** Pure builder
+  (`build_digest(cfg, as_of, container_restart_count)`) + IO shell
+  (`build_and_send_digest(...)`) + CLI (`python -m monitoring.daily_digest
+  --dry-run [--as-of ...] [--data-dir ...]`). Sections per the locked
+  Appendix A: P&L (24h realized from `paper_trades.db SELL.pnl`, unrealized
+  from net open BUY notional minus matching SELL, equity + peak + dd from
+  the A.1 per-mode `risk_engine_state.paper.json` with legacy fallback),
+  Operational (cycles_run from the new `cycle_log` table, exceptions from
+  D.1's `strategy_exception_state.json`, container restarts from `docker
+  inspect` minus `watchdog_heartbeat.restart_count_in_window` for auto/
+  manual split — per the session-4 cross-cutting finding), Strategies
+  (firing/silent/halted via `paper_trades.db` + D.1 halt state), Action
+  needed (NONE unless dd<=-10%, consecutive exceptions>=2, manual
+  restart, or share-equality counter non-zero).
+
+  **cycle_log table.** Idempotent CREATE TABLE IF NOT EXISTS +
+  INSERT at `trading/live_paper_runner.py:1911-1934`, next to the
+  heartbeat write. Same defensive try/except as the heartbeat path —
+  a cycle_log write failure never breaks the trade loop.
+
+  **Dispatch.** `health/watchdog.py::_maybe_dispatch_digest` fires once
+  per IST calendar day at >= 09:00 IST (configurable via
+  `WATCHDOG_DIGEST_HOUR_IST`, defaults to 9). Guard via
+  `data/digest_log.json` so the 60-second poll only sends once.
+  `WATCHDOG_DIGEST_DISABLED=1` short-circuits the dispatch for dry
+  rollouts. Self-heartbeat now also records `last_digest_sent_for`.
+
+  **Tests.** `tests/test_daily_digest.py` — 9/9 green:
+    - golden-output (deterministic-input fixture, exact-string assertions
+      on every section)
+    - missing-state tolerance (cycle_log absent -> N/A; risk_engine state
+      absent -> N/A; share_eq absent -> no trigger)
+    - Action-needed trigger matrix (each of dd / consec exceptions /
+      manual restart / share-equality individually fires; NONE when clean)
+    - send-guard via digest_log.json + digests/ archive presence
+
+  **Deploy.** `scripts/deploy_session5_d4_daily_digest.py` ships
+  `monitoring/daily_digest.py` + the runner cycle_log writer + the
+  watchdog dispatch wiring; rebuilds aaats-paper-crypto and aaats-watchdog;
+  runs box dry-run smoke; verifies the cycle_log table exists post-cycle.
+
+  **Two field-discovered issues fixed mid-deploy:**
+    - `Dockerfile.watchdog` did not `COPY monitoring/` (the new module
+      lives outside the previously-baked `health/` + `observability/`).
+      Added the COPY; rebuilt watchdog. Image
+      `sha256:e948bedc5171...`.
+    - The first live digest fired correctly via the dispatch loop but
+      reported `Action needed: NONE` against the known -33% paper
+      drawdown because the watchdog container could not see
+      `/app/data/state-paper/risk_engine_state.paper.json` — the A.1
+      per-mode named volume was only mounted in paper-crypto. Compose
+      patched to add `state-crypto-paper:/app/data/state-paper:ro` to
+      the aaats-watchdog volumes. Today's `digest_log.json` entry
+      cleared on the box; the watchdog's next 60s tick re-fired the
+      corrected digest. Operator now has both messages in Telegram;
+      the second (sent_at_utc 05:48:13Z) supersedes the first and
+      correctly reports
+      `Equity: $87.45 (peak $131.32, dd -33.4%) ... Action needed:
+      drawdown -33.4% near kill threshold (-15%)`.
+
+  Rollback baseline at `.rollback/2026-05-23_session5_d4_daily_digest/MANIFEST.txt`.
+
+  **Cross-cutting findings:**
+    - D.4's data sources implicitly depend on A.1's per-mode state path.
+      A.1 box deploy and D.4 implementation landed the same session;
+      had they been split, the watchdog's volume-mount gap would have
+      been a between-session blocker. Sequencing was correct because
+      A.1 came first (the digest is read-only on the file A.1 writes).
+    - "Container has correct image AND correct file SHA AND correct
+      service mounts AND can render the digest" all-true does NOT imply
+      "the digest's reads return non-N/A". The state-paper mount is a
+      DIFFERENT correctness boundary from the image-bake and the SHA
+      checks. Going forward, the deploy smoke must explicitly verify the
+      digest sees non-N/A equity, not just that the dry-run renders.
+    - Telegram swallow-and-continue + send_alert no-op-without-creds
+      meant the misleading first digest had no internal error. The
+      digest's own correctness regression (Action needed wrongly =NONE
+      against a known -33% dd) was caught only because the operator
+      had the actual paper state in mind. A drift assertion ("digest
+      claims dd=N/A while risk_engine reports dd!=N/A") could catch
+      this at build time; deferred.
+
+  **D.5 day-1 — infrastructure live, clock not yet started.**
+  `data/digests/2026-05-23.txt` archive file written on the box (the
+  corrected digest body). `digest_log.json` records the send with
+  `ist_date=2026-05-23, sent=true`. D.5 day-1 begins on the first day
+  the digest fires with `Action needed: NONE`, which is gated on B.3
+  soak bringing the drawdown above -10%.
+
+  **Next D-track steps:**
+   - **D.5 day-1 begin** — gated on first NONE digest (B.3-dependent).
+   - **D.6 (proposed)** — still queued (silent-except lint + the
+     row-7/17/22 catalog items).
+   - **Alerts log writer** — the digest's Action-needed "Alerts fired"
+     row is currently N/A pending an `observability.alerts.send_alert`
+     wrapper that appends to `data/alerts_log.json`. ~1 Haiku session.
+   - **Drift assertion at deploy smoke** — the volume-mount-gap detector
+     mentioned above. ~1 Haiku session.

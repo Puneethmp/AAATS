@@ -1,0 +1,78 @@
+
+
+================================================================================
+ADDENDUM 2 - state-crypto-paper RO mounted into watchdog
+================================================================================
+PATCHED_AT_UTC          = 2026-05-23T05:48:24Z
+POST_WATCHDOG_STATUS    = running
+WATCHDOG_MOUNTS         = :/var/run/docker.sock|:/app/data|deployment_state-crypto-paper:/app/data/state-paper|
+EQUITY_VISIBLE_IN_DIGEST = True
+DRAWDOWN_TRIGGER_FIRES   = True
+ARCHIVE_NOW_HAS_EQUITY   = True
+
+FINDING: the first live digest (Telegram, ~05:42 UTC = 11:12 IST) reported
+         Action needed: NONE against the known -33% paper drawdown because the
+         watchdog container could not read /app/data/state-paper/. Compose now
+         mounts the volume read-only on the watchdog; corrected digest re-sent.
+
+Dry-run output (with state-paper mount):
+  AAATS daily digest -- 2026-05-23 (T+11 since rebuild)
+  
+  P&L (24h)
+    Realized:   $+0.04
+    Unrealized: $+0.05
+    Equity:     $87.45  (peak $131.32, dd -33.4%)
+  
+  Operational
+    Cycles run:        1 (expected 96, 1.0% uptime)
+    Exceptions:        0  (0 auto-halted)
+    Container restarts: 0  (auto: 0, manual: 0)
+    Alerts fired:      N/A  (alerts_log not yet implemented)
+  
+  Strategies (24h)
+    Firing:   C1_stat_arb (10 trades)
+    Silent:   C2_momentum, C3_altcoin_reversion, C5b_funding_arb, C6_bollinger_range
+    Halted:   (none)
+  
+  Action needed: drawdown -33.4% near kill threshold (-15%)
+
+Archived digest after re-tick:
+  AAATS daily digest -- 2026-05-23 (T+11 since rebuild)
+  
+  P&L (24h)
+    Realized:   $+0.04
+    Unrealized: $+0.05
+    Equity:     $87.45  (peak $131.32, dd -33.4%)
+  
+  Operational
+    Cycles run:        1 (expected 96, 1.0% uptime)
+    Exceptions:        0  (0 auto-halted)
+    Container restarts: 0  (auto: 0, manual: 0)
+    Alerts fired:      N/A  (alerts_log not yet implemented)
+  
+  Strategies (24h)
+    Firing:   C1_stat_arb (10 trades)
+    Silent:   C2_momentum, C3_altcoin_reversion, C5b_funding_arb, C6_bollinger_range
+    Halted:   (none)
+  
+  Action needed: drawdown -33.4% near kill threshold (-15%)
+
+digest_log.json after re-tick:
+  [
+    {
+      "ist_date": "2026-05-23",
+      "sent_at_utc": "2026-05-23T05:48:13.730124+00:00",
+      "container_restart_count": 0,
+      "sent": true,
+      "bytes": 577
+    }
+  ]
+
+watchdog_heartbeat.json:
+  {
+    "timestamp": "2026-05-23T05:48:13.731426+00:00",
+    "last_decision": "ok",
+    "restart_count_in_window": 0,
+    "target": "aaats-paper-crypto",
+    "last_digest_sent_for": "2026-05-23"
+  }

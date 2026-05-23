@@ -237,6 +237,32 @@ Each criterion is binary and citable to evidence.
   gates (G1–G5 unchanged; see "Doctrine reference" below).
 - **C.5** Two human gates at flip moment unchanged: Telegram receipt at PF3,
   typed `FLIP TO LIVE $25` at deploy.
+- **C.6** D.5 30-day no-intervention soak passed: 30 consecutive daily digests
+  delivered with `Action needed: NONE`, zero unresolved alerts, zero manual
+  ops. Cite: the 30 digest payloads archived in `data/digests/`. Added by
+  [`2026-05-21_track_d_reliability_addendum.md`](2026-05-21_track_d_reliability_addendum.md).
+- **C.7** **PROFITABILITY GATE (added 2026-05-23, Cowork strategic review).**
+  The 4-week Phase B.3 paper-soak's final equity must be **≥ the soak's
+  starting equity**. Net-flat or net-positive. This is STRICTER than the
+  pre-existing B.3 criterion ("no single-week loss > 5%"), which a -3%/wk
+  bleed pattern could pass while still losing 12%/yr in real terms. Rationale:
+  reliability ≠ edge. A bot that is reliable but bleeding does not deserve
+  $25 of real capital — the locked doctrine's `-5%` auto-revert would just
+  return the capital on day 1 of live mode, wasting the tranche. Cite:
+  weekly equity-curve table in the B.3 status log + final-vs-start equity
+  number.
+  - **If C.7 fails AND the cause is identifiable** (e.g., one strategy is
+    the loss source by ≥80%): treat as a Track B re-triage trigger (HALT
+    or REPLACE the loss source), then re-run B.3 from week 0. Do NOT
+    repeat-tune the same strategy in the same regime — that's the
+    rebuild-loop antipattern the autonomy contract was written to end.
+  - **If C.7 fails AND the cause is regime-wide** (all strategies bleed
+    proportionally): pause the live-flip path entirely; the strategy
+    universe needs replacement, not patching. Doctrine still protects via
+    the 5 injection gates + auto-revert.
+  - **If C.7 passes:** proceed to the C.1–C.6 evaluation. C.7 does NOT
+    unblock anything else — it just prevents proceeding when the engineering
+    is correct but the edge is absent.
 
 ---
 
@@ -932,6 +958,98 @@ this.
     - [0] docker.sock approval — ANSWERED (approved).
     - [1] A.1 compose-change review — PENDING (queued for end-of-session
       ask).
+
+- **2026-05-23 (session 5)** — Three-track ship: [0] reconciler Option A
+  + halt_on_critical=True re-enabled, [1] A.1 box deploy, [2] D.4 daily
+  digest implementation + first live send.
+
+  **[0] BTC/ETH ledger drift Option A — SHIPPED + verified clean.**
+  `scripts/reconcile_intracycle.py:323` SQL exclusion extended from
+  `strategy != 'C5b_funding_arb'` to `strategy NOT IN ('C5b_funding_arb',
+  'C1_stat_arb')` — parity with the other delta-neutral arb. C1's
+  pair-keyed `BTC/USDT_ETH/USDT` legs no longer surface as Source B net
+  positions, removing the `symbol_present_in_only_one_source` HALT-per-cycle
+  trigger that forced the session-3 band-aid. `trading/live_paper_runner.py:1881`
+  flipped back to `halt_on_critical=True` (the doctrine-correct default).
+  Test: `tests/test_reconciler_c1_exclusion.py` seeds a synthetic open
+  C1 BUY-BTC/SELL-ETH pair in a tmp DB and asserts the reconciler passes
+  with zero HALT issues. 3/3 + 2/2 existing `test_reconcile_denylist.py`
+  green. Box verification (`c:/tmp/verify_session5_step0.py` at 05:25Z):
+  `Reconciliation clean | checked=7 positions across crypto`, RestartCount=0,
+  zero BTC/ETH HALT lines. Image `sha256:7a32d03ecfc9...`.
+  Rollback at `.rollback/2026-05-23_session5_reconciler_c1_exclusion/MANIFEST.txt`.
+
+  **[1] A.1 state isolation — SHIPPED, paper peak preserved.**
+  Compose change + risk/engine.py + migrate script shipped via
+  `scripts/deploy_session5_a1_state_isolation.py`. Per-mode volume layout
+  active: `deployment_state-crypto-paper:/app/data/state-paper` (rw on
+  paper-crypto), `deployment_state-crypto-live:/app/data/state-live`
+  (created empty). Legacy `deployment_state-crypto` untouched as rollback
+  baseline. Two field-discovered issues fixed mid-deploy:
+    - Migrate script's CRLF line endings (Windows git autocrlf) broke
+      `set -euo pipefail`. Re-uploaded LF-normalized; deploy scripts now
+      normalize on every SFTP write.
+    - Migrate script's default `SRC_VOL=state-crypto` was an empty
+      bystander volume; the real legacy state lived in compose-prefixed
+      `deployment_state-crypto`. Script patched to auto-detect the
+      prefixed variant by probing for the `risk_engine_state.json` file.
+  Verification: post-restart log line
+  `Risk engine peak loaded from /app/data/state-paper/risk_engine_state.paper.json: $131.32`
+  + `market peaks loaded ... crypto=$131.32`. State-crypto-paper now
+  holds the real 148-byte risk_engine_state.paper.json. Rollback at
+  `.rollback/2026-05-23_session5_a1_state_isolation/MANIFEST.txt`.
+
+  **[2] D.4 daily digest — SHIPPED, first live send confirmed.**
+  New module `monitoring/daily_digest.py` (pure builder + IO shell) with
+  CLI dry-run (`python -m monitoring.daily_digest --dry-run`). Sections
+  per the locked Appendix A format. cycle_log SQLite table added to
+  `data/paper_trades.db`, written by `trading/live_paper_runner.py:1911-1934`
+  next to the heartbeat write (idempotent CREATE + INSERT per cycle).
+  Watchdog dispatch loop wired in `health/watchdog.py::_maybe_dispatch_digest`:
+  fires once per IST calendar day at >= 09:00 IST, guarded by
+  `data/digest_log.json` to prevent the 60s poll from re-firing.
+  Tests at `tests/test_daily_digest.py`: 9/9 green (golden output,
+  missing-state tolerance, action-needed trigger matrix, send-guard
+  with archive write).
+  Box deploy via `scripts/deploy_session5_d4_daily_digest.py`. Two
+  field-discovered issues fixed:
+    - `Dockerfile.watchdog` did not COPY `monitoring/`. Added it; rebuilt
+      watchdog. Image `sha256:e948bedc5171...`.
+    - The first live digest reported `Action needed: NONE` against the
+      known -33% paper drawdown because the watchdog container could not
+      read `/app/data/state-paper/risk_engine_state.paper.json` (the named
+      volume was only mounted in paper-crypto, not in the watchdog).
+      Compose patched to add `state-crypto-paper:/app/data/state-paper:ro`
+      to the aaats-watchdog volumes. Today's `digest_log.json` entry
+      cleared on the box and the watchdog re-tick re-fired the corrected
+      digest. Operator now has both messages in Telegram; the second
+      message (sent_at_utc 05:48:13Z) supersedes the first and correctly
+      reports `Equity: $87.45 (peak $131.32, dd -33.4%) ... Action
+      needed: drawdown -33.4% near kill threshold (-15%)`.
+  Rollback at `.rollback/2026-05-23_session5_d4_daily_digest/MANIFEST.txt`.
+
+  **[4] D.5 day-1 — infrastructure live, clock not yet started.**
+  `data/digests/2026-05-23.txt` archive file written on the box (the
+  corrected digest body, 577 bytes). `digest_log.json` records the
+  send with `ist_date=2026-05-23, sent=true`. D.5 day-1 begins on the
+  first day the digest fires with `Action needed: NONE`, which is gated
+  on B.3 soak bringing the drawdown above -10%.
+
+  **Cross-cutting findings:**
+    - The C.7 profitability gate added today by Cowork (final-week B.3
+      equity >= starting equity) does not change session 5 scope but
+      raises the bar for live-flip authorization. See §"Track C - Flip
+      gate" C.7.
+    - Operator approval for the A.1 compose change came in pre-session as
+      part of the session 5 prompt (Cowork ack 2026-05-23); the ask-first
+      step was already retired.
+    - Workstation cp1252 vs box utf-8 is a continuing tax on deploy
+      scripts; every Bash output that includes box log lines now strips
+      to ASCII before print.
+
+  **Operator pings this session:** none required. The first-digest
+  Action-needed=NONE issue self-resolved within ~6 minutes via the
+  corrected re-send; no operator intervention solicited.
 
 ---
 

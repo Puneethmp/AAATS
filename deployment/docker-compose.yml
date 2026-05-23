@@ -252,11 +252,18 @@ services:
       - WATCHDOG_POLL_INTERVAL_SEC=60
       - WATCHDOG_MAX_RESTARTS=3
       - WATCHDOG_RATE_WINDOW_SEC=1800
+      - WATCHDOG_DIGEST_HOUR_IST=9
     volumes:
-      # rw needed for watchdog's self-heartbeat at data/watchdog_heartbeat.json.
-      # Defense-in-depth `:ro` was nominal — the watchdog already has docker.sock
-      # write authority, so a ro data mount doesn't materially shrink blast radius.
+      # rw needed for watchdog's self-heartbeat at data/watchdog_heartbeat.json
+      # and for D.4's data/digest_log.json + data/digests/ archive writes.
       - ../data:/app/data
+      # D.4 daily digest: read-only view into the per-mode risk-engine state
+      # so the digest's P&L section can resolve equity / peak / drawdown.
+      # Without this the digest reports those as N/A and the Action-needed
+      # drawdown-trigger goes silent on real downside (caught 2026-05-23 when
+      # the first live digest reported "NONE" against a -33% paper drawdown).
+      # paper-crypto owns the rw mount; the watchdog only reads.
+      - state-crypto-paper:/app/data/state-paper:ro
       # Host docker socket — required for `docker restart aaats-paper-crypto`.
       # Read-only mount of the socket is NOT supported by Docker (the API
       # uses the socket bidirectionally); least-privilege is a separate

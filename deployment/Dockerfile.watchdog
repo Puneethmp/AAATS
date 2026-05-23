@@ -20,6 +20,9 @@ RUN pip install --no-cache-dir python-telegram-bot
 # Copy only the modules we need (keeps the image small).
 COPY health/ /app/health/
 COPY observability/ /app/observability/
+# D.4 daily digest is composed by the watchdog at 09:00 IST. The module reads
+# the bind-mounted data dir so its sources are runtime state, not image-baked.
+COPY monitoring/ /app/monitoring/
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
