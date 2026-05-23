@@ -1,0 +1,58 @@
+ROLLBACK BASELINE - 2026-05-24 Session 10 [P1.6] watcher deploy
+================================================================================
+
+DEPLOYED_AT_UTC               = 2026-05-23T12:16:07Z
+PRE_PAPER_IMAGE_SHA           = sha256:1d3a7ffadd385c77688724b43d6511d7cb821ca88c7a562c56a131b8877dc16b
+POST_PAPER_IMAGE_SHA          = sha256:ddbba66310e3a13e6f6ca98a0c67bbd63592e6fb68cdfd305b351f32e3b3612d
+PRE_WATCHDOG_IMAGE_SHA        = sha256:d0ad9ab1d971873db7b31c1fa051a00947e32335c0195e959efd38827c383f5b
+POST_WATCHDOG_IMAGE_SHA       = sha256:653fbdb892f4eca432c61b0dae4e1f8eb7036226aac63601f874c17e9298ef3d
+POST_PAPER_STATUS             = running
+POST_WATCHDOG_STATUS          = running
+SMOKE_A_PAPER_SYM             = True
+SMOKE_A_BIS_WATCHDOG_SYMS     = True
+SMOKE_B_DIGEST_DRY_RUN        = True
+SMOKE_C_PAPER_RUNNING         = True
+PRE_HALT_STATE                = {
+  "us": true,
+  "india": true,
+  "crypto": true
+}
+
+Pre-deploy file SHAs:
+  monitoring/daily_digest.py                              : d9986c67f64ed018276f2eea01de72d3b222a5cda0eafde9574bf0666a01478b
+  scripts/reset_paper_book_200.py                         : ABSENT
+  docs/runbooks/2026-05-23_operator_away_protocol.md      : ABSENT
+  docs/conventions/deploy_discipline.md                   : ABSENT
+
+Post-deploy file SHAs:
+  monitoring/daily_digest.py                              : 83074d9ebf29e7e9d12e366dec1aa4319dfa83fb3d90f0c43cd55234eabdcb7c
+  scripts/reset_paper_book_200.py                         : 030325fbbd3d261706267764f3077b8c8460bea5c3ea44c1223f1b5f3b2f995b
+  docs/runbooks/2026-05-23_operator_away_protocol.md      : da82b1bae8365c0853fd6f445835d742fe9687fd28c9b0274ad6af1b87d69278
+  docs/conventions/deploy_discipline.md                   : 1349f56d849fa462b06a39dd3e5a81a062e537667195e62fe18b626d9502381f
+
+Smoke (a) paper-crypto import output:
+  <function compute_c3_divergence at 0x761ebd938540>
+
+Smoke (a-bis) watchdog import output:
+  all imports OK
+
+Smoke (b) digest dry-run tail:
+  AAATS daily digest -- 2026-05-23 (T+11 since rebuild)
+  
+  P&L (24h)
+    Realized:   $+0.04
+    Unrealized: $+0.05
+    Equity:     $87.45  (peak $131.32, dd -33.4%)
+  
+  Operational
+    Cycles run:        29 (expected 96, 30.2% uptime)
+    Exceptions:        0  (0 auto-halted)
+    Container restarts: 0  (auto: 0, manual: 0)
+    Alerts fired:      1  (open: 1, resolved: 0)
+  
+  Strategies (24h)
+    Firing:   C1_stat_arb (10 trades)
+    Silent:   C2_momentum, C3_altcoin_reversion, C5b_funding_arb, C6_bollinger_range
+    Halted:   (none)
+  
+  Action needed: drawdown -33.4% past portfolio-kill threshold (-20%); all new entries blocked, open positions continue to mark-to-market
