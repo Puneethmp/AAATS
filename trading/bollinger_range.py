@@ -192,36 +192,36 @@ def _record(symbol: str, action: str, price: float, size_usd: float,
             exit_time: str | None = None, pnl_pct: float | None = None,
             pct_b: float = 0.0, rsi: float = 0.0, exit_reason: str = "",
             shares: float | None = None) -> None:
-    try:
-        from execution.paper_trader import record_trade
-        # SELL must record the same shares that the BUY row stored, otherwise
-        # paper_trades SUM(BUY) - SUM(SELL) leaves residual dust per closed
-        # position. Caller passes entry-derived shares for SELL.
-        recorded_shares = (
-            float(shares)
-            if shares is not None
-            else round(size_usd / max(price, 1e-9), 8)
-        )
-        record_trade(
-            db_path=DB_PATH, market="crypto", symbol=symbol,
-            action=action,
-            shares=recorded_shares,
-            price=price, signal="C6_BOLLINGER_RANGE",
-            regime="RANGE_BOUND", risk_action="ALLOW",
-            pnl=pnl,
-            note=f"C6 {action} %B={pct_b:.3f} RSI={rsi:.1f}",
-            strategy="C6_bollinger_range",
-            entry_time=entry_time, exit_time=exit_time,
-            pnl_pct=pnl_pct, size_usd=round(size_usd, 4),
-            notes={
-                "pct_b": round(pct_b, 4),
-                "rsi": round(rsi, 2),
-                "exit_reason": exit_reason,
-                "confidence": 0.65,
-            },
-        )
-    except Exception as exc:
-        log.warning("[c6] record_trade failed: %s", exc)
+    """Persist the trade row. Raises on DB failure; the caller MUST
+    skip state mutation on raise (2026-05-23 phantom-position fix; see
+    tests/test_orphan_position_prevention.py)."""
+    from execution.paper_trader import record_trade
+    # SELL must record the same shares that the BUY row stored, otherwise
+    # paper_trades SUM(BUY) - SUM(SELL) leaves residual dust per closed
+    # position. Caller passes entry-derived shares for SELL.
+    recorded_shares = (
+        float(shares)
+        if shares is not None
+        else round(size_usd / max(price, 1e-9), 8)
+    )
+    record_trade(
+        db_path=DB_PATH, market="crypto", symbol=symbol,
+        action=action,
+        shares=recorded_shares,
+        price=price, signal="C6_BOLLINGER_RANGE",
+        regime="RANGE_BOUND", risk_action="ALLOW",
+        pnl=pnl,
+        note=f"C6 {action} %B={pct_b:.3f} RSI={rsi:.1f}",
+        strategy="C6_bollinger_range",
+        entry_time=entry_time, exit_time=exit_time,
+        pnl_pct=pnl_pct, size_usd=round(size_usd, 4),
+        notes={
+            "pct_b": round(pct_b, 4),
+            "rsi": round(rsi, 2),
+            "exit_reason": exit_reason,
+            "confidence": 0.65,
+        },
+    )
 
 
 # ── Public runner ──────────────────────────────────────────────────────────────
@@ -353,19 +353,31 @@ def run_bollinger_range_crypto(
                             )
                             continue
 
-                    exit_ts  = datetime.now(timezone.utc).isoformat()
+                    exit_ts = datetime.now(timezone.utc).isoformat()
+
+                    # 2026-05-23 phantom-ENA fix: write SELL ledger
+                    # FIRST; leave position open on failure (retry
+                    # next cycle).
+                    try:
+                        _record(symbol=sym, action="SELL", price=price,
+                                size_usd=size_usd, pnl=pnl,
+                                entry_time=pos["entry_ts"], exit_time=exit_ts,
+                                pnl_pct=round(pnl_pct * 100, 4),
+                                pct_b=pct_b, rsi=rsi, exit_reason=exit_reason,
+                                shares=round(
+                                    pos["size_usd"] / max(pos["entry_price"], 1e-9),
+                                    8,
+                                ))
+                    except Exception as exc:
+                        log.error(
+                            "[c6] %s: SELL ABORTED — record_trade failed (%s); "
+                            "position held, will retry next cycle",
+                            sym, exc,
+                        )
+                        continue
+
                     capital += size_usd + pnl
                     portfolio["capital"] = capital
-
-                    _record(symbol=sym, action="SELL", price=price,
-                            size_usd=size_usd, pnl=pnl,
-                            entry_time=pos["entry_ts"], exit_time=exit_ts,
-                            pnl_pct=round(pnl_pct * 100, 4),
-                            pct_b=pct_b, rsi=rsi, exit_reason=exit_reason,
-                            shares=round(
-                                pos["size_usd"] / max(pos["entry_price"], 1e-9),
-                                8,
-                            ))
                     log.info(
                         "[c6] EXIT  %s  reason=%s  pnl=$%.4f (%+.2f%%)  cap=$%.2f",
                         sym, exit_reason, pnl, pnl_pct * 100, capital,
@@ -425,9 +437,23 @@ def run_bollinger_range_crypto(
                         continue
 
                 entry_ts = datetime.now(timezone.utc).isoformat()
+
+                # 2026-05-23 phantom-ENA fix: write BUY ledger FIRST;
+                # state + capital mutated only on success.
+                try:
+                    _record(symbol=sym, action="BUY", price=price,
+                            size_usd=trade_usd, entry_time=entry_ts,
+                            pct_b=pct_b, rsi=rsi, exit_reason="")
+                except Exception as exc:
+                    log.error(
+                        "[c6] %s: BUY ABORTED — record_trade failed (%s); "
+                        "no state mutation, no capital deduction",
+                        sym, exc,
+                    )
+                    continue
+
                 capital -= trade_usd
                 portfolio["capital"] = capital
-
                 state[sym] = {
                     "entry_price": price,
                     "entry_ts":    entry_ts,
@@ -438,9 +464,6 @@ def run_bollinger_range_crypto(
                 open_now += 1
                 changed   = True
 
-                _record(symbol=sym, action="BUY", price=price,
-                        size_usd=trade_usd, entry_time=entry_ts,
-                        pct_b=pct_b, rsi=rsi, exit_reason="")
                 log.info(
                     "[c6] ENTRY %s  %%B=%.3f  RSI=%.1f  size=$%.2f  cap=$%.2f",
                     sym, pct_b, rsi, trade_usd, capital,

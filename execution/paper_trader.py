@@ -76,6 +76,16 @@ _MIGRATE_SQLS = [
     "ALTER TABLE paper_trades ADD COLUMN pnl_pct         REAL",
     "ALTER TABLE paper_trades ADD COLUMN notes           TEXT",
     "ALTER TABLE paper_trades ADD COLUMN size_usd        REAL    DEFAULT 0.0",
+    # 2026-05-23 healer: scripts/init_db.py's CREATE schema omits
+    # `value`; without this migration step a fresh DB created by
+    # init_db.py FIRST (then opened by _conn) is missing the column
+    # and every record_trade INSERT fails with "no such column: value".
+    # Default 0.0 because ALTER TABLE ADD COLUMN cannot enforce NOT NULL
+    # against existing rows; the INSERT path always passes a real value.
+    "ALTER TABLE paper_trades ADD COLUMN value           REAL    DEFAULT 0.0",
+    # value-with-risk_action pair: risk_action is NOT NULL in the CREATE
+    # schema but absent from init_db; same healer rationale.
+    "ALTER TABLE paper_trades ADD COLUMN risk_action     TEXT    DEFAULT 'ALLOW'",
     # v3 idempotency columns (gap 4) — also created via execution.idempotency
     # but kept here so a fresh DB built by paper_trader._conn() has them too.
     "ALTER TABLE paper_trades ADD COLUMN client_order_id TEXT",
@@ -269,15 +279,30 @@ def record_trade(
              client_order_id, correlation_id),
         )
         c.commit()
-    except sqlite3.IntegrityError:
-        # UNIQUE INDEX caught a race (parallel callers both passed dedupe_check).
-        # Look up the winner and return its id.
+    except sqlite3.IntegrityError as exc:
+        # UNIQUE INDEX caught a race (parallel callers both passed
+        # dedupe_check). Look up the winner — if found, return its id.
+        # If NOT found, the IntegrityError was NOT a duplicate-race
+        # but some other constraint violation (e.g. the 2026-05-23
+        # bug: init_db.py declared `id INTEGER PRIMARY KEY` so writing
+        # uuid strings raised "datatype mismatch", which was silently
+        # treated as a duplicate and the row was never persisted).
+        # Re-raise so the caller can see the failure instead of
+        # accumulating orphan strategy state.
         row = c.execute(
             "SELECT id FROM paper_trades WHERE client_order_id = ?",
             (client_order_id,),
         ).fetchone()
         c.close()
-        winner = row[0] if row else trade_id
+        if row is None:
+            _log.error(
+                "PAPER record_trade IntegrityError without a winning row "
+                "(client_order_id={}); re-raising — likely schema mismatch "
+                "or constraint violation, NOT a duplicate race: {}",
+                client_order_id[:12], exc,
+            )
+            raise
+        winner = row[0]
         _log.warning(
             "PAPER duplicate race resolved by UNIQUE INDEX | cli_id={} | winner={}",
             client_order_id[:12], winner,

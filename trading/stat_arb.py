@@ -203,25 +203,34 @@ def _record_stat_arb_trade(
     confidence: float = 0.0, exit_reason: str = "",
     entry_time: str | None = None, exit_time: str | None = None,
 ) -> None:
-    """Write a stat-arb trade to the main paper_trades.db."""
-    try:
-        from execution.paper_trader import record_trade
-        size_usd = round(shares * price, 4)
-        pnl_pct  = round(pnl / size_usd * 100, 4) if size_usd and action == "SELL" else None
-        notes_d  = {"confidence": confidence}
-        if exit_reason:
-            notes_d["exit_reason"] = exit_reason
-        record_trade(
-            db_path=_DB_PATH, market=market, symbol=symbol,
-            action=action, shares=shares, price=price,
-            signal="STAT_ARB", regime="PAIRS", risk_action="ALLOW",
-            pnl=pnl if pnl != 0.0 else 0.0, note=note,
-            strategy="C1_stat_arb",
-            entry_time=entry_time, exit_time=exit_time,
-            pnl_pct=pnl_pct, notes=notes_d, size_usd=size_usd,
-        )
-    except Exception as exc:
-        log.warning(f"  stat_arb record_trade failed: {exc}")
+    """Write a stat-arb trade to the main paper_trades.db.
+
+    Raises on DB failure (was silently swallowed pre-2026-05-23, leading
+    to the phantom-ENA pattern in C3 — see trading/altcoin_reversion._record
+    docstring). The strategy isolation envelope counts consecutive raises
+    and auto-halts at 3.
+
+    KNOWN WEAKNESS (out of urgent-hotfix scope): pair trades record two
+    rows back-to-back (long leg + short leg). If the SECOND raises after
+    the FIRST committed, the ledger is in a partial state. Cleanup is
+    via the existing reconciler + manual triage. Fixing this properly
+    needs a transaction wrapping both INSERTs, which requires a wider
+    paper_trader API change."""
+    from execution.paper_trader import record_trade
+    size_usd = round(shares * price, 4)
+    pnl_pct  = round(pnl / size_usd * 100, 4) if size_usd and action == "SELL" else None
+    notes_d  = {"confidence": confidence}
+    if exit_reason:
+        notes_d["exit_reason"] = exit_reason
+    record_trade(
+        db_path=_DB_PATH, market=market, symbol=symbol,
+        action=action, shares=shares, price=price,
+        signal="STAT_ARB", regime="PAIRS", risk_action="ALLOW",
+        pnl=pnl if pnl != 0.0 else 0.0, note=note,
+        strategy="C1_stat_arb",
+        entry_time=entry_time, exit_time=exit_time,
+        pnl_pct=pnl_pct, notes=notes_d, size_usd=size_usd,
+    )
 
 
 def _send(msg: str, market: str) -> None:

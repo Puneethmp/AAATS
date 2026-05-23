@@ -435,38 +435,44 @@ def _record(
     exit_reason: str = "",
     shares: float | None = None,
 ) -> None:
-    try:
-        from execution.paper_trader import record_trade
-        # SELL must record the same shares that the BUY row stored, otherwise
-        # paper_trades SUM(BUY) - SUM(SELL) leaves residual dust per closed
-        # position. Caller passes the entry-derived shares for SELL. BUY path
-        # falls back to size_usd/price (price IS entry price there, correct).
-        recorded_shares = (
-            float(shares)
-            if shares is not None
-            else round(size_usd / max(price, 1e-9), 8)
-        )
-        record_trade(
-            db_path=DB_PATH, market="crypto", symbol=symbol,
-            action=action,
-            shares=recorded_shares,
-            price=price, signal="C3_ALT_REVERSION",
-            regime="RANGE_OR_BULL", risk_action="ALLOW",
-            pnl=pnl,
-            note=f"C3 {action} z={z_score:.3f}",
-            strategy="C3_altcoin_reversion",
-            entry_time=entry_time,
-            exit_time=exit_time,
-            pnl_pct=pnl_pct,
-            size_usd=round(size_usd, 4),
-            notes={
-                "z_score":     round(z_score, 4),
-                "exit_reason": exit_reason,
-                "confidence":  0.70,   # C3 has no ML gate yet; fixed prior
-            },
-        )
-    except Exception as exc:
-        log.warning("[c3] record_trade failed: %s", exc)
+    """Persist the trade row to paper_trades.db.
+
+    Raises on any DB failure — the caller (run_altcoin_reversion_crypto)
+    MUST skip the corresponding state mutation when this raises, or the
+    strategy state file will hold an entry with no matching ledger row
+    and the reconciler will halt the cycle. The 2026-05-23 phantom-ENA
+    incident was caused by an earlier swallow-and-log here; see
+    tests/test_orphan_position_prevention.py for the regression pin.
+    """
+    from execution.paper_trader import record_trade
+    # SELL must record the same shares that the BUY row stored, otherwise
+    # paper_trades SUM(BUY) - SUM(SELL) leaves residual dust per closed
+    # position. Caller passes the entry-derived shares for SELL. BUY path
+    # falls back to size_usd/price (price IS entry price there, correct).
+    recorded_shares = (
+        float(shares)
+        if shares is not None
+        else round(size_usd / max(price, 1e-9), 8)
+    )
+    record_trade(
+        db_path=DB_PATH, market="crypto", symbol=symbol,
+        action=action,
+        shares=recorded_shares,
+        price=price, signal="C3_ALT_REVERSION",
+        regime="RANGE_OR_BULL", risk_action="ALLOW",
+        pnl=pnl,
+        note=f"C3 {action} z={z_score:.3f}",
+        strategy="C3_altcoin_reversion",
+        entry_time=entry_time,
+        exit_time=exit_time,
+        pnl_pct=pnl_pct,
+        size_usd=round(size_usd, 4),
+        notes={
+            "z_score":     round(z_score, 4),
+            "exit_reason": exit_reason,
+            "confidence":  0.70,   # C3 has no ML gate yet; fixed prior
+        },
+    )
 
 
 # ── Public runner ──────────────────────────────────────────────────────────────
@@ -614,24 +620,38 @@ def run_altcoin_reversion_crypto(
                             )
                             continue
 
-                    entry      = pos["entry_price"]
-                    size       = pos["size_usd"]
-                    pnl        = size * (current_price - entry) / entry
-                    pnl_pct    = round(pnl / size * 100, 4) if size else None
-                    exit_ts    = datetime.now(timezone.utc).isoformat()
-                    capital   += size + pnl
-                    portfolio["capital"] = capital
+                    entry   = pos["entry_price"]
+                    size    = pos["size_usd"]
+                    pnl     = size * (current_price - entry) / entry
+                    pnl_pct = round(pnl / size * 100, 4) if size else None
+                    exit_ts = datetime.now(timezone.utc).isoformat()
 
-                    _record(
-                        symbol=sym, action="SELL",
-                        price=current_price, size_usd=size,
-                        pnl=pnl, entry_time=pos["entry_ts"],
-                        exit_time=exit_ts, pnl_pct=pnl_pct,
-                        z_score=current_z, exit_reason=reason,
-                        shares=round(
-                            pos["size_usd"] / max(pos["entry_price"], 1e-9), 8
-                        ),
-                    )
+                    # 2026-05-23 phantom-ENA fix: write the SELL ledger
+                    # row FIRST. If it fails, we LEAVE the position open
+                    # (state + capital untouched) so the next cycle can
+                    # retry. Better to hold a position one extra cycle
+                    # than to lose track of it.
+                    try:
+                        _record(
+                            symbol=sym, action="SELL",
+                            price=current_price, size_usd=size,
+                            pnl=pnl, entry_time=pos["entry_ts"],
+                            exit_time=exit_ts, pnl_pct=pnl_pct,
+                            z_score=current_z, exit_reason=reason,
+                            shares=round(
+                                pos["size_usd"] / max(pos["entry_price"], 1e-9), 8
+                            ),
+                        )
+                    except Exception as exc:
+                        log.error(
+                            "[c3] %s: SELL ABORTED — record_trade failed (%s); "
+                            "position held, will retry next cycle",
+                            sym, exc,
+                        )
+                        continue
+
+                    capital += size + pnl
+                    portfolio["capital"] = capital
                     log.info(
                         "[c3] EXIT  %s  reason=%s  z=%.3f  "
                         "pnl=$%.4f (%.2f%%)  portfolio=$%.2f",
@@ -710,10 +730,29 @@ def run_altcoin_reversion_crypto(
                         )
                         continue
 
-                entry_ts   = datetime.now(timezone.utc).isoformat()
-                capital   -= trade_usd
-                portfolio["capital"] = capital
+                entry_ts = datetime.now(timezone.utc).isoformat()
 
+                # 2026-05-23 phantom-ENA fix: write the ledger row FIRST.
+                # State + capital are mutated ONLY on a successful DB
+                # insert, so a record_trade failure cannot leave an
+                # orphan position in altcoin_reversion_state.json.
+                try:
+                    _record(
+                        symbol=sym, action="BUY",
+                        price=current_price, size_usd=trade_usd,
+                        entry_time=entry_ts,
+                        z_score=current_z, exit_reason="",
+                    )
+                except Exception as exc:
+                    log.error(
+                        "[c3] %s: BUY ABORTED — record_trade failed (%s); "
+                        "no state mutation, no capital deduction",
+                        sym, exc,
+                    )
+                    continue
+
+                capital -= trade_usd
+                portfolio["capital"] = capital
                 state[sym] = {
                     "entry_price": current_price,
                     "entry_ts":    entry_ts,
@@ -725,12 +764,6 @@ def run_altcoin_reversion_crypto(
                 open_count += 1
                 changed = True
 
-                _record(
-                    symbol=sym, action="BUY",
-                    price=current_price, size_usd=trade_usd,
-                    entry_time=entry_ts,
-                    z_score=current_z, exit_reason="",
-                )
                 vol_str = f"{symbol_vol:.3f}" if symbol_vol is not None else "n/a"
                 log.info(
                     "[c3] ENTRY %s  z=%.3f  price=%.4f  vol=%s  "
