@@ -1,8 +1,8 @@
-# Next Claude Code session prompt (session 12 — operator-return review)
+# Next Claude Code session prompt (session 13 — operator-return review)
 
-**Purpose:** Per `feedback_respond_as_prompt.md` — operator pastes the block below into the next Claude Code session on return from the away period. Session 10+11 (consolidated) shipped Phase 1 and Phase 2 autonomously on 2026-05-23 (PASS); the D.5 30-day soak is live on the $200 paper-crypto book with the C3 divergence-watcher armed for days 1-7.
+**Purpose:** Per `feedback_respond_as_prompt.md` — operator pastes the block below on return from the away period. Session 12 closed all 3 must-verify pre-departure items + shipped one new fix (5+restarts/24h pager) + sent operator-bye. The soak is live.
 
-**Updated:** 2026-05-23 post session 10+11 success. D.5 day-1 fired at 2026-05-23T12:46:32Z. Divergence-watcher day-7 deactivation: 2026-05-30T12:46:32Z. D.5 soak day-30 ETA: 2026-06-22T12:46:32Z.
+**Updated:** 2026-05-23 (post session 12 — all C1-C5 exit gates GREEN). D.5 day-1 fired at 2026-05-23T12:46:32Z. First anomaly window backfilled (phantom_ena_crash_loop 13:29:44Z → 15:07:46Z). Divergence-watcher window: → 2026-05-30T12:46:32Z. D.5 soak day-30 ETA: 2026-06-22T12:46:32Z.
 
 ---
 
@@ -10,43 +10,51 @@
 
 ```
 Context: AAATS operator-return review. The bot has been running the
-D.5 30-day soak since 2026-05-23T12:46:32Z autonomously. This session
-processes the away-period queue, decides whether C.6 (D.5 30-day no-
-intervention soak) and C.7 (B.3 4-week profitability) gates passed,
-and stages the next move (live flip prep, or restart-day-1 if the
-soak was interrupted).
+D.5 30-day soak since 2026-05-23T12:46:32Z autonomously, through the
+2026-05-23T13:29-15:07 phantom-ENA incident (recovered via session-11
+hotfix) and with the session-12 anomaly-window counter + 5+restarts/24h
+pager fix shipped before AFK departure. This session processes the
+away-period queue, decides C.6 + C.7, optionally runs PF5.9 (deferred
+from session 12), and stages the next move.
 
-Session 10+11 shipped (REFERENCE — do not redo):
+Session 11 + 12 shipped (REFERENCE — do not redo):
 
-  [P1.0] PF5.6 D.1 auto-halt isolation tests (4 pass).
-  [P1.1] PF5.5 100bps slippage stress tests (2 pass).
-  [P1.2] scripts/reset_paper_book_200.py + 7 tests.
-  [P1.3] monitoring/daily_digest.py C3 divergence-watcher + 6 tests.
-  [P1.4] docs/runbooks/2026-05-23_operator_away_protocol.md updated
-         (D2 override + D3 watcher row in decision matrix).
-  [P1.5] docs/conventions/deploy_discipline.md import-graph guard note.
-  [P1.6] scripts/deploy_session10_watcher.py shipped to box —
-         paper-crypto rebuilt sha256:1a06f1a3de03 -> sha256:ddbba66310e3,
-         watchdog rebuilt -> sha256:653fbdb892f4. Smoke A/A'/B/C green.
-         Rollback: .rollback/2026-05-24_session10_watcher_deploy/.
-  [P2.0] D.5 reset SUCCESS at 2026-05-23T12:46:32Z. 4 attempts total;
-         3 fixes applied along the way (watchdog stop, rm -f containers,
-         india seed, state archive). All persistent code on origin/main.
-  [P2.1] D.5 day-1 marker verified: $200 seed, watcher armed days 1-7,
-         [-$2,+$2] band on C3 P&L.
-  [P2.2] PF5.7 container-kill smoke green (live box).
-  [P2.3] PF5.8 flash-crash -21% drawdown -> engine HALT_ALL fires,
-         operator channel uncrossed, new entries blocked, reset clears.
-  [P2.4] Telegram pager validated end-to-end (message_id=2830,
-         HTTP 200 from sendMessage API).
-  [P2.5] Watcher armed confirmation: day 0/7, pnl=$0.00, no breach.
-  [P2.7] Operator-bye sent (cid c75c134e-67b3-4c97-adf5-767b4d28c706).
+  Session 11 hotfix (commits c71291e, 11b0874, 86bc8d4, 4219651):
+    Phantom-position fix. init_db.py schema mirror, paper_trader value
+    + risk_action migration, IntegrityError re-raise on missing winner,
+    C3+C6 ledger-first ordering, C1 stripped silent catch. Hotfix
+    deploy archived broken paper_trades.db (id INTEGER) + orphan
+    altcoin_reversion_state.json. tests/test_orphan_position_prevention.py
+    pins all three layers.
+
+  Session 12 [0] (commit 36e405f / paper-crypto b4a8f5906339, watchdog
+  f828f7892163): D.5 anomaly-window counter. monitoring/daily_digest.py
+  gains compute_soak_counter + enforce_anomaly_window_state +
+  render_soak_counter_row. _mark_digest_sent now captures action_needed.
+  Marker backfilled with phantom_ena_crash_loop window. 6 tests in
+  tests/test_d5_soak_counter.py.
+
+  Session 12 [1] (commit 660464b / watchdog 84a3e8c00302): 5+restarts/
+  24h pager + auto-halt + persistent history. health/watchdog.py gains
+  DAILY_RESTART_PAGER_THRESHOLD + _load/_save_persistent_restart_history
+  + _check_daily_pager_threshold. ESCALATION upgraded to [PAGER] +
+  critical. 5 tests in tests/test_pager_on_restart_storm.py + 11
+  existing watchdog tests still green.
+
+  Session 12 [2] B.2 P&L scan: branch (a) CLEAN. Only one valid C3
+  TON/USDT BUY post-recovery, zero ENA phantom rows.
+
+  Session 12 [3] PF5.9 DEFERRED to this session per D2 (time-tight).
+
+  Pre-departure pager test: HTTP 200, message_id=2898.
+
+  Operator-bye sent (cid 32ecfd0f-679d-4add-9b82-25e935c4911f).
 
 ================================================================
 PHASE A — Pager + digest queue review (DO FIRST, ~30-60 min)
 ================================================================
 
-  [A.1] Read every Telegram pager queued since 2026-05-23T13:00Z.
+  [A.1] Read every Telegram pager queued since 2026-05-23T15:30Z.
         Source-of-truth: data/alerts_log.json on box (severity=critical
         rows + [PAGER] prefix). Cross-reference Telegram chat 1946109268
         if accessible. Tabulate:
@@ -54,90 +62,85 @@ PHASE A — Pager + digest queue review (DO FIRST, ~30-60 min)
           - subsystem (which alert source)
           - what auto-action the pre-auth matrix took
           - whether operator intervention is now needed.
+        Note: data/watchdog_state.json now holds the persistent 24h
+        restart history. If 5+ shows up there, the pager fix triggered.
 
   [A.2] Read every daily digest from data/digests/ archive
-        (alternative: data/digest_log.json index). Look for:
+        (alternative: data/digest_log.json index, which now includes the
+        action_needed field per entry). Look for:
           - `Action needed != NONE` streaks (3+ in a row = was paged).
           - The C3 P&L since day-1 row in days 1-7 — did it stay within
             [-$2, +$2]? If exited, the watcher should have halted C3
             and that should appear in [A.1].
+          - The "Soak day N of 30 (M digests excluded)" row — confirms
+            the anomaly-window counter is working.
           - Strategy halt entries (any auto-halts during the period).
 
   [A.3] Read data/alerts_log.json full timeline. Tabulate by severity
-        (info / warn / critical). Note resolution rate — high open-alert
-        backlog == operator triage needed.
+        (info / warn / critical). Note resolution rate.
 
-  [A.4] Check soak counter. D.5 success = 30 consecutive NONE-NONE
-        digests starting 2026-05-23. If interrupted (any reset or
-        non-NONE digest streak ended), the day-1 counter restarted —
-        check the latest d5_day1_marker.json on box for the current
-        counter origin.
+  [A.4] Check soak counter via:
+          docker exec aaats-watchdog python -m monitoring.daily_digest --dry-run
+        The Soak day N row gives the official counter. If counter << days
+        since 2026-05-23, anomaly windows ate into it.
 
-  Output of Phase A: a one-page operator briefing with:
-    - Pager count + last-action-taken table
-    - Soak status (day N of 30 / interrupted at day N / completed)
-    - Strategy halts that need operator decision (resume vs keep halted)
-    - Any pager unaddressed by pre-auth matrix (needs decision)
+  Output of Phase A: one-page operator briefing with pager count,
+  soak status, halted strategies, doctrine-level decisions if any.
 
 ================================================================
 PHASE B — Soak verdict + B.2/B.3 evaluation
 ================================================================
 
   [B.1] D.5 verdict (C.6 gate):
-          - If 30 consecutive NONE-NONE digests reached → C.6 PASS.
-          - If interrupted → C.6 NOT YET; decide whether to restart
-            day-1 or escalate (e.g. if interruption was a real bug).
+          - If counter reached 30 → C.6 PASS.
+          - If interrupted (counter << days_since_day1) → C.6 NOT YET;
+            decide whether to restart day-1 or escalate.
 
   [B.2] B.2 evaluation (if 2026-05-29 was reached during the away
-        period). Per docs/known_issues/2026-05-23_strategy_c3_post_b2.md:
-          - Read the auto-evaluation result file (TBD path; per the
-            decision protocol).
-          - If P1/P2/P3 all green → C3 stays active; proceed to B.3.
-          - If any F1/F2/F3 fired → C3 should already be halted; verify
-            and document the halt reason.
+        period). Per docs/known_issues/2026-05-23_strategy_c3_post_b2.md.
 
-  [B.3] B.3 4-week soak check (if it started during away). Compare
-        final equity vs starting $200:
+  [B.3] B.3 4-week soak check (if it started). Compare final equity vs $200.
           - >= $200 → C.7 PASS.
-          - <  $200 → C.7 FAIL → re-triage per C.7's failure-branch logic
-            (see docs/decisions/2026-05-22_live_flip_rebuild_plan.md).
+          - <  $200 → C.7 FAIL → re-triage per C.7's failure-branch logic.
 
-  [B.4] If C.6 + C.7 BOTH PASS: stage Track C live-flip preparation.
-        Operator-on-station decision required (per autonomy contract,
-        live-flip is reserved for operator).
-        If either FAILS or NOT YET: stay in paper; produce a NO-FLIP-YET
-        briefing with the failed gate's specific evidence.
+  [B.4] If C.6 + C.7 BOTH PASS: stage Track C live-flip preparation
+        (operator-only decision; do not flip from this session).
+        If either FAILS or NOT YET: produce NO-FLIP-YET briefing.
 
 ================================================================
-PHASE C — Tree maintenance + commit
+PHASE C — PF5.9 adversarial test (deferred from session 12)
 ================================================================
 
-  [C.1] Resolve any pager-driven decisions:
-          - Strategies the operator wants resumed → reset_strategy() +
-            commit the audit.
-          - Strategies the operator wants kept halted → leave halted +
-            document why in docs/known_issues/.
-          - Doctrine-level decisions surfaced by pager → write a new
-            docs/decisions/ doc + Cowork plan.
+  [C.1] PF5.9 adversarial restart-during-write test.
+        Per feedback_adversarial_vs_verification_testing.md.
 
-  [C.2] Update Status logs:
-          - docs/decisions/2026-05-22_live_flip_rebuild_plan.md Status
-            log (C.6/C.7/Track C outcomes).
-          - docs/decisions/2026-05-21_track_d_reliability_addendum.md
-            Status log (D.5 final outcome).
+        tests/preflight/test_pf5_9_restart_during_write.py:
+          - In-memory fixture mocking the C3 BUY emission path.
+          - Inject failure between strategy_state.json write and
+            paper_trader.record_trade — use a mock that raises
+            BrokenPipeError or sqlite3.OperationalError mid-write to
+            simulate the crash window.
+          - Verify post-recovery state: either BOTH ledgers got the
+            entry OR NEITHER. Never one without the other.
+          - Failing-then-passing: checkout commit 1d3a7ff (pre-c71291e),
+            run RED. HEAD: GREEN.
 
-  [C.3] Overwrite this file (docs/decisions/2026-05-21_next_session_prompt.md)
-        with the session-13 prompt. If C.6+C.7 pass and operator decides
-        live-flip → session-13 is "Track C gate execution + first live
-        tranche". Else → session-13 is "soak day-N continuation +
-        whatever PHASE B surfaced".
-
-  [C.4] Commit atomic per scope (Cowork chats, decision docs, status
-        logs, any code fixes from pager triage). git pull --rebase
-        before push.
+        If GREEN: log + close the bug class. If RED on HEAD: the fix
+        is incomplete. Re-open the incident.
 
 ================================================================
-CONSTRAINTS (unchanged from sessions 1-11):
+PHASE D — Tree maintenance + commit
+================================================================
+
+  [D.1] Resolve any pager-driven decisions from Phase A.
+  [D.2] Update Status logs (rebuild_plan.md, track_d_addendum.md).
+  [D.3] Overwrite this file with the session-14 prompt. If C.6+C.7
+        pass and operator decides live-flip → session-14 is Track C
+        gate execution. Else → soak continuation.
+  [D.4] Commit atomic per scope. git pull --rebase before push.
+
+================================================================
+CONSTRAINTS (unchanged from sessions 1-12)
 ================================================================
 
   - No SCP deploy from dirty tree.
@@ -145,17 +148,49 @@ CONSTRAINTS (unchanged from sessions 1-11):
   - No behavior change in trading/, execution/, risk/ paper paths
     without failing-then-passing test.
   - Use --no-deps for rebuilds.
-  - Pre-existing test failures NOT regressions: test_dual_ledger_drift_bounded[runtime],
-    test_high_uncertainty, test_xgboost_ensemble (4 cases),
-    test_angel_one_integration.
-  - Live-flip is operator-only (per autonomy contract). C.1-C.7 gates
-    must pass first. Never flip from this session autonomously.
+  - Pre-existing test failures NOT regressions:
+    test_dual_ledger_drift_bounded[runtime], test_high_uncertainty,
+    test_xgboost_ensemble (4 cases), test_angel_one_integration,
+    test_paper_loop::test_buy_blocked_by_risk_engine (state file
+    pollution from prior tests).
+  - Live-flip is operator-only (per autonomy contract).
+
+================================================================
+Reporting at session end
+================================================================
+
+  - Append to Status logs with operator-return verification results.
+  - Overwrite this file with session-14 prompt.
+  - Commit + push.
+  - OPERATOR PINGS:
+    * "Operator returned" Telegram (info-level).
+    * Pager-level only on critical findings.
 ```
 
 ---
 
 ## Status log
 
-- **2026-05-23 (sessions 10+11 consolidated):** Phase 1 + auto-confirm + Phase 2 shipped autonomously per pre-auth. 19 new unit tests green, 4 box-smoke tests green (PF5.5/5.6 in unit suite, PF5.7/5.8 against live box), divergence-watcher live in monitoring/daily_digest.py, reset_paper_book_200.py executed successfully on 4th attempt (3 fixes layered in), D.5 day-1 marker written, operator-bye sent. Final commits: `c0a22ff` (Phase 1), `0d30c75` (P1.6 MANIFEST), `02cc4e9` `a2ddf15` `ec98d9b` `74d7d8c` (reset script fixes), `1eaaf41` (Phase 2 PF5.7/5.8 tests). All pushed to origin/main.
+- **2026-05-23 (session 12 — pre-departure verification, autonomous):**
+  All three Cowork-surfaced items closed: [0] D.5 anomaly-window
+  counter shipped (commit 36e405f / paper b4a8f59 + watchdog f828f78);
+  [1] pager-during-crash diagnosed branch(c) + fix shipped (commit
+  660464b / watchdog 84a3e8c); [2] B.2 scan CLEAN (branch a, 1 valid
+  row); [3] PF5.9 deferred per D2. Pre-departure pager test PASSED
+  (HTTP 200, message_id=2898). All C1-C5 exit gates GREEN.
+  Operator-bye sent (cid 32ecfd0f). Total session ships: 11 new tests
+  + 1 known-issue doc + 2 deploys + soak intact.
 
-- **2026-05-23 D.5 day-1 fired at 2026-05-23T12:46:32Z.** Watcher window: 2026-05-23 → 2026-05-30. D.5 soak day-30 ETA: 2026-06-22.
+- **2026-05-23 (session 11 — phantom-position hotfix):** Three-layer
+  bug closed (init_db schema, paper_trader IntegrityError handler,
+  C3+C6 ledger-first ordering). Commits c71291e, 11b0874, 86bc8d4,
+  4219651. tests/test_orphan_position_prevention.py — 6 tests green.
+
+- **2026-05-23 (sessions 10+11):** D.5 reset to $200. day-1 fired
+  2026-05-23T12:46:32Z. Divergence-watcher armed days 1-7.
+
+- **D.5 day-30 ETA:** 2026-06-22T12:46:32Z (counter pauses during
+  anomaly windows so could be later).
+
+- **First anomaly window:** phantom_ena_crash_loop
+  2026-05-23T13:29:44Z → 2026-05-23T15:07:46Z (~98 min).
