@@ -676,6 +676,171 @@ def enforce_c3_divergence_watcher(
     return divergence
 
 
+# ── D.5 soak counter + anomaly-window logic ────────────────────────────────
+#
+# Per Cowork D1 (2026-05-23): the D.5 30-day soak counter PAUSES during
+# defined anomaly windows and resumes on the next NONE-NONE digest.
+# Strict reading would invalidate the soak on any infrastructure
+# incident; pragmatic reading preserves it while still penalizing real
+# trading-side problems. The first anomaly window backfilled for the
+# 2026-05-23T13:29-15:07 phantom-ENA crash loop.
+#
+# Counter = (NONE digests since day1_at) - (NONE digests within any
+# anomaly window). Anomaly windows open automatically when any digest
+# reports Action needed != NONE and there is no open window; they
+# close on the next NONE-NONE digest.
+
+
+def _save_marker(marker_path: Path, marker: dict[str, Any]) -> None:
+    """Atomic write of the d5_day1_marker.json."""
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = marker_path.with_suffix(marker_path.suffix + ".tmp")
+    tmp.write_text(json.dumps(marker, indent=2), encoding="utf-8")
+    tmp.replace(marker_path)
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        ts = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+
+
+def _in_any_window(
+    ts: datetime, windows: list[dict[str, Any]],
+) -> bool:
+    """True iff ts falls within any [start, end) anomaly window. An open
+    window (end=None) covers from start onward."""
+    for w in windows:
+        if not isinstance(w, dict):
+            continue
+        start = _parse_iso(w.get("start"))
+        if start is None or ts < start:
+            continue
+        end = _parse_iso(w.get("end"))
+        if end is None or ts < end:
+            return True
+    return False
+
+
+def enforce_anomaly_window_state(
+    cfg: DigestConfig,
+    marker: dict[str, Any] | None,
+    action_needed: str,
+    as_of: datetime,
+) -> dict[str, Any] | None:
+    """Open/close anomaly windows in the marker based on the current
+    digest's action_needed line.
+
+    - Action needed != NONE and no open window -> append a new open
+      window {start: as_of, end: None, reason: action_text}.
+    - Action needed == NONE and there is an open window -> set end=as_of
+      on the most-recently-opened entry.
+
+    Marker is mutated and persisted to disk. Returns the updated marker
+    (or None if there is no marker to mutate)."""
+    if not isinstance(marker, dict):
+        return None
+    windows = list(marker.get("anomaly_windows", []) or [])
+    open_idx = next(
+        (i for i, w in enumerate(windows)
+         if isinstance(w, dict) and w.get("end") is None),
+        None,
+    )
+    changed = False
+    is_none = action_needed.strip().upper() == "NONE"
+
+    if not is_none and open_idx is None:
+        windows.append({
+            "start": as_of.astimezone(timezone.utc).isoformat(),
+            "end": None,
+            "reason": f"auto: {action_needed.strip()[:140]}",
+        })
+        changed = True
+    elif is_none and open_idx is not None:
+        windows[open_idx]["end"] = as_of.astimezone(timezone.utc).isoformat()
+        changed = True
+
+    if changed:
+        marker["anomaly_windows"] = windows
+        try:
+            _save_marker(_watcher_marker_path(cfg), marker)
+        except OSError:
+            pass
+    return marker
+
+
+def compute_soak_counter(
+    cfg: DigestConfig,
+    marker: dict[str, Any] | None,
+    as_of: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Count NONE-NONE digests since day1_at, MINUS those falling within
+    any anomaly window. Returns None when the marker is absent or
+    dormant (no day1_at)."""
+    if not isinstance(marker, dict):
+        return None
+    day1 = _parse_iso(marker.get("day1_at"))
+    if day1 is None:
+        return None
+
+    now = as_of if as_of is not None else datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    windows = marker.get("anomaly_windows", []) or []
+
+    log = _read_json(cfg.digest_log_path)
+    if not isinstance(log, list):
+        log = []
+
+    none_total = 0
+    none_in_window = 0
+    for entry in log:
+        if not isinstance(entry, dict):
+            continue
+        sent_at = _parse_iso(entry.get("sent_at_utc"))
+        if sent_at is None or sent_at < day1:
+            continue
+        action = str(entry.get("action_needed", "")).strip().upper()
+        if action != "NONE":
+            continue
+        none_total += 1
+        if _in_any_window(sent_at, windows):
+            none_in_window += 1
+
+    days_since = max(0, int((now - day1).total_seconds() // 86400))
+    effective = max(0, none_total - none_in_window)
+
+    return {
+        "day1_at": day1.isoformat(),
+        "days_since_day1": days_since,
+        "none_digests_count": none_total,
+        "excluded_digests_count": none_in_window,
+        "effective_counter": effective,
+        "anomaly_windows": list(windows),
+    }
+
+
+def render_soak_counter_row(counter: dict[str, Any] | None) -> str | None:
+    """Render the digest body's soak-counter row. None when dormant
+    (no marker)."""
+    if not counter:
+        return None
+    excluded = counter["excluded_digests_count"]
+    effective = counter["effective_counter"]
+    days = counter["days_since_day1"]
+    if excluded:
+        return (
+            f"Soak day {effective} of 30 "
+            f"({excluded} digest{'s' if excluded != 1 else ''} excluded; "
+            f"calendar day {days})"
+        )
+    return f"Soak day {effective} of 30 (calendar day {days})"
+
+
 # ── Top-level builder ───────────────────────────────────────────────────────
 
 
@@ -735,6 +900,16 @@ def build_digest(
     divergence = enforce_c3_divergence_watcher(cfg, as_of=as_of)
     watcher_row = render_watcher_row(divergence)
 
+    # D.5 soak counter — opens/closes anomaly windows based on this
+    # cycle's action_needed line, then computes the effective counter.
+    # Marker mutation runs BEFORE compute_soak_counter so closing-on-NONE
+    # is reflected in this digest's row.
+    marker_raw = _read_json(_watcher_marker_path(cfg))
+    marker = marker_raw if isinstance(marker_raw, dict) else None
+    marker = enforce_anomaly_window_state(cfg, marker, action, as_of)
+    soak = compute_soak_counter(cfg, marker, as_of=as_of)
+    soak_row = render_soak_counter_row(soak)
+
     header = f"AAATS daily digest -- {ist_today.isoformat()} (T+{t_plus} since rebuild)"
     parts = [
         header,
@@ -747,6 +922,8 @@ def build_digest(
     ]
     if watcher_row is not None:
         parts.extend(["", watcher_row])
+    if soak_row is not None:
+        parts.extend(["", soak_row])
     parts.extend(["", f"Action needed: {action}"])
     return "\n".join(parts)
 
@@ -782,12 +959,21 @@ def _mark_digest_sent(
     log = _read_json(cfg.digest_log_path)
     if not isinstance(log, list):
         log = []
+    # Extract the Action needed value from the body so compute_soak_counter
+    # can later filter by it. Defaults to "" if the body is malformed
+    # (counter treats anything != "NONE" as not-counted).
+    action_needed = ""
+    for line in payload.splitlines():
+        if line.lstrip().lower().startswith("action needed:"):
+            action_needed = line.split(":", 1)[1].strip()
+            break
     log.append({
         "ist_date": ist_today.isoformat(),
         "sent_at_utc": datetime.now(timezone.utc).isoformat(),
         "container_restart_count": container_restart_count,
         "sent": sent,
         "bytes": len(payload),
+        "action_needed": action_needed,
     })
     _atomic_write_json(cfg.digest_log_path, log)
 
