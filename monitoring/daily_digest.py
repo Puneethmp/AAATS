@@ -491,6 +491,191 @@ def compute_action_needed(
     return "; ".join(triggers)
 
 
+# ── C3 divergence-watcher (D3, first-week soak guard) ──────────────────────
+#
+# Per Cowork decision D3 (2026-05-23): for the first 7 days of the D.5
+# soak, if cumulative C3 P&L (in USD, since the d5_day1_marker timestamp)
+# exits the band [c3_threshold_low_usd, c3_threshold_high_usd] (default
+# [-$2.00, +$2.00]), the watcher auto-HALTs C3 and pages the operator.
+# After day 7, the watcher deactivates — C3's normal D.1 isolation
+# becomes the only protective layer.
+
+
+WATCHER_MARKER_FILENAME = "d5_day1_marker.json"
+
+
+def _parse_marker_day1(marker_text: str) -> datetime | None:
+    try:
+        payload = json.loads(marker_text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    raw = payload.get("day1_at")
+    if not isinstance(raw, str):
+        return None
+    try:
+        ts = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+
+
+def compute_c3_divergence(
+    marker: dict[str, Any] | None,
+    *,
+    db_path: Path | str | None = None,
+    as_of: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Pure-function compute of the watcher state.
+
+    Returns None if the watcher is dormant (marker missing, failed-reset
+    marker, or window expired). Otherwise returns a dict with:
+        pnl_since_day1_usd  : SUM of paper_trades.pnl WHERE strategy LIKE 'C3%'
+                              AND timestamp >= day1_at
+        days_into_watcher   : floor((now - day1_at) / 86400)
+        within_window       : days_into_watcher < watcher_window_days
+        threshold_breach    : 'low' | 'high' | None
+        c3_threshold_low_usd, c3_threshold_high_usd, watcher_window_days
+        day1_at             : ISO string
+    """
+    if not isinstance(marker, dict):
+        return None
+    if not marker.get("divergence_watcher_armed", False):
+        return None
+    raw_day1 = marker.get("day1_at")
+    if not isinstance(raw_day1, str):
+        return None
+    try:
+        day1 = datetime.fromisoformat(raw_day1)
+    except ValueError:
+        return None
+    if day1.tzinfo is None:
+        day1 = day1.replace(tzinfo=timezone.utc)
+
+    now = as_of if as_of is not None else datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    window_days = int(marker.get("watcher_window_days", 7))
+    low = float(marker.get("c3_threshold_low_usd", -2.0))
+    high = float(marker.get("c3_threshold_high_usd", 2.0))
+
+    days_into = max(0, int((now - day1).total_seconds() // 86400))
+    within = days_into < window_days
+
+    pnl_since_day1 = 0.0
+    if db_path is not None:
+        db = Path(db_path)
+        if db.exists():
+            try:
+                with sqlite3.connect(str(db)) as conn:
+                    row = conn.execute(
+                        "SELECT COALESCE(SUM(pnl), 0.0) FROM paper_trades "
+                        "WHERE strategy LIKE 'C3%' AND timestamp >= ?",
+                        (day1.isoformat(),),
+                    ).fetchone()
+                    pnl_since_day1 = float(row[0]) if row and row[0] is not None else 0.0
+            except sqlite3.Error:
+                pnl_since_day1 = 0.0
+
+    breach: str | None = None
+    if within:
+        if pnl_since_day1 < low:
+            breach = "low"
+        elif pnl_since_day1 > high:
+            breach = "high"
+
+    return {
+        "day1_at": day1.isoformat(),
+        "days_into_watcher": days_into,
+        "watcher_window_days": window_days,
+        "within_window": within,
+        "pnl_since_day1_usd": round(pnl_since_day1, 4),
+        "c3_threshold_low_usd": low,
+        "c3_threshold_high_usd": high,
+        "threshold_breach": breach,
+    }
+
+
+def render_watcher_row(divergence: dict[str, Any] | None) -> str | None:
+    """Render the appended digest row. None when dormant."""
+    if not divergence:
+        return None
+    days = divergence["days_into_watcher"]
+    window = divergence["watcher_window_days"]
+    pnl = divergence["pnl_since_day1_usd"]
+    if not divergence["within_window"]:
+        return f"C3 P&L since day-1: ${pnl:+.2f} (watcher inactive, day {days} past +{window})"
+    return f"C3 P&L since day-1: ${pnl:+.2f} (watcher active, days {days}/{window})"
+
+
+def _watcher_marker_path(cfg: DigestConfig) -> Path:
+    return cfg.data_dir / WATCHER_MARKER_FILENAME
+
+
+def enforce_c3_divergence_watcher(
+    cfg: DigestConfig,
+    as_of: datetime | None = None,
+    *,
+    halt_strategy_fn: Any = None,
+    send_alert_fn: Any = None,
+) -> dict[str, Any] | None:
+    """Compute divergence + enforce side effects (halt C3 + pager alert)
+    if the threshold band was breached inside the 7-day window.
+
+    Side effects are best-effort and isolated — failures must not break
+    digest rendering, since the digest job is itself a watchdog.
+
+    Returns the divergence dict (or None) for downstream rendering.
+    """
+    marker_path = _watcher_marker_path(cfg)
+    marker_text = _read_json(marker_path)
+    # _read_json returns the parsed dict, not raw text.
+    marker = marker_text if isinstance(marker_text, dict) else None
+
+    divergence = compute_c3_divergence(marker, db_path=cfg.db_path, as_of=as_of)
+    if not divergence:
+        return None
+    if not divergence["within_window"]:
+        return divergence
+    if not divergence["threshold_breach"]:
+        return divergence
+
+    # Breach. Halt + pager. Both side effects are best-effort.
+    band = (
+        f"outside [${divergence['c3_threshold_low_usd']:+.2f}, "
+        f"${divergence['c3_threshold_high_usd']:+.2f}]"
+    )
+    reason = (
+        f"C3 divergence-watcher: pnl_since_day1=${divergence['pnl_since_day1_usd']:+.2f}, "
+        f"{band} window in soak day {divergence['days_into_watcher']}"
+    )
+    try:
+        if halt_strategy_fn is None:
+            from risk.strategy_halt import halt_strategy as _halt
+        else:
+            _halt = halt_strategy_fn
+        _halt("C3_altcoin_reversion", reason=reason, consecutive_exceptions=0)
+    except Exception:  # noqa: BLE001 — digest must not crash
+        pass
+
+    try:
+        if send_alert_fn is None:
+            from observability.alerts import send_alert as _send
+        else:
+            _send = send_alert_fn
+        _send(
+            f"[PAGER] C3 divergence-watcher: {reason}",
+            market="crypto",
+            severity="critical",
+        )
+    except Exception:  # noqa: BLE001 — digest must not crash
+        pass
+
+    return divergence
+
+
 # ── Top-level builder ───────────────────────────────────────────────────────
 
 
@@ -547,6 +732,8 @@ def build_digest(
     )
     strategies = build_strategies_section(cfg, as_of)
     action = compute_action_needed(cfg, pnl, ops, strategies)
+    divergence = enforce_c3_divergence_watcher(cfg, as_of=as_of)
+    watcher_row = render_watcher_row(divergence)
 
     header = f"AAATS daily digest -- {ist_today.isoformat()} (T+{t_plus} since rebuild)"
     parts = [
@@ -557,9 +744,10 @@ def build_digest(
         render_ops_section(ops),
         "",
         render_strategies_section(strategies),
-        "",
-        f"Action needed: {action}",
     ]
+    if watcher_row is not None:
+        parts.extend(["", watcher_row])
+    parts.extend(["", f"Action needed: {action}"])
     return "\n".join(parts)
 
 

@@ -111,6 +111,38 @@ box's filesystem alone cannot.
 - If a session aborts mid-scope, push the completed work and note skipped scope
   explicitly. Don't sit on partial commits hoping to bundle them later.
 
+## Import-graph guard for SCP manifests
+
+**Rule.** A paramiko-SCP deploy script that ships a file `X.py` MUST also ship
+every other source file in the same repo that `X.py` imports — UNLESS those
+imports are already present on the box at the same SHA. If unsure, ship them.
+
+**Why.** Session 9 [0.5] (hotfix `foundation/state_bridge.py + foundation/positions.py`):
+those two files were committed to `origin/main` on 2026-05-21 (`464bf7e`) but
+never shipped to the box. The session-8 strategy code that landed in session-9
+imported them; the rebuild succeeded, but the container's first cycle raised
+`ImportError: cannot import name '...' from 'foundation.state_bridge'` and stayed
+in a crash-loop until the two missing files were SCP'd. This was avoidable —
+the import graph said the new files were required, the deploy manifest didn't
+encode that.
+
+**How to apply.**
+
+1. Every `deploy_session*.py` declares a `FILES` list. Treat that list as a
+   closed dependency graph: if a file in `FILES` imports a module that is NOT
+   in `FILES`, either (a) prove the module on the box matches `origin/main` HEAD,
+   or (b) add it to `FILES`.
+2. Post-rebuild smoke gate (a) of every deploy script MUST include an import
+   canary: `docker exec <container> python -c "import <touched_module>"` for at
+   least one module from `FILES`. Crash-on-import is the failure mode this
+   guard defends against; the canary catches it before the container settles.
+3. Follow-up: `tools/lint/manifest_import_audit.py` — a lint that walks each
+   `deploy_session*.py` `FILES` list, builds the AST-level import graph for
+   each file, and warns when a transitive dependency is not in the manifest
+   and not present in `.rollback/<latest>/MANIFEST.txt` post-deploy SHAs.
+   Deferrable post-soak (no operational risk while the soak is single-strategy
+   stable); add to D.5+1 follow-ups list.
+
 ## Commit message convention
 
 ```
