@@ -1,0 +1,16 @@
+ROLLBACK BASELINE - 2026-05-23 Session 12 [1] pager fix
+================================================================================
+
+DEPLOYED_AT_UTC               = 2026-05-23T15:31:59Z
+PRE_WATCHDOG_IMAGE_SHA        = sha256:f828f7892163ca8d84df1d127121555a6cc63adb87a2460840806ef03968258f
+POST_WATCHDOG_IMAGE_SHA       = sha256:84a3e8c00302dca3645009d86bd1f2e9bb02b65d1abad41828213d1465e02dcb
+POST_WATCHDOG_STATUS          = running
+SMOKE_A_SYMBOLS               = True
+SMOKE_C_BOOT                  = True
+GATE_WATCHDOG_RUNNING         = True
+
+File SHAs (pre -> post):
+  health/watchdog.py                       : 387b6614cf05da16b52c635699e55be2532c845c4b63f00772ce36382724d305 -> 3d5925f85ad458b0e4b99af134d64d296b1675db776281dca5d36013a39263ae
+
+Boot log tail:
+  2026-05-23 15:31:28,371 INFO watchdog watchdog starting target=aaats-paper-crypto stale_threshold=2700s poll=60s rate=3/1800s digest_hour_ist=9 digest_disabled=False
