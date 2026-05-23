@@ -1669,6 +1669,8 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
     run_strategy_with_isolation(
         "C1_stat_arb", run_stat_arb_crypto,
         portfolio, fetch_crypto_hourly,
+        full_positions=positions,
+        full_portfolio=portfolio,
     )
 
     # Funding rate arbitrage: BTC/ETH delta-neutral (C5b)

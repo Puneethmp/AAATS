@@ -1153,6 +1153,100 @@ this.
 
   **Operator pings this session:** none required.
 
+- **2026-05-24 (session 7)** — Coordinated session-6 box deploy + C1
+  kill-gate wire + lint chip-away (B.2 skipped, ineligible until 2026-05-29).
+
+  **[0] Session-6 bundled deploy — SHIPPED + smoke green.**
+  `scripts/deploy_session7_kill_alerts_lint.py` rolled 9 files (3 image-baked
+  changes to paper-crypto + 1 to metrics + 1 to watchdog, plus 4 workstation-side
+  helpers) onto the box in one paramiko atomic-swap pass. Post-rebuild image SHAs
+  captured at `.rollback/2026-05-24_session7_kill_alerts_lint/MANIFEST.txt`:
+  paper-crypto `4905e304…`, metrics `25f222ac…`, watchdog `d0ad9ab1…`.
+  Smoke gates: digest dry-run inside aaats-watchdog renders
+  `Equity: $87.45  (peak $131.32, dd -33.4%)`; new band wording fires
+  `Action needed: drawdown -33.4% past portfolio-kill threshold (-20%); all new
+  entries blocked, open positions continue to mark-to-market`;
+  `aaats_metrics_exporter_up=1.000000` on `:9091/metrics`.
+
+  **Surfaced finding — operator-channel halt was being silently ignored
+  pre-deploy.** Box `data/halt_state.json` shows
+  `{us:true, india:true, crypto:true}` set at 2026-05-22 17:41 UTC (~13 hours
+  before deploy). Pre-deploy `run_crypto` ignored this entirely and kept
+  trading (digest showed `C1_stat_arb (10 trades)` over 24h). Post-deploy the
+  session-6 `is_halted("crypto")` gate fires correctly and the runner short-
+  circuits with `Crypto market HALTED (kill switch) — skipping cycle`. **Operator
+  decision:** keep crypto halted; -33.4% drawdown is past the portfolio-kill
+  threshold and a halt is defensible. Reset path documented for future sessions:
+  `python kill.py --reset crypto` on the box, but the engine-level -15% kill
+  will continue to gate new entries until paper-crypto recovers above -15%.
+
+  **Semantic gap surfaced (session 8 item):** the runner-wide short-circuit
+  on `is_halted("crypto")` ALSO stops mark-to-market and exit logic for
+  open positions, broader than the engine-level kill's documented "block new
+  entries, keep MTM" semantics. The C3 standalone gate at
+  `altcoin_reversion.py:598` blocks SELL emissions too, so currently
+  positions are stuck open during operator halt. Worth a session-8 review:
+  either (a) move the runner short-circuit BELOW exit/MTM code so open
+  positions still bleed correctly, or (b) accept current semantics as
+  intentional and document it in `CLAUDE.md` "Kill-switch semantics".
+
+  **[1] B.2 — SKIPPED (eligibility 2026-05-29).** Today is 2026-05-23; the
+  B.2 evaluation window begins 2026-05-29 per
+  `docs/known_issues/2026-05-23_strategy_c3_post_b2.md`. Reordered per prompt
+  fallback: [2], [3].
+
+  **[2] C1 stat_arb standalone kill-gate — SHIPPED.**
+  `run_stat_arb_crypto` and `_run_pair` now accept
+  `full_positions` / `full_portfolio` kwargs and resolve
+  `trading.live_paper_runner.apply_kill_switch_gate` once per cycle, parity
+  with C3 / C6. Gate is consulted before BUY emission at the entry block
+  and before SELL emission at CONVERGE / HARD_STOP / TIME_STOP exit paths.
+  Call site in `trading/live_paper_runner.py` updated to pass the runner-wide
+  state dicts. Tests at `tests/test_stat_arb_kill_gate.py` (4/4 green) cover:
+  signature accepts new kwargs (pre-patch raised TypeError); gate-tripped
+  blocks entry at -33% drawdown even when |z|>entry_z; gate-open allows
+  entry (proves the fixture isn't silently failing); back-compat path
+  (kwargs omitted) bypasses the gate cleanly. **The latent bug surfaced at
+  end of session 6** ("C1 would happily open new positions IF the entry-z
+  fires") is now closed.
+
+  **[3] D.6 lint chip-away — SHIPPED.**
+  `execution/paper_executor.py` lines 126/144/150/217/268/276/294 converted
+  from `log.X("...%s...", args)` to f-string form (7 hits removed).
+  `execution/idempotency.py` lines 179/191/200 silent-except handlers gain
+  `log.debug(...)` bodies that record the OperationalError message
+  (3 hits removed; new module-level logger added). My own session-7
+  stat_arb.py edits also converted to f-strings (-3 hits I would have
+  added). Net: silent-except 80 → 77, loguru-printf 188 → 181 (10 fewer).
+  Baseline at `tools/lint/silent_except_baseline.txt` ratcheted downward;
+  ratchet CI gate at `tests/test_lint_silent_except.py` green.
+
+  **[4] D.5 day-1 — STILL PARKED.** Today's box digest fired with
+  `Action needed: drawdown -33.4% past portfolio-kill threshold (-20%)`.
+  Day-1 clock remains parked until equity recovers and a NONE digest
+  fires.
+
+  **Cross-cutting findings:**
+    - Pre-existing test failure `tests/test_dual_ledger_drift.py
+      ::test_dual_ledger_drift_bounded[runtime]` — confirmed via
+      git-stash that it fails BEFORE session-7 edits; caused by box
+      auto-cron snapshots in `runtime/`, unrelated to the C1 kill-gate
+      or lint work. Triage owner: a later session that owns the
+      runtime/ ledger writer.
+    - Lint rule observation: many `loguru-printf` hits in stdlib-logging
+      modules (e.g. `paper_executor.py` uses `logging.getLogger`, not
+      loguru) are false positives — `%s` is correct stdlib usage there.
+      Conversion to f-strings is doctrine-neutral (works for both) but
+      eagerly formats. If future cleanup chips a hot debug path, prefer
+      `# noqa: loguru-printf` over f-string conversion for stdlib code.
+    - Lint baseline file lives under `tools/lint/silent_except_baseline.txt`;
+      always ratchet downward after a cleanup batch and re-run
+      `tests/test_lint_silent_except.py` to lock the new floor.
+
+  **Operator pings this session:** one — clarification on the operator
+  halt_state divergence surfaced in [0]. Resolved with operator's
+  "best recommendation" preference; keep-halted chosen.
+
 ---
 
 ## B.1 triage table (decision merged 2026-05-22 session 2)

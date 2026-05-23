@@ -123,7 +123,7 @@ class PaperExecutor:
                 "enableRateLimit": True,
             })
         except Exception as exc:
-            log.error("PaperExecutor: ccxt binance init failed: %s", exc)
+            log.error(f"PaperExecutor: ccxt binance init failed: {exc}")
             self._binance = None
         return self._binance
 
@@ -141,14 +141,12 @@ class PaperExecutor:
         try:
             book = ex.fetch_order_book(symbol, limit=20)
         except Exception as exc:
-            log.warning("PaperExecutor: orderbook fetch failed for %s: %s",
-                        symbol, exc)
+            log.warning(f"PaperExecutor: orderbook fetch failed for {symbol}: {exc}")
 
         try:
             trades = ex.fetch_trades(symbol, limit=50)
         except Exception as exc:
-            log.debug("PaperExecutor: trades fetch failed for %s: %s",
-                      symbol, exc)
+            log.debug(f"PaperExecutor: trades fetch failed for {symbol}: {exc}")
 
         return book, trades
 
@@ -215,9 +213,9 @@ class PaperExecutor:
 
         if not result.filled:
             log.info(
-                "PAPER fill rejected | %s %s @ %.6f x%.8f | type=%s | reason=%s",
-                side, symbol, intended_price, size, result.fill_type,
-                result.notes.get("reason", "unknown"),
+                f"PAPER fill rejected | {side} {symbol} @ {intended_price:.6f} "
+                f"x{size:.8f} | type={result.fill_type} | "
+                f"reason={result.notes.get('reason', 'unknown')}"
             )
             return None
 
@@ -266,14 +264,13 @@ class PaperExecutor:
                 correlation_id=corr_id,
             )
             log.info(
-                "PAPER %s %s @ %.6f x%.8f | type=%s fees=$%.4f slip=%.1fbps "
-                "| strat=%s | trade=%s",
-                side, symbol, result.fill_price, result.filled_size,
-                result.fill_type, result.fees_usd, result.slippage_bps,
-                strategy, trade_id[:8],
+                f"PAPER {side} {symbol} @ {result.fill_price:.6f} "
+                f"x{result.filled_size:.8f} | type={result.fill_type} "
+                f"fees=${result.fees_usd:.4f} slip={result.slippage_bps:.1f}bps "
+                f"| strat={strategy} | trade={trade_id[:8]}"
             )
         except Exception as exc:
-            log.error("PaperExecutor record_trade failed: %s", exc, exc_info=True)
+            log.error(f"PaperExecutor record_trade failed: {exc}", exc_info=True)
 
         # Decision ledger fill event (best-effort)
         try:
@@ -291,6 +288,6 @@ class PaperExecutor:
                 client_order_id=cli_id,
             )
         except Exception as exc:
-            log.debug("PaperExecutor ledger.fill skipped (non-fatal): %s", exc)
+            log.debug(f"PaperExecutor ledger.fill skipped (non-fatal): {exc}")
 
         return result

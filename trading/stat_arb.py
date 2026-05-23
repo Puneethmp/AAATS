@@ -299,6 +299,9 @@ def _run_pair(
     portfolio: dict,
     state: dict,
     health: dict,
+    gate_check=None,
+    full_positions: dict | None = None,
+    full_portfolio: dict | None = None,
 ) -> tuple[dict, dict]:
     """
     Evaluate one pair: update health cache, check exits, check entry.
@@ -306,6 +309,15 @@ def _run_pair(
     Position encoding in state[key]:
         side, shares_a, shares_b, entry_price_a, entry_price_b,
         entry_z, entry_time, entry_alloc
+
+    Kill-switch gate (B') wiring:
+        gate_check, full_positions, full_portfolio are resolved by the
+        public runner (run_stat_arb_crypto). When gate_check is None
+        (test / back-compat callers), all entries and exits proceed
+        ungated. When gate_check is set, it is consulted before any BUY
+        or SELL emission; on HALT, the offending leg is skipped and
+        re-evaluated next cycle. Parity with C3 (altcoin_reversion.py)
+        and C6 (bollinger_range.py).
     """
     key      = f"{pair.long_sym}_{pair.short_sym}"
     mkt_port = portfolio[pair.market]
@@ -358,13 +370,32 @@ def _run_pair(
     cached_eg_p   = health_entry.get("eg_pvalue", 0.0)
     cached_corr14 = health_entry.get("corr_14d", 1.0)
 
+    # -- Kill-switch gate (B'): close branch ---------------------------------
+    # Block SELL/BUY emissions for any exit (CONVERGE / HARD_STOP / TIME_STOP)
+    # before mutating state, capital, or persistence. If the gate trips, the
+    # position stays open and is re-evaluated next cycle.
+    def _exit_gate_ok() -> bool:
+        if gate_check is None:
+            return True
+        _allowed, _kill_reason = gate_check(
+            pair.market, pair.long_sym, price_a,
+            full_positions, full_portfolio,
+        )
+        if not _allowed:
+            log.info(f"[c1] {key}: SKIP EXIT — kill switch active ({_kill_reason})")
+        return _allowed
+
     # -- EXIT: spread converged -----------------------------------------------
     if position and abs(z) < pair.exit_z:
+        if not _exit_gate_ok():
+            return state, health
         return _close_position(pair, key, z, price_a, price_b, position, mkt_port, state, health, reason="CONVERGE")
 
     # -- EXIT: hard stop (spread blowing out) ---------------------------------
     if position and abs(z) >= pair.hard_stop_z:
         log.warning(f"  HARD_STOP {key}: |z|={abs(z):.3f} >= {pair.hard_stop_z}")
+        if not _exit_gate_ok():
+            return state, health
         return _close_position(pair, key, z, price_a, price_b, position, mkt_port, state, health, reason="HARD_STOP")
 
     # -- EXIT: time stop (max hold exceeded) ----------------------------------
@@ -375,6 +406,8 @@ def _run_pair(
             log.warning(
                 f"  TIME_STOP {key}: held {age_hours:.1f}H >= {pair.time_stop_hours}H"
             )
+            if not _exit_gate_ok():
+                return state, health
             return _close_position(pair, key, z, price_a, price_b, position, mkt_port, state, health, reason="TIME_STOP")
 
     # -- ENTRY: no position, spread stretched, health gate passes -------------
@@ -389,6 +422,17 @@ def _run_pair(
         if alloc * 2 > capital:
             log.info(f"  Insufficient capital for stat_arb {key} -- skip")
             return state, health
+
+        # Kill-switch gate (B') — block ENTRY emission BEFORE any state
+        # mutation, DB write, or capital adjustment. Parity with C3/C6.
+        if gate_check is not None:
+            _allowed, _kill_reason = gate_check(
+                pair.market, pair.long_sym, price_a,
+                full_positions, full_portfolio,
+            )
+            if not _allowed:
+                log.info(f"[c1] {key}: SKIP ENTRY — kill switch active ({_kill_reason})")
+                return state, health
 
         shares_a = alloc / max(price_a, 1e-9)
         shares_b = alloc / max(price_b, 1e-9)
@@ -441,6 +485,8 @@ def _run_pair(
 def run_stat_arb_crypto(
     portfolio: dict,
     fetch_hourly_fn,
+    full_positions: dict | None = None,
+    full_portfolio: dict | None = None,
 ) -> None:
     """
     Run crypto pairs stat-arb. Call once per cycle from run_crypto().
@@ -448,7 +494,19 @@ def run_stat_arb_crypto(
     Args:
         portfolio:       The live portfolio dict (mutated in-place).
         fetch_hourly_fn: Callable(symbol) -> pd.DataFrame | None
+        full_positions:  Full positions dict {"crypto": {...}, "india": {...}}.
+                         Required for kill-switch gate (B' helper). When None
+                         (test/back-compat callers), the gate is bypassed.
+        full_portfolio:  Full portfolio dict, same role as full_positions.
     """
+    _gate_check = None
+    if full_positions is not None and full_portfolio is not None:
+        try:
+            from trading.live_paper_runner import apply_kill_switch_gate as _gate_check
+        except Exception as exc:
+            log.warning(f"[c1] kill-switch helper unavailable ({exc}) — proceeding ungated")
+            _gate_check = None
+
     state        = _load_state()
     health       = _load_pair_health()
     crypto_pairs = [p for p in PAIRS if p.market == "crypto"]
@@ -467,7 +525,12 @@ def run_stat_arb_crypto(
             prices_a = df_a.set_index("timestamp")["close"] if "timestamp" in df_a.columns else df_a["close"]
             prices_b = df_b.set_index("timestamp")["close"] if "timestamp" in df_b.columns else df_b["close"]
 
-            state, health = _run_pair(pair, prices_a, prices_b, portfolio, state, health)
+            state, health = _run_pair(
+                pair, prices_a, prices_b, portfolio, state, health,
+                gate_check=_gate_check,
+                full_positions=full_positions,
+                full_portfolio=full_portfolio,
+            )
         except Exception as exc:
             log.error(f"  Stat-arb crypto {pair.long_sym}/{pair.short_sym}: {exc}", exc_info=True)
 

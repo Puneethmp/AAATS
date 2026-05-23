@@ -1,0 +1,81 @@
+ROLLBACK BASELINE - 2026-05-24 Session 7 [0] coordinated box deploy
+================================================================================
+
+DEPLOYED_AT_UTC               = 2026-05-23T06:55:58Z
+PRE_PAPER_IMAGE_SHA           = sha256:3d7b33b751b1585c37803e9b166edd0691f434dd6b687fac0194fba7741bc2ea
+POST_PAPER_IMAGE_SHA          = sha256:4905e304f6886d1999d91bc5bbea334d05de6b3dbe0b75fc2391bab8bcf91e85
+PRE_METRICS_IMAGE_SHA         = sha256:c9e2e54ab593e3b8742b33c2282b3ccd3ba1ddf16991b86219a2e8d216204c56
+POST_METRICS_IMAGE_SHA        = sha256:25f222accd10e197d90e89370a4f00cdb405da61c8ff8f173946facc938a5f24
+PRE_WATCHDOG_IMAGE_SHA        = sha256:e948bedc51710dabe82cb97032b32596dc77a5382cf74f7b23cbff7a8c6e6096
+POST_WATCHDOG_IMAGE_SHA       = sha256:d0ad9ab1d971873db7b31c1fa051a00947e32335c0195e959efd38827c383f5b
+POST_PAPER_STATUS             = running
+POST_METRICS_STATUS           = running
+POST_WATCHDOG_STATUS          = running
+SMOKE_A_PAPER_NO_SURPRISE_HALT = False
+SMOKE_B_BOX_DRY_RUN_PASSED    = True
+SMOKE_B_BAND_WORDING_OK       = True
+SMOKE_C_ALERTS_LOG_PRESENT    = False
+SMOKE_C_SELF_UP_GAUGE         = True
+PRE_HALT_STATE                = {
+  "us": true,
+  "india": true,
+  "crypto": true
+}
+POST_HALT_STATE               = {
+  "us": true,
+  "india": true,
+  "crypto": true
+}
+
+Pre-deploy file SHAs:
+  trading/live_paper_runner.py                       : c79867e11548b3abd9c1b2c99ffaef43df731a264944f774117ba76fd6bc3526
+  monitoring/daily_digest.py                         : f592f802e82e8f956df862bfba32a58fa2d9441b4db55c7c3d9067dbe6cee7f6
+  observability/alerts.py                            : 1f6bab77a415b343f62a6d15135200ef628158327b64069d105a6f819b05f428
+  foundation/kill_switch.py                          : 5bc8a6d874ed6c3b5587d2d8b53339848ec34c40ffc81953f44e0915d772ff21
+  monitoring/metrics_exporter.py                     : c3409f24846b1ba02b1fa067c5b4ab076dbe7dd541a651ed6d8bffd2955acc3a
+  tools/operator/_digest_smoke.py                    : ABSENT
+  tools/lint/__init__.py                             : ABSENT
+  tools/lint/silent_except.py                        : ABSENT
+  tools/lint/silent_except_baseline.txt              : ABSENT
+
+Post-deploy file SHAs:
+  trading/live_paper_runner.py                       : b9928fc2938d30089c49e4139f6d1d61cc58b9f0175ecdca4ea7f1482bebaf4c
+  monitoring/daily_digest.py                         : d9986c67f64ed018276f2eea01de72d3b222a5cda0eafde9574bf0666a01478b
+  observability/alerts.py                            : 6f589127c416d5794621ced5a1234bcca763017d27920182c8ed8586b6ecb4b6
+  foundation/kill_switch.py                          : a88af1bae47cdba094dc6a39a70158c88ae035c0ec99e49fa111022a63cf1218
+  monitoring/metrics_exporter.py                     : 2c720d13f8901c27f91a3114cdc940dc341fd603f532dd0c484b0484c4a204be
+  tools/operator/_digest_smoke.py                    : 4577ba0913b0032335f5126fb2be3e7fc6cc248fe94d3c3a449c75c5322033d0
+  tools/lint/__init__.py                             : e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  tools/lint/silent_except.py                        : 0ee0e6637e6bf71742e6dff8a1a60c99269fbfeac80926bb9ebec08f642f024a
+  tools/lint/silent_except_baseline.txt              : 456b865a92955909827b4f3b174c31473d80b384257d2650067f87f478a12cd5
+
+Box dry-run output (tail):
+  AAATS daily digest -- 2026-05-23 (T+11 since rebuild)
+  
+  P&L (24h)
+    Realized:   $+0.04
+    Unrealized: $+0.05
+    Equity:     $87.45  (peak $131.32, dd -33.4%)
+  
+  Operational
+    Cycles run:        6 (expected 96, 6.2% uptime)
+    Exceptions:        0  (0 auto-halted)
+    Container restarts: 0  (auto: 0, manual: 0)
+    Alerts fired:      N/A  (alerts_log not yet populated)
+  
+  Strategies (24h)
+    Firing:   C1_stat_arb (10 trades)
+    Silent:   C2_momentum, C3_altcoin_reversion, C5b_funding_arb, C6_bollinger_range
+    Halted:   (none)
+  
+  Action needed: drawdown -33.4% past portfolio-kill threshold (-20%); all new entries blocked, open positions continue to mark-to-market
+
+Equity line parsed:
+  $87.45  (peak $131.32, dd -33.4%)
+
+metrics self-up curl:
+  aaats_metrics_exporter_up 1.000000
+
+alerts_log.json head (or MISSING):
+  head: cannot open '/home/aaats/aaats/data/alerts_log.json' for reading: No such file or directory
+  MISSING

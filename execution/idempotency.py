@@ -52,11 +52,14 @@ PRODUCTION SAFETY
 from __future__ import annotations
 
 import hashlib
+import logging
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
+
+log = logging.getLogger(__name__)
 
 # ─── Public types ────────────────────────────────────────────────────────────
 
@@ -176,8 +179,11 @@ def _ensure_dedupe_index(db_path: str) -> sqlite3.Connection:
     ):
         try:
             conn.execute(sql)
-        except sqlite3.OperationalError:
-            pass  # column already exists
+        except sqlite3.OperationalError as exc:
+            # Expected on every run after the first — the column already exists.
+            # Logged at debug to surface unexpected variants (e.g. permission)
+            # in forensic traces without spamming normal startup.
+            log.debug(f"idempotency migration noop ({sql!r}): {exc}")
 
     # UNIQUE INDEX — last-line DB-level guarantee against double-fires.
     # Partial index excludes NULLs so legacy rows without client_order_id
@@ -188,8 +194,8 @@ def _ensure_dedupe_index(db_path: str) -> sqlite3.Connection:
             "ON paper_trades(client_order_id) "
             "WHERE client_order_id IS NOT NULL"
         )
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as exc:
+        log.debug(f"idempotency ux_paper_trades_client_order_id noop: {exc}")
 
     # Plain index on correlation_id — fast joins for audit trail forensics
     try:
@@ -197,8 +203,8 @@ def _ensure_dedupe_index(db_path: str) -> sqlite3.Connection:
             "CREATE INDEX IF NOT EXISTS ix_paper_trades_correlation_id "
             "ON paper_trades(correlation_id)"
         )
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as exc:
+        log.debug(f"idempotency ix_paper_trades_correlation_id noop: {exc}")
 
     conn.commit()
     return conn

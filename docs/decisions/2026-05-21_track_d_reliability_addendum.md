@@ -607,3 +607,105 @@ The `Action needed` field is the operator's single decision-trigger. If it's `NO
     - 268-hit lint cleanup — chip away gradually; each cleanup
       ratchets the baseline down.
     - C5b funding_arb re-enable — blocked on unified ledger Q1-Q4.
+
+- **2026-05-24 (session 7)** — **Session-6 box deploy + D.6 chip-away
+  + Row 7 verified live on box + C1 kill-gate wired.**
+
+  **Bundled box deploy.** `scripts/deploy_session7_kill_alerts_lint.py`
+  pushed alerts-log writer (`observability/alerts.py`), digest band
+  wording (`monitoring/daily_digest.py`), the run_crypto operator-kill
+  gate (`trading/live_paper_runner.py`), row 7 self-up gauge
+  (`monitoring/metrics_exporter.py`), and the workstation helpers
+  (`tools/operator/_digest_smoke.py`, `tools/lint/*`) in one atomic
+  pass. Rebuilt `aaats-paper-crypto` + `aaats-metrics` + `aaats-watchdog`
+  with `--no-deps`. Post-deploy SHAs at
+  `.rollback/2026-05-24_session7_kill_alerts_lint/MANIFEST.txt`.
+
+  **Smoke gates (all green):**
+    - **Digest** — `docker exec aaats-watchdog python -m monitoring.daily_digest
+      --dry-run` renders `Equity: $87.45 (peak $131.32, dd -33.4%)` and
+      the new band wording fires correctly:
+      `Action needed: drawdown -33.4% past portfolio-kill threshold (-20%);
+      all new entries blocked, open positions continue to mark-to-market`.
+      The session-5 N/A regression is no longer reachable.
+    - **Row 7 (metrics-exporter self-up)** — `curl :9091/metrics` on
+      the box returns `aaats_metrics_exporter_up 1.000000`. In-band
+      liveness gauge complements Prometheus's `up{job="aaats-metrics"}`
+      and surfaces the deadlocked-scrape-loop failure mode that
+      Prometheus's target gauge would miss.
+    - **Alerts log** — `data/alerts_log.json` is absent at deploy time
+      (lazy creation on first `send_alert`). Digest currently reports
+      `Alerts fired: N/A (alerts_log not yet populated)`; will switch
+      to fired/open counts on the first HALT or strategy-exception
+      alert post-deploy.
+    - **Deploy-smoke helper** — `tools/operator/_digest_smoke.py` was
+      wired into the deploy script via
+      `assert_digest_renders_equity(_box_run, target_container=
+      "aaats-watchdog", mode="paper")`; returned
+      `ok=True message="digest renders equity correctly:
+      $87.45  (peak $131.32, dd -33.4%)"`. The N/A drift assertion
+      from session 6 is now part of every box deploy.
+
+  **Surfaced finding — operator halt was being silently ignored
+  pre-deploy.** `data/halt_state.json` on the box was
+  `{us:true, india:true, crypto:true}` (set 2026-05-22 17:41 UTC,
+  ~13 hours pre-deploy). Pre-deploy `run_crypto` ignored the operator
+  channel entirely and traded freely. Post-deploy the session-6
+  `is_halted("crypto")` gate fires correctly and the runner short-
+  circuits. Operator chose to keep crypto halted (-33% drawdown
+  justifies it). See live_flip_rebuild_plan.md session-7 entry for
+  the full operator interaction.
+
+  **Semantic gap surfaced (session 8 item).** The runner-wide
+  short-circuit at top of `run_crypto` also stops MTM and exit code
+  for open positions. The engine-level kill's documented semantics
+  are "block new entries, keep MTM". Resolution options:
+  (a) move the runner short-circuit BELOW the MTM/exit code so open
+  positions continue to bleed, (b) accept current behavior as
+  intentional and document it. Not addressed this session.
+
+  **D.6 chip-away.** Top-leverage targets cleaned per session-6
+  prompt:
+    - `execution/paper_executor.py` lines 126/144/150/217/268/276/294 —
+      f-string conversion (Row 17 motivation; fires on every trade).
+    - `execution/idempotency.py` lines 179/191/200 —
+      `sqlite3.OperationalError` silent-except handlers gained
+      `log.debug(...)` bodies recording the exception text (column-
+      exists / index-exists are the expected paths; unexpected
+      variants now surface in forensic traces). New module-level
+      `log = logging.getLogger(__name__)`.
+    - My own session-7 stat_arb edits also converted to f-strings
+      to avoid adding hits. Net delta: silent-except 80 → 77,
+      loguru-printf 188 → 181 (-10 / -3). Baseline ratcheted at
+      `tools/lint/silent_except_baseline.txt`; ratchet CI gate green.
+
+  **Observation for future cleanup sessions.** The `loguru-printf`
+  rule is conservative — it flags any `log.X("...%s...", arg)` call
+  regardless of whether `log` is loguru or stdlib `logging`. Many
+  flagged sites in `execution/`, `markets/`, `trading/` are stdlib
+  logging where `%s` is correct. Two safe escape hatches:
+  f-string conversion (works for both, but eagerly formats), or
+  `# noqa: loguru-printf` annotation when the file is provably stdlib.
+  A future D.6 refinement could detect the imported logger type and
+  scope the rule to loguru-only modules, removing false-positive
+  noise from the chip-away queue.
+
+  **C1 standalone kill-gate — SHIPPED (prereq for B.2).**
+  `trading/stat_arb.py` `run_stat_arb_crypto` + `_run_pair` now
+  accept `full_positions` / `full_portfolio` kwargs and resolve
+  `apply_kill_switch_gate` once per cycle, parity with C3 / C6.
+  Gate is consulted before BUY emission at the entry block and
+  before SELL emission at CONVERGE / HARD_STOP / TIME_STOP exit
+  paths. Tests at `tests/test_stat_arb_kill_gate.py` (4/4 green).
+  This closes the session-6 latent risk ("C1 would happily open new
+  positions IF the entry-z fires").
+
+  **Next D-track steps:**
+    - D.5 day-1 begin — still parked at -33.4% drawdown; gated on
+      first NONE digest (requires B.3 soak + recovery above -10%).
+    - D.6 chip-away ongoing — 258 remaining hits (77 silent-except,
+      181 loguru-printf). Each session can ratchet downward.
+    - Lint rule refinement — scope `loguru-printf` to loguru-imported
+      modules only, removing false positives. ~1 Haiku session.
+    - Runner-halt-stops-MTM semantic review (item from session 7
+      surfaced finding).
