@@ -52,6 +52,22 @@ top-level `networks:` block lists `aaats: external: true`. This survives contain
 recreation. Do NOT run `docker network connect aaats aaats-metrics` manually —
 compose owns this attachment now.
 
+## Kill-switch semantics (verdict 2026-05-23)
+
+The -15% per-market and -20% portfolio kill thresholds at [risk/engine.py:38-39](risk/engine.py#L38-L39) are **new-entry gates, not liquidation gates**. When `RiskEngine.update_market` observes drawdown ≤ -15%, it sets `_halted_markets[market]` (in-memory) and returns `HALT_MARKET` with `allowed_fraction=0.0`. The runner's `apply_kill_switch_gate` honors this by short-circuiting `execute()` and the C3/C6 standalone gates before any order is placed. **Open positions continue to mark-to-market.** A separate -2% per-trade stop ([risk/engine.py:340-368](risk/engine.py#L340-L368)) handles per-position liquidation; the market-level kill does NOT.
+
+Three parallel halt channels exist and are intentionally **NOT synchronized**:
+
+| Channel | File | Set by | Cleared by |
+|---|---|---|---|
+| Operator/CLI halt | `data/halt_state.json` | `kill.py` CLI / `foundation/kill_switch.halt()` | `foundation/kill_switch.reset()` |
+| Engine market-DD halt | in-memory `RiskEngine._halted_markets` | `engine.update_market()` on DD ≤ -15% | re-derives every cycle from persisted peak |
+| Strategy auto-halt | `data/strategy_halt_state.json` | `risk/strategy_halt.halt_strategy()` after 3 consec exceptions | `risk/strategy_halt.reset_strategy()` |
+
+Reading `halt_state.json` is meaningful for the **operator** channel only. A `crypto: false` value does NOT mean the engine kill is off — the engine has its own per-process halt state that regenerates from the persisted peak on every cycle. Investigation memo: [docs/known_issues/2026-05-23_kill_trigger_investigation.md](docs/known_issues/2026-05-23_kill_trigger_investigation.md).
+
+`run_crypto` now short-circuits at top-of-cycle on `is_halted("crypto")` (parity with `run_india`, added 2026-05-23 session 6). The runner-wide kill skip is on the **operator** channel; the per-order engine kill still gates each `execute()` independently.
+
 ## Where to find what (doc layout)
 
 - **Invariants that never change across sessions** — this file (`CLAUDE.md`).

@@ -1,0 +1,13 @@
+# D.6 lint baseline (frozen 2026-05-23 session 6).
+#
+# Format: one line per rule with its locked count. The CI gate at
+# tests/test_lint_silent_except.py asserts the live count for each rule
+# is <= the number recorded here. New code that ADDS hits fails the
+# gate; cleanup that REDUCES hits is encouraged — update this file
+# downward when that happens.
+#
+# When you reduce a count, also run the lint with the changed paths
+# and confirm the new total is what you expect. Drift in either
+# direction means a hit was missed.
+silent-except: 80
+loguru-printf: 188

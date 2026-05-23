@@ -155,8 +155,11 @@ def test_full_digest_renders_expected_shape(tmp_path: Path) -> None:
     assert "Silent:   C1_stat_arb, C2_momentum" in body
     assert "Halted:   C5b_funding_arb (since 2026-05-15, manual disable pending unified ledger)" in body
 
-    # Action needed -- dd is -15.9% which triggers the >=-10% rule.
-    assert "Action needed: drawdown -15.9% near kill threshold (-15%)" in body
+    # Action needed -- dd is -15.9% which is past the -15% market-kill band.
+    assert (
+        "Action needed: drawdown -15.9% past market-kill threshold (-15%); "
+        "new entries blocked, open positions continue to mark-to-market"
+    ) in body
 
 
 # ── Missing-state tolerance ────────────────────────────────────────────────
@@ -242,6 +245,153 @@ def test_action_triggers_on_drawdown_at_threshold(tmp_path: Path) -> None:
     )
     assert "drawdown" in body.lower()
     assert "Action needed: NONE" not in body
+
+
+# ── Kill-switch wording bands (post-2026-05-23 kill-trigger investigation) ──
+
+
+def _build_with_equity(tmp_path: Path, peak: float, equity: float) -> str:
+    _empty_db(tmp_path)
+    (tmp_path / "state-paper").mkdir(exist_ok=True)
+    (tmp_path / "state-paper" / "risk_engine_state.paper.json").write_text(
+        json.dumps({"peak": peak, "last_equity": equity,
+                    "last_update_ts": 1779513912.0,
+                    "market_peaks": {"crypto": peak}}),
+        encoding="utf-8",
+    )
+    cfg = daily_digest.DigestConfig.from_data_dir(tmp_path)
+    return daily_digest.build_digest(
+        cfg, as_of=datetime(2026, 5, 23, 8, 0, tzinfo=timezone.utc),
+        container_restart_count=0, yesterdays_restart_count=0,
+    )
+
+
+def test_drawdown_band_near_threshold(tmp_path: Path) -> None:
+    # -12% drawdown -> "near kill threshold" wording.
+    body = _build_with_equity(tmp_path, peak=100.0, equity=88.0)
+    assert "near kill threshold (-15%)" in body
+    assert "past market-kill" not in body
+    assert "past portfolio-kill" not in body
+
+
+def test_drawdown_band_past_market_kill(tmp_path: Path) -> None:
+    # -17% drawdown -> "past market-kill" wording.
+    body = _build_with_equity(tmp_path, peak=100.0, equity=83.0)
+    assert "past market-kill threshold (-15%)" in body
+    assert "new entries blocked" in body
+    assert "past portfolio-kill" not in body
+
+
+def test_drawdown_band_past_portfolio_kill(tmp_path: Path) -> None:
+    # -33.4% drawdown (the paper-crypto reality 2026-05-23) -> portfolio-kill band.
+    body = _build_with_equity(tmp_path, peak=131.32, equity=87.45)
+    assert "past portfolio-kill threshold (-20%)" in body
+    assert "all new entries blocked" in body
+    assert "near kill threshold" not in body
+
+
+# ── alerts_log integration (session 6) ──────────────────────────────────────
+
+
+def _write_alerts_log(tmp_path: Path, rows: list[dict]) -> None:
+    (tmp_path / "alerts_log.json").write_text(json.dumps(rows), encoding="utf-8")
+
+
+def test_alerts_log_present_switches_alerts_known_on(tmp_path: Path) -> None:
+    """With alerts_log.json present, the 'N/A (alerts_log not yet populated)'
+    fallback disappears and real counts render."""
+    _empty_db(tmp_path)
+    _write_alerts_log(tmp_path, [])  # empty list -> known but 0/0/0
+    cfg = daily_digest.DigestConfig.from_data_dir(tmp_path)
+    body = daily_digest.build_digest(
+        cfg, as_of=datetime(2026, 5, 23, 8, 0, tzinfo=timezone.utc),
+        container_restart_count=0, yesterdays_restart_count=0,
+    )
+    assert "Alerts fired:      0  (open: 0, resolved: 0)" in body
+    assert "alerts_log not yet populated" not in body
+
+
+def test_alerts_log_window_filter(tmp_path: Path) -> None:
+    """Only rows in the [as_of - 24h, as_of) window count."""
+    _empty_db(tmp_path)
+    as_of = datetime(2026, 5, 23, 8, 0, tzinfo=timezone.utc)
+    in_window = (as_of - timedelta(hours=2)).isoformat()
+    out_of_window = (as_of - timedelta(hours=48)).isoformat()
+    _write_alerts_log(tmp_path, [
+        {"ts": in_window, "market": "crypto", "severity": "warn",
+         "message": "in", "correlation_id": "a1"},
+        {"ts": in_window, "market": "crypto", "severity": "critical",
+         "message": "in2", "correlation_id": "a2"},
+        {"ts": out_of_window, "market": "crypto", "severity": "warn",
+         "message": "stale", "correlation_id": "a0"},
+    ])
+    cfg = daily_digest.DigestConfig.from_data_dir(tmp_path)
+    body = daily_digest.build_digest(
+        cfg, as_of=as_of,
+        container_restart_count=0, yesterdays_restart_count=0,
+    )
+    assert "Alerts fired:      2  (open: 2, resolved: 0)" in body
+
+
+def test_alerts_log_resolution_pairs_close_correlation(tmp_path: Path) -> None:
+    """A row carrying 'unresolves': <cid> in the window cancels the open
+    count for that correlation_id."""
+    _empty_db(tmp_path)
+    as_of = datetime(2026, 5, 23, 8, 0, tzinfo=timezone.utc)
+    in_window = (as_of - timedelta(hours=2)).isoformat()
+    later = (as_of - timedelta(hours=1)).isoformat()
+    _write_alerts_log(tmp_path, [
+        {"ts": in_window, "market": "crypto", "severity": "warn",
+         "message": "fired", "correlation_id": "a1"},
+        {"ts": later, "market": "crypto", "severity": "info",
+         "message": "cleared", "correlation_id": "a1-resolve",
+         "unresolves": "a1"},
+    ])
+    cfg = daily_digest.DigestConfig.from_data_dir(tmp_path)
+    body = daily_digest.build_digest(
+        cfg, as_of=as_of,
+        container_restart_count=0, yesterdays_restart_count=0,
+    )
+    assert "Alerts fired:      1  (open: 0, resolved: 1)" in body
+
+
+def test_action_triggers_on_three_open_alerts(tmp_path: Path) -> None:
+    _empty_db(tmp_path)
+    as_of = datetime(2026, 5, 23, 8, 0, tzinfo=timezone.utc)
+    in_window = (as_of - timedelta(hours=2)).isoformat()
+    rows = [
+        {"ts": in_window, "market": "crypto", "severity": "warn",
+         "message": f"alert {i}", "correlation_id": f"cid-{i}"}
+        for i in range(3)
+    ]
+    _write_alerts_log(tmp_path, rows)
+    cfg = daily_digest.DigestConfig.from_data_dir(tmp_path)
+    body = daily_digest.build_digest(
+        cfg, as_of=as_of,
+        container_restart_count=0, yesterdays_restart_count=0,
+    )
+    assert "3 open alerts in last 24h" in body
+    assert "Action needed: NONE" not in body
+
+
+def test_action_silent_on_two_open_alerts(tmp_path: Path) -> None:
+    """Threshold is >=3; two open alerts must not trip the action line."""
+    _empty_db(tmp_path)
+    as_of = datetime(2026, 5, 23, 8, 0, tzinfo=timezone.utc)
+    in_window = (as_of - timedelta(hours=2)).isoformat()
+    rows = [
+        {"ts": in_window, "market": "crypto", "severity": "warn",
+         "message": f"alert {i}", "correlation_id": f"cid-{i}"}
+        for i in range(2)
+    ]
+    _write_alerts_log(tmp_path, rows)
+    cfg = daily_digest.DigestConfig.from_data_dir(tmp_path)
+    body = daily_digest.build_digest(
+        cfg, as_of=as_of,
+        container_restart_count=0, yesterdays_restart_count=0,
+    )
+    assert "Action needed: NONE" in body
+    assert "open alerts in last 24h" not in body
 
 
 def test_action_triggers_on_consecutive_exceptions(tmp_path: Path) -> None:

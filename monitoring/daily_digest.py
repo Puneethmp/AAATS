@@ -47,6 +47,7 @@ class DigestConfig:
     watchdog_heartbeat_path: Path
     digest_log_path: Path
     digests_archive_dir: Path
+    alerts_log_path: Path
     target_container: str = "aaats-paper-crypto"
     cycle_interval_sec: int = 900  # paper-crypto runs every 15 min
 
@@ -70,6 +71,7 @@ class DigestConfig:
             watchdog_heartbeat_path=d / "watchdog_heartbeat.json",
             digest_log_path=d / "digest_log.json",
             digests_archive_dir=d / "digests",
+            alerts_log_path=d / "alerts_log.json",
         )
 
 
@@ -214,7 +216,42 @@ class SectionOps:
     alerts_resolved: int = 0
     cycles_known: bool = True
     restarts_known: bool = True
-    alerts_known: bool = False  # alerts_log not implemented yet (per design memo)
+    alerts_known: bool = False
+
+
+def _count_alerts_in_window(
+    alerts_log: Any,
+    start_iso: str,
+    end_iso: str,
+) -> tuple[int, int, int]:
+    """Count fired / open / resolved alerts in the 24h window.
+
+    The log is a flat list of dict rows; ``resolved`` rows carry an
+    ``unresolves`` field referencing a prior correlation_id. ``open`` =
+    fired in window AND no matching resolution in window.
+    """
+    if not isinstance(alerts_log, list):
+        return 0, 0, 0
+    fired_in_window: list[dict[str, Any]] = []
+    resolved_cids: set[str] = set()
+    for row in alerts_log:
+        if not isinstance(row, dict):
+            continue
+        ts = str(row.get("ts", ""))
+        if not (start_iso <= ts < end_iso):
+            continue
+        unresolves = row.get("unresolves")
+        if isinstance(unresolves, str) and unresolves:
+            resolved_cids.add(unresolves)
+            continue
+        fired_in_window.append(row)
+    fired = len(fired_in_window)
+    open_n = sum(
+        1 for r in fired_in_window
+        if r.get("correlation_id") not in resolved_cids
+    )
+    resolved = len(resolved_cids)
+    return fired, open_n, resolved
 
 
 def build_ops_section(
@@ -284,6 +321,13 @@ def build_ops_section(
         sec.auto_restarts = min(sec.auto_restarts, sec.container_restarts)
         sec.manual_restarts = sec.container_restarts - sec.auto_restarts
 
+    alerts_log = _read_json(cfg.alerts_log_path)
+    if alerts_log is not None:
+        sec.alerts_known = True
+        sec.alerts_fired, sec.alerts_open, sec.alerts_resolved = (
+            _count_alerts_in_window(alerts_log, start_iso, end_iso)
+        )
+
     return sec
 
 
@@ -313,7 +357,7 @@ def render_ops_section(sec: SectionOps) -> str:
             f"(open: {sec.alerts_open}, resolved: {sec.alerts_resolved})"
         )
     else:
-        lines.append("  Alerts fired:      N/A  (alerts_log not yet implemented)")
+        lines.append("  Alerts fired:      N/A  (alerts_log not yet populated)")
     return "\n".join(lines)
 
 
@@ -401,9 +445,25 @@ def compute_action_needed(
     triggers: list[str] = []
 
     if pnl.drawdown_pct is not None and pnl.drawdown_pct <= -10.0:
-        triggers.append(
-            f"drawdown {pnl.drawdown_pct:.1f}% near kill threshold (-15%)"
-        )
+        # Three bands match the kill-switch design (per
+        # docs/known_issues/2026-05-23_kill_trigger_investigation.md):
+        # -10 to -15  -> approach warning
+        # -15 to -20  -> past market-kill, engine refuses new crypto entries
+        # <= -20      -> past portfolio-kill, engine refuses entries in ALL markets
+        if pnl.drawdown_pct <= -20.0:
+            triggers.append(
+                f"drawdown {pnl.drawdown_pct:.1f}% past portfolio-kill threshold (-20%); "
+                "all new entries blocked, open positions continue to mark-to-market"
+            )
+        elif pnl.drawdown_pct <= -15.0:
+            triggers.append(
+                f"drawdown {pnl.drawdown_pct:.1f}% past market-kill threshold (-15%); "
+                "new entries blocked, open positions continue to mark-to-market"
+            )
+        else:
+            triggers.append(
+                f"drawdown {pnl.drawdown_pct:.1f}% near kill threshold (-15%)"
+            )
 
     exc_state = _read_json(cfg.exception_state_path) or {}
     if isinstance(exc_state, dict):
@@ -422,6 +482,9 @@ def compute_action_needed(
     share_eq = _read_json(cfg.share_eq_path)
     if isinstance(share_eq, dict) and any(int(v or 0) > 0 for v in share_eq.values()):
         triggers.append("share-equality mismatch counter non-zero")
+
+    if ops.alerts_known and ops.alerts_open >= 3:
+        triggers.append(f"{ops.alerts_open} open alerts in last 24h")
 
     if not triggers:
         return "NONE"

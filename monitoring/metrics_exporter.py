@@ -1167,6 +1167,19 @@ def _price_cache_loop():
         time.sleep(3600)  # 1h
 
 
+def collect_self_up() -> list[str]:
+    """D.0 row 7 (added 2026-05-23): expose a self-up gauge so Prometheus
+    can alert when this exporter goes silent. Value is always 1 while the
+    HTTP loop is alive; Prometheus's `up{job="aaats-metrics"}` already
+    reflects the same, but this metric is an in-band marker that the
+    scrape loop has refreshed at least once (i.e. _scrape_all hasn't
+    deadlocked while the HTTP thread keeps serving stale cached data)."""
+    return [_g(
+        "aaats_metrics_exporter_up", 1.0,
+        help_text="1 while the scrape loop has refreshed the cache (in-band liveness, complements Prometheus's up{} target gauge)",
+    )]
+
+
 def _scrape_all():
     parts = []
     for fn in [collect_portfolio, collect_trades, collect_phase,
@@ -1184,6 +1197,7 @@ def _scrape_all():
                collect_paper_executor,
                collect_share_equality,
                collect_strategy_exceptions,
+               collect_self_up,
                ]:
         try: parts.extend(fn())
         except Exception as e: log.warning(f"{fn.__name__} failed: {e}")

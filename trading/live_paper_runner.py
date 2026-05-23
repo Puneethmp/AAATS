@@ -1573,6 +1573,18 @@ def run_india(positions: dict, portfolio: dict) -> None:
 
 def run_crypto(positions: dict, portfolio: dict) -> None:
     """Run one crypto paper-trading cycle across CRYPTO_SYMBOLS."""
+    # Parity with run_india: short-circuit on operator/CLI kill switch
+    # (data/halt_state.json). The risk-engine kill is per-order and
+    # in-memory; this is the persistent operator channel set by kill.py.
+    # See docs/known_issues/2026-05-23_kill_trigger_investigation.md.
+    try:
+        from foundation.kill_switch import is_halted as _is_halted
+        if _is_halted("crypto"):
+            log.warning("Crypto market HALTED (kill switch) — skipping cycle")
+            return
+    except ImportError:
+        pass
+
     log.info("== Crypto cycle | capital=USD %.2f ==", portfolio["crypto"]["capital"])
     _LAST_CYCLE_CONTEXT.clear()
 

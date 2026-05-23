@@ -1051,6 +1051,108 @@ this.
   Action-needed=NONE issue self-resolved within ~6 minutes via the
   corrected re-send; no operator intervention solicited.
 
+- **2026-05-23 (session 6)** — Kill-trigger investigation + alerts-log
+  writer + deploy-smoke drift + D.6 lint sweep.
+
+  **[0a] Kill-trigger investigation — CLOSED.** Verdict primarily **(d)**:
+  the -15% market kill IS firing as a new-entry size gate (every cycle
+  the engine fires HALT_MARKET, the runner short-circuits `execute()`
+  before any order is placed). Open positions continue to bleed
+  mark-to-market by design; this is the per-trade -2% stop's job, not
+  the market-level kill. Secondary finding **(c) partial**: the three
+  halt channels (`data/halt_state.json`, in-memory
+  `RiskEngine._halted_markets`, `data/strategy_halt_state.json`) are
+  intentionally NOT synchronized — `halt_state.json` is the operator/CLI
+  channel only. The session-4 observation "`halt_state.json` shows
+  crypto:false, therefore kill not firing" was the wrong inference.
+  Full memo at
+  [`docs/known_issues/2026-05-23_kill_trigger_investigation.md`](../known_issues/2026-05-23_kill_trigger_investigation.md).
+
+  **[0b] Derivative fixes — SHIPPED to workstation.**
+    - `trading/live_paper_runner.py:run_crypto` short-circuits on
+      `foundation.kill_switch.is_halted("crypto")` at top of cycle (parity
+      with `run_india`). This closes the operator-CLI kill asymmetry
+      surfaced by the investigation.
+    - `monitoring/daily_digest.py:compute_action_needed` distinguishes
+      three drawdown bands: -10 to -15% "near", -15 to -20% "past
+      market-kill (new entries blocked, open positions bleed)", ≤ -20%
+      "past portfolio-kill (all new entries blocked, open positions
+      bleed)". Replaces the misleading "near kill threshold" wording
+      that fired at -33.4%.
+    - `CLAUDE.md` gains a "Kill-switch semantics" subsection so future
+      sessions don't re-litigate the verdict.
+    - Tests: `tests/test_kill_trigger_paths.py` (5/5 green) covers
+      engine HALT_MARKET at -16%, no-HALT at -14%, run_crypto
+      short-circuit when halted, run_crypto proceeds when clear, and
+      MARKET_DRAWDOWN_HALT constant locked at -0.15. Digest band tests
+      added to `tests/test_daily_digest.py`.
+    - **NOT deployed to box this session.** The change is reversible
+      and operator-CLI-channel only; bundled with the next session-7
+      deploy when other queued items also need a rebuild.
+
+  **[2] Alerts-log writer + deploy-smoke drift — SHIPPED to workstation.**
+    - `observability/alerts.py::send_alert` now appends one row per call
+      to `data/alerts_log.json` (atomic .tmp+replace, severity inferred
+      from message body when not explicit, UUID4 correlation_id
+      auto-generated). KeyboardInterrupt passes through cleanly so the
+      operator can still Ctrl+C the bot.
+    - `monitoring/daily_digest.py` reads `alerts_log.json`, computes
+      fired/open/resolved over the 24h window, flips `alerts_known=True`
+      when the file is present, and adds a new Action-needed trigger:
+      `alerts_open >= 3` fires the action line.
+    - `tools/operator/_digest_smoke.py` is the deploy-smoke helper that
+      runs `python -m monitoring.daily_digest --dry-run` inside the
+      target container, parses the Equity line, and asserts it is NOT
+      N/A when the on-disk state file exists. Catches the session-5
+      volume-mount drift at build time. Tests:
+      `tests/test_alerts_log.py` (11/11), `tests/test_operator/test_digest_smoke.py`
+      (9/9), digest alerts-log tests added to `tests/test_daily_digest.py`.
+
+  **[3] D.6 lint sweep + row 7 + row 22 — SHIPPED to workstation.**
+    - `tools/lint/silent_except.py` is an AST walker that flags
+      `except <T>: pass` (silent-except) and loguru `%s/%d` placeholders
+      (loguru-printf). 273 baseline hits (80 silent-except + 188
+      loguru-printf after annotating doctrine-correct paths in
+      foundation/kill_switch.py and observability/alerts.py with
+      `# noqa: silent-except`).
+    - `tools/lint/silent_except_baseline.txt` locks the current counts;
+      `tests/test_lint_silent_except.py` fails the suite if either rule's
+      count INCREASES (cleanup downward is encouraged with a print
+      reminder to update the baseline).
+    - `tests/test_lint_logic.py` (10/10) covers the AST checks
+      themselves against synthetic tmp_path fixtures.
+    - **Row 7 (metrics-exporter target-down):** `monitoring/metrics_exporter.py`
+      gains `collect_self_up()` emitting `aaats_metrics_exporter_up=1`
+      from the scrape loop, complementing Prometheus's `up{job=...}`
+      target gauge with in-band liveness.
+    - **Row 22 (dead-code SELL-share recompute resurrection risk):**
+      `tests/test_dead_code_guard.py` asserts
+      `execution/crypto_runner.py` + `execution/india_runner.py` remain
+      deleted, and that no new code introduces
+      `round(size_usd / entry_price, 6)` on a SELL path. 2/2 green.
+
+  **[4] D.5 day-1 — NOT TRIGGERED.** Today's digest fired with action
+  needed != NONE (paper drawdown -33.4% → past market-kill band per the
+  new wording). Day-1 clock remains parked until B.3 soak brings the
+  drawdown above -10%.
+
+  **Cross-cutting findings:**
+    - C1_stat_arb standalone (`trading/stat_arb.py:478`) still
+      bypasses `apply_kill_switch_gate` (deferred to B.2 per B.1
+      triage). At -33% drawdown the bot would happily open new C1
+      positions IF the strategy's entry-z fires. Currently latent
+      because C1 is honestly skipping on z=-0.116.
+    - Pre-existing 6-test-failure baseline (xgboost confidence
+      thresholds + consensus voting + dual_ledger_drift bounds + Angel
+      One credentials) is unrelated to this session's surfaces;
+      confirmed by stash-and-rerun before commit. Filed for a later
+      session that owns those modules.
+    - Workstation-local; no box deploy. Compose + rebuild will roll up
+      run_crypto kill-switch parity + digest wording + alerts-log
+      writer in session 7's first deploy.
+
+  **Operator pings this session:** none required.
+
 ---
 
 ## B.1 triage table (decision merged 2026-05-22 session 2)

@@ -532,3 +532,78 @@ The `Action needed` field is the operator's single decision-trigger. If it's `NO
      wrapper that appends to `data/alerts_log.json`. ~1 Haiku session.
    - **Drift assertion at deploy smoke** — the volume-mount-gap detector
      mentioned above. ~1 Haiku session.
+
+- **2026-05-23 (session 6)** — **Alerts-log writer + D.6 lint + drift
+  smoke + row 7/22 — ALL SHIPPED to workstation.**
+
+  **Alerts-log writer.** `observability/alerts.py::send_alert` is now
+  side-effecting: every call appends a JSON row to `data/alerts_log.json`
+  (atomic .tmp+replace, severity inferred from message body unless
+  explicit kwarg, UUID4 correlation_id auto-generated and returned to
+  caller). `monitoring/daily_digest.py` reads the file, computes
+  fired/open/resolved over the 24h window, switches `alerts_known=True`
+  when populated, and adds a new Action-needed trigger:
+  `alerts_open >= 3` fires the action line. Tests at
+  `tests/test_alerts_log.py` (11/11 green) cover atomic-write,
+  corrupt-file recovery, severity inference, explicit-vs-auto
+  correlation_id, OSError-mid-replace robustness, and that
+  KeyboardInterrupt propagates cleanly through to the loop. Digest
+  tests in `tests/test_daily_digest.py` cover window-filter,
+  resolution-pair, and the >=3-open trigger.
+
+  **Drift assertion at deploy smoke.** `tools/operator/_digest_smoke.py`
+  is the helper: takes a paramiko-like command runner (or a stub),
+  probes the in-container state file with `test -s`, runs
+  `python -m monitoring.daily_digest --dry-run` in the target
+  container, and parses the Equity line. Returns ok/not-ok plus a
+  diagnostic message. Tests at
+  `tests/test_operator/test_digest_smoke.py` (9/9 green) cover the
+  five scenarios: state-missing pass, state-present + good digest
+  pass, state-present + N/A digest fail (the session-5 bug),
+  non-zero digest exit fail, render-format-drift fail, plus the
+  live-mode path variant. Next deploy script can wire this in via:
+  ```python
+  from tools.operator._digest_smoke import assert_digest_renders_equity
+  ok, msg = assert_digest_renders_equity(ssh_runner, mode="paper")
+  if not ok: sys.exit(f"deploy-smoke failed: {msg}")
+  ```
+
+  **D.6 lint sweep.** `tools/lint/silent_except.py` is an AST walker
+  flagging two patterns: silent-except (`except <T>: pass`) and
+  loguru-printf (`log.info("%s", x)` instead of `{}`). Repo baseline
+  recorded at `tools/lint/silent_except_baseline.txt`: 80
+  silent-except, 188 loguru-printf (after `# noqa: silent-except`
+  annotations on the doctrine-correct paths in
+  `foundation/kill_switch.py` and `observability/alerts.py`).
+  `tests/test_lint_silent_except.py` is the ratchet CI gate — fails
+  if either count rises; encourages downgrades. `tests/test_lint_logic.py`
+  (10/10) tests the AST checks on synthetic fixtures. Future sessions
+  can chip away at the 268 remaining hits.
+
+  **Row 7 (metrics-exporter target-down):**
+  `monitoring/metrics_exporter.py` gains `collect_self_up()` emitting
+  `aaats_metrics_exporter_up=1` from inside the scrape loop. Distinct
+  from Prometheus's `up{job="aaats-metrics"}` — the in-band gauge
+  signals that the scrape loop has refreshed at least once (catches
+  the deadlocked-loop-with-stale-cache failure mode the
+  Prometheus-side `up` would miss).
+
+  **Row 22 (dead-code SELL-share recompute resurrection):**
+  `tests/test_dead_code_guard.py` asserts (a) the deleted
+  `execution/{crypto,india}_runner.py` files have not reappeared,
+  (b) no .py file outside the allowlist introduces
+  `round(size_usd / entry_price, 6)`. 2/2 green.
+
+  **NOT shipped to box this session.** All artifacts are workstation-only
+  pending session 7's rolled-up deploy. The watchdog already has
+  `monitoring/` baked into its image (session-5 fix); the alerts-log
+  writer needs `observability/alerts.py` redeployed to paper-crypto
+  for the alerts to begin populating.
+
+  **Deferred to session 7+:**
+    - C1 standalone kill-gate wire (`trading/stat_arb.py:478`) — B.2
+      may force this if C1's z gate fires while crypto is in HALT.
+    - D.5 day-1 begin — still gated on first NONE digest.
+    - 268-hit lint cleanup — chip away gradually; each cleanup
+      ratchets the baseline down.
+    - C5b funding_arb re-enable — blocked on unified ledger Q1-Q4.

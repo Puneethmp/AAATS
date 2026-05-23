@@ -85,8 +85,8 @@ def halt(market: MarketType, reason: str, triggered_by: str) -> None:
     )
     try:
         send_alert(alert_text, market=market)
-    except Exception:
-        pass  # Alert failure must never prevent a halt from completing
+    except Exception:  # noqa: silent-except — alert failure must never prevent a halt from completing
+        pass
 
 
 def is_halted(market: _SingleMarket) -> bool:
