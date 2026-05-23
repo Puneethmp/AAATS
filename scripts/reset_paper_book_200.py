@@ -192,14 +192,16 @@ def execute_reset(
     """
     started_at = now_fn()
 
-    # (d) stop paper-crypto.
+    # (d) stop paper-crypto AND watchdog. Both mount deployment_state-crypto-paper
+    # (paper-crypto rw, watchdog ro), so leaving watchdog up makes the
+    # `docker volume rm` step fail with "volume is in use".
     rc, _ = box.run(
-        f"cd {remote_dir}/deployment && docker compose stop aaats-paper-crypto",
-        "docker compose stop aaats-paper-crypto",
+        f"cd {remote_dir}/deployment && docker compose stop aaats-paper-crypto aaats-watchdog",
+        "docker compose stop aaats-paper-crypto + aaats-watchdog",
     )
     if rc != 0:
         return 3, build_failure_marker(
-            "docker compose stop aaats-paper-crypto failed", started_at,
+            "docker compose stop (paper-crypto + watchdog) failed", started_at,
         )
 
     # (e)(f) volume rm + create.
@@ -209,10 +211,11 @@ def execute_reset(
         "wipe + recreate state-crypto-paper volume",
     )
     if rc != 0:
-        # Restore: bring container back up so we don't leave the bot off-air.
+        # Restore: bring containers back up so we don't leave the bot off-air.
         box.run(
-            f"cd {remote_dir}/deployment && docker compose start aaats-paper-crypto",
-            "rollback: start aaats-paper-crypto after volume rm failure",
+            f"cd {remote_dir}/deployment && "
+            "docker compose start aaats-paper-crypto aaats-watchdog",
+            "rollback: start paper-crypto + watchdog after volume rm failure",
         )
         return 3, build_failure_marker("volume rm/create failed", started_at)
 
@@ -223,16 +226,19 @@ def execute_reset(
         portfolio_json,
         "seed paper_portfolio.json $200",
     )
-    # Bring the container up briefly so the bind-mounted state-paper
-    # exists and we can wipe legacy strategy state files cleanly.
+    # Bring both containers back up. paper-crypto materializes the
+    # state-paper volume; watchdog needs to be running so the digest
+    # poll loop below can exec into it. --no-deps so we don't disturb
+    # metrics-exporter / grafana / etc.
     rc, _ = box.run(
-        f"cd {remote_dir}/deployment && docker compose up -d --no-deps aaats-paper-crypto",
-        "docker compose up aaats-paper-crypto (post-seed)",
+        f"cd {remote_dir}/deployment && "
+        "docker compose up -d --no-deps aaats-paper-crypto aaats-watchdog",
+        "docker compose up aaats-paper-crypto + aaats-watchdog (post-seed)",
         timeout=300,
     )
     if rc != 0:
         return 3, build_failure_marker(
-            "docker compose up aaats-paper-crypto failed", started_at,
+            "docker compose up (paper-crypto + watchdog) failed", started_at,
         )
 
     # (h) Clear operator halt for crypto.
