@@ -33,20 +33,40 @@ echo "=================================================================="
 echo "  A.1 state migration: state-crypto -> state-crypto-paper"
 echo "=================================================================="
 
-if ! docker volume inspect state-crypto >/dev/null 2>&1; then
-    # If the legacy volume name was prefixed by compose (e.g. deployment_state-crypto),
-    # surface that so the operator can adjust this script before running.
-    echo "FATAL: docker volume 'state-crypto' not found."
-    echo "Candidates with 'state-crypto' in the name:"
+# Pick the source volume:
+#  1. SRC_VOL env override (operator-supplied).
+#  2. The compose-prefixed `deployment_state-crypto` if it exists AND contains
+#     a `risk_engine_state.json` (the legacy filename) -- this is the path
+#     the box actually uses, observed empirically 2026-05-23.
+#  3. The unprefixed `state-crypto` (the original design).
+#  4. Fatal if neither exists.
+_have_volume() {
+    docker volume inspect "$1" >/dev/null 2>&1
+}
+_volume_has_legacy_state() {
+    docker run --rm -v "$1:/probe:ro" alpine \
+        sh -c 'test -f /probe/risk_engine_state.json' >/dev/null 2>&1
+}
+
+if [ -n "${SRC_VOL:-}" ]; then
+    :  # operator override -- trust it
+elif _have_volume "deployment_state-crypto" && _volume_has_legacy_state "deployment_state-crypto"; then
+    SRC_VOL="deployment_state-crypto"
+elif _have_volume "state-crypto" && _volume_has_legacy_state "state-crypto"; then
+    SRC_VOL="state-crypto"
+elif _have_volume "deployment_state-crypto"; then
+    SRC_VOL="deployment_state-crypto"
+elif _have_volume "state-crypto"; then
+    SRC_VOL="state-crypto"
+else
+    echo "FATAL: neither 'state-crypto' nor 'deployment_state-crypto' exists."
+    echo "Candidates on this host:"
     docker volume ls --format '{{.Name}}' | grep -i state-crypto || echo "  (none)"
-    echo
-    echo "If the actual name has a 'deployment_' prefix, edit SRC_VOL below"
-    echo "and re-run."
     exit 1
 fi
 
-SRC_VOL="${SRC_VOL:-state-crypto}"
 DST_VOL="${DST_VOL:-state-crypto-paper}"
+echo "Resolved source volume: ${SRC_VOL} -> ${DST_VOL}"
 
 echo
 echo "[1/4] Source volume contents (BEFORE):"

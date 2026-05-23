@@ -1,0 +1,118 @@
+ROLLBACK BASELINE - 2026-05-23 Session 5 [1] A.1 state isolation
+================================================================================
+
+DEPLOYED_AT_UTC          = 2026-05-23T05:31:20Z
+POST_PAPER_IMAGE         = sha256:102e3394c8fdbeff7536def35d905ea308e4709d68e454e355aeda65604c1944
+POST_PAPER_STATUS        = running
+POST_PAPER_MOUNTS        = ->/app/scripts|deployment_state-crypto-paper->/app/data/state-paper|deployment_state-crypto-live->/app/data/state-live|->/app/logs|->/app/data|
+PAPER_PEAK_PATH_IN_LOGS  = False
+LOCKED_FALLBACK_ONLY     = False
+
+Legacy state-crypto ls (before migration):
+  total 8
+  drwxr-xr-x    2 root     root          4096 May 23 05:29 .
+  drwxr-xr-x    1 root     root          4096 May 23 05:30 ..
+
+Legacy risk_engine_state.json (raw):
+  NO_FILE
+
+Migration stdout:
+  ==================================================================
+    A.1 state migration: state-crypto -> state-crypto-paper
+  ==================================================================
+  
+  [1/4] Source volume contents (BEFORE):
+  total 8
+  drwxr-xr-x    2 root     root          4096 May 23 05:29 .
+  drwxr-xr-x    1 root     root          4096 May 23 05:30 ..
+  
+  [2/4] Copying state-crypto -> state-crypto-paper...
+  cp OK
+  
+  [3/4] Renaming legacy risk_engine_state.json -> risk_engine_state.paper.json...
+  (no legacy risk_engine_state.json present; rename skipped)
+  
+  [4/4] Destination volume contents (AFTER):
+  total 8
+  drwxr-xr-x    2 root     root          4096 May 23 05:29 .
+  drwxr-xr-x    1 root     root          4096 May 23 05:30 ..
+  
+  ==================================================================
+    Migration complete.
+    Source volume state-crypto is UNTOUCHED -- safe rollback for 7+ days.
+    Verify the new engine reads state-crypto-paper/risk_engine_state.paper.json
+    before deleting the legacy volume.
+  ==================================================================
+
+state-crypto-paper ls (after migration):
+  total 8
+  drwxr-xr-x    2 root     root          4096 May 23 05:29 .
+  drwxr-xr-x    1 root     root          4096 May 23 05:30 ..
+
+state-crypto-paper/risk_engine_state.paper.json (raw):
+  NO_FILE
+
+Peak-loaded log lines observed:
+  [32m05:30:50[0m | [36mdecision    [0m | [36mconsensus_voting    [0m | [1mINFO    [0m | Initialized consensus voting: agreement_threshold=0.45, veto_threshold=0.85
+  2026-05-23T05:30:50Z  INFO     paper_runner    state-smoke  state/risk_engine_state.json : MISSING_OPTIONAL
+  [32m05:31:15[0m | [36mrisk        [0m | [36mengine              [0m | [1mINFO    [0m | Risk engine peak seeded from doctrine: $110.00 (initial=110.00, locked=110.00)
+
+
+================================================================================
+ADDENDUM 1 - re-migration with corrected source volume
+================================================================================
+RE_MIGRATION_AT_UTC      = 2026-05-23T05:34:23Z
+FINDING: legacy state file lived in `deployment_state-crypto` (the
+compose-prefixed volume), not the unprefixed `state-crypto` the migration
+script defaulted to. Script patched to auto-detect; re-run with explicit
+SRC_VOL=deployment_state-crypto. Real risk_engine_state.json (148 bytes)
+now copied into deployment_state-crypto-paper and renamed.
+
+POST_PAPER_IMAGE         = sha256:102e3394c8fdbeff7536def35d905ea308e4709d68e454e355aeda65604c1944
+POST_PAPER_STATUS        = running
+PAPER_PEAK_PATH_IN_LOGS  = True
+PEAK_SEEDED_FROM_DOCTRINE= True
+PEAK_LOADED_FROM_FILE    = True
+
+Migration stdout (re-run):
+  ==================================================================
+    A.1 state migration: state-crypto -> state-crypto-paper
+  ==================================================================
+  Resolved source volume: deployment_state-crypto -> deployment_state-crypto-paper
+  
+  [1/4] Source volume contents (BEFORE):
+  total 12
+  drwxrwxr-x    2 root     root          4096 May 23 05:25 .
+  drwxr-xr-x    1 root     root          4096 May 23 05:33 ..
+  -rw-r--r--    1 root     root           148 May 23 05:25 risk_engine_state.json
+  
+  [2/4] Copying deployment_state-crypto -> deployment_state-crypto-paper...
+  cp OK
+  
+  [3/4] Renaming legacy risk_engine_state.json -> risk_engine_state.paper.json...
+  renamed risk_engine_state.json -> risk_engine_state.paper.json
+  
+  [4/4] Destination volume contents (AFTER):
+  total 12
+  drwxrwxr-x    2 root     root          4096 May 23 05:33 .
+  drwxr-xr-x    1 root     root          4096 May 23 05:33 ..
+  -rw-r--r--    1 root     root           148 May 23 05:25 risk_engine_state.paper.json
+  
+  ==================================================================
+    Migration complete.
+    Source volume deployment_state-crypto is UNTOUCHED -- safe rollback for 7+ days.
+    Verify the new engine reads deployment_state-crypto-paper/risk_engine_state.paper.json
+    before deleting the legacy volume.
+  ==================================================================
+
+deployment_state-crypto-paper/risk_engine_state.paper.json (raw):
+  {"peak": 131.32147002087942, "last_update_ts": 1779513912.2868829, "last_equity": 87.44787199671836, "market_peaks": {"crypto": 131.32147002087942}}
+
+Peak-loaded log lines after restart:
+  [32m05:30:50[0m | [36mdecision    [0m | [36mconsensus_voting    [0m | [1mINFO    [0m | Initialized consensus voting: agreement_threshold=0.45, veto_threshold=0.85
+  2026-05-23T05:30:50Z  INFO     paper_runner    state-smoke  state/risk_engine_state.json : MISSING_OPTIONAL
+  [32m05:31:15[0m | [36mrisk        [0m | [36mengine              [0m | [1mINFO    [0m | Risk engine peak seeded from doctrine: $110.00 (initial=110.00, locked=110.00)
+  [32m05:33:48[0m | [36mdecision    [0m | [36mconsensus_voting    [0m | [1mINFO    [0m | Initialized consensus voting: agreement_threshold=0.45, veto_threshold=0.85
+  2026-05-23T05:33:49Z  INFO     paper_runner    state-smoke  state/risk_engine_state.json : MISSING_OPTIONAL
+  [32m05:34:12[0m | [36mrisk        [0m | [36mengine              [0m | [1mINFO    [0m | Risk engine peak loaded from /app/data/state-paper/risk_engine_state.paper.json: $131.32
+  [32m05:34:12[0m | [36mrisk        [0m | [36mengine              [0m | [1mINFO    [0m | Risk engine market peaks loaded from /app/data/state-paper/risk_engine_state.paper.json: crypto=$131.32

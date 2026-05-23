@@ -1,0 +1,33 @@
+ROLLBACK BASELINE - 2026-05-23 Session 5 [0] reconciler C1 exclusion + halt_on_critical=True
+================================================================================
+
+DEPLOYED_AT_UTC          = 2026-05-23T05:24:34Z
+PRE_PAPER_IMAGE_SHA      = sha256:8bf3cfcc61e6aa80391c4e29750b59707e3be869fd150283bef9984d23955b04
+POST_PAPER_IMAGE_SHA     = sha256:7a32d03ecfc99b84a41f93eaf033aa3677f94de5e465f01ea15d81ce4256c0e6
+PRE_PAPER_STATUS         = running
+POST_PAPER_STATUS        = running
+PRE_PAPER_RESTART_COUNT  = 0
+POST_PAPER_RESTART_COUNT = 0
+HALT_IN_RECENT_LOGS      = drawdown-only (pre-existing -33.4% C3 mark-to-market state); no reconciler HALT
+
+Pre-deploy file SHAs (box, captured immediately before swap):
+  scripts/reconcile_intracycle.py                    : bb33025c94c97091a2a0792d54e15a6dba4176ae81c186be5246e6a00328a186
+  trading/live_paper_runner.py                       : 72f675535632e89a514c1598a7c94c4fec00e00eb225298bf975f05cd42443ca
+
+Post-deploy file SHAs (box, after rebuild):
+  scripts/reconcile_intracycle.py                    : 29829ca66665828bee389787496068bdc82872886c06d51a9dec65f4d5508f7c
+  trading/live_paper_runner.py                       : 807440d00d1a81bd3c73845ba9a39050336ee5afbe7a9ef7fd79cc080f700951
+
+Verification observed via c:/tmp/verify_session5_step0.py at 05:25Z:
+  container state          = running restart=0 started=2026-05-23T05:24:34Z
+  reconciler line          = "Reconciliation clean | checked=7 positions across crypto"
+  BTC/ETH HALT lines       = 0  (the symbol_present_in_only_one_source pattern is gone)
+  ETH/USDT in source B     = -0.000025 shares = $-0.05 notional, dust-filtered ($0.25 threshold)
+  BTC/USDT in source B     = absent (no currently-open C1 entry)
+  Cycle 1 post-rebuild     = "Cycle 1 done in 11.9s, sleeping 888s"
+
+Deploy-script note: the original deploy script crashed at step [7/8] on a UnicodeEncodeError
+trying to print a stop-sign emoji from a box log HALT line (cp1252 codec on Windows). The
+script has been patched in commit (next) to strip log output to ASCII before printing.
+Verification + MANIFEST were completed via the patched verify script
+c:/tmp/verify_session5_step0.py.

@@ -62,17 +62,23 @@ MANIFEST = (
 )
 
 
+def _ascii(line: str) -> str:
+    # cp1252 codec on the operator Windows workstation chokes on box log emoji
+    # (e.g., kill-switch lines use stop-sign + arrow). Strip to ASCII for print.
+    return line.encode("ascii", "replace").decode("ascii")
+
+
 def _run(client: paramiko.SSHClient, cmd: str, label: str) -> tuple[int, str]:
     print(f"  -> {label}")
     _, stdout, stderr = client.exec_command(cmd, timeout=600)
     rc = stdout.channel.recv_exit_status()
-    out = stdout.read().decode().strip()
-    err = stderr.read().decode().strip()
+    out = stdout.read().decode("utf-8", "replace").strip()
+    err = stderr.read().decode("utf-8", "replace").strip()
     for line in out.splitlines()[-15:]:
-        print(f"     {line}")
+        print(f"     {_ascii(line)}")
     if rc != 0 and err:
         for line in err.splitlines()[-5:]:
-            print(f"     ERR: {line}")
+            print(f"     ERR: {_ascii(line)}")
     return rc, out
 
 
