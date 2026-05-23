@@ -90,7 +90,10 @@ def test_proceeds_on_PARTIAL_with_watcher_note(
 
 def test_seeds_200_baseline() -> None:
     """seed_state_payload($200) returns the canonical paper_portfolio.json
-    payload at the doctrine-amended floor with all counters zeroed."""
+    payload at the doctrine-amended floor with all counters zeroed.
+
+    Includes BOTH crypto and india — live_paper_runner.main() reads both
+    keys at startup, omitting india crash-loops the container."""
     payload = reset.seed_state_payload(200.0)
     assert payload["crypto"]["capital"] == 200.0
     assert payload["crypto"]["starting_equity"] == 200.0
@@ -99,6 +102,11 @@ def test_seeds_200_baseline() -> None:
     assert payload["crypto"]["wins"] == 0
     assert payload["crypto"]["losses"] == 0
     assert payload["crypto"]["settlement_queue"] == []
+
+    # india must be present so live_paper_runner.main() doesn't KeyError.
+    assert "india" in payload
+    assert payload["india"]["capital"] == reset.INDIA_STARTING_EQUITY_INR
+    assert payload["india"]["realized_pnl"] == 0.0
 
 
 # ── Day-1 marker ──────────────────────────────────────────────────────────

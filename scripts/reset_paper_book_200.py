@@ -52,6 +52,13 @@ WATCHER_WINDOW_DAYS = 7
 C3_THRESHOLD_LOW_USD = -2.0
 C3_THRESHOLD_HIGH_USD = 2.0
 
+# India paper book stays at its existing doctrine floor (unchanged by the
+# 2026-05-23 amendment, which only raised the crypto floor 100->200).
+# trading/live_paper_runner.py main() reads BOTH portfolio["crypto"]
+# and portfolio["india"] at startup; omitting india from the seed
+# triggers KeyError and crash-loops the container.
+INDIA_STARTING_EQUITY_INR = 25000.0
+
 DIGEST_POLL_WINDOW_SEC = 20 * 60     # 20 minutes
 DIGEST_POLL_INTERVAL_SEC = 30
 
@@ -70,24 +77,37 @@ def read_backtest_recommendation(path: _pl.Path) -> str:
     return rec.strip().upper()
 
 
-def seed_state_payload(starting_equity_usd: float) -> dict[str, Any]:
+def _market_baseline(capital: float) -> dict[str, Any]:
+    return {
+        "capital": float(capital),
+        "starting_equity": float(capital),
+        "realized_pnl": 0.0,
+        "total_trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "total_win_pct": 0.0,
+        "total_loss_pct": 0.0,
+        "settlement_queue": [],
+    }
+
+
+def seed_state_payload(
+    starting_equity_usd: float,
+    india_starting_equity_inr: float = INDIA_STARTING_EQUITY_INR,
+) -> dict[str, Any]:
     """The data/paper_portfolio.json payload at reset moment.
 
+    Includes BOTH markets because trading/live_paper_runner.py main()
+    reads portfolio["crypto"]["capital"] AND portfolio["india"]["capital"]
+    at startup. Omitting india triggers KeyError before any cycle runs.
+
     Mirrors the schema scripts/reset_paper_state.py uses but at the
-    operator-away amendment's $200 floor and with all counters at zero.
+    operator-away amendment's $200 crypto floor (india unchanged). All
+    counters zeroed.
     """
     return {
-        "crypto": {
-            "capital": float(starting_equity_usd),
-            "starting_equity": float(starting_equity_usd),
-            "realized_pnl": 0.0,
-            "total_trades": 0,
-            "wins": 0,
-            "losses": 0,
-            "total_win_pct": 0.0,
-            "total_loss_pct": 0.0,
-            "settlement_queue": [],
-        },
+        "crypto": _market_baseline(starting_equity_usd),
+        "india": _market_baseline(india_starting_equity_inr),
     }
 
 
