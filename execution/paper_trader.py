@@ -91,8 +91,8 @@ def _conn(db_path: str) -> sqlite3.Connection:
     for sql in _MIGRATE_SQLS:
         try:
             c.execute(sql)
-        except sqlite3.OperationalError:
-            pass  # column already exists
+        except sqlite3.OperationalError as exc:
+            _log.debug(f"paper_trades migration noop ({sql[:40]}...): {exc}")
     # v3: UNIQUE INDEX on client_order_id — last-line dedupe guarantee
     try:
         c.execute(
@@ -103,13 +103,13 @@ def _conn(db_path: str) -> sqlite3.Connection:
             "CREATE INDEX IF NOT EXISTS ix_paper_trades_correlation_id "
             "ON paper_trades(correlation_id)"
         )
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as exc:
+        _log.debug(f"paper_trades index create noop: {exc}")
     try:
         c.execute("DROP VIEW IF EXISTS trades")
         c.execute(_VIEW_SQL)
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as exc:
+        _log.debug(f"paper_trades view rebuild noop: {exc}")
     c.commit()
     return c
 

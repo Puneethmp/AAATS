@@ -709,3 +709,70 @@ The `Action needed` field is the operator's single decision-trigger. If it's `NO
       modules only, removing false positives. ~1 Haiku session.
     - Runner-halt-stops-MTM semantic review (item from session 7
       surfaced finding).
+
+- **2026-05-23 (session 8)** — Operator-halt MTM gap closed +
+  alerts-log smoke confirmed + D.6 chip-away (-6 silent-except).
+
+  **Operator-halt MTM gap — SHIPPED.** This was the open semantic-gap
+  item from session 7. Adopted option (a) per the session-8 prompt:
+  the operator-halt channel now blocks new entries without freezing
+  open positions. Implementation in
+  [trading/live_paper_runner.py](trading/live_paper_runner.py):
+    - Per-emission entry gate `apply_kill_switch_gate` consults
+      `foundation.kill_switch.is_halted(market)` and the engine's
+      HALT_ALL / HALT_MARKET decision. Blocks BUY emissions.
+    - New `apply_kill_switch_exit_gate` only blocks on catastrophic
+      engine HALT_ALL. HALT_MARKET and operator halt allow exits.
+      Used by `execute()` SELL branch + C3 / C6 SELL paths + C1
+      `_run_pair`'s `_exit_gate_ok` helper.
+    - `run_crypto` + `run_india` no longer short-circuit on
+      `is_halted`. They log the halt once and continue —
+      `_check_trailing_stops`, MTM, exit signals all reachable.
+    - Latent bug fixed along the way: the underlying
+      `_mark_to_market_and_decide` helper now returns the more severe
+      of `update_portfolio`'s and `update_market`'s decisions (HALT_ALL
+      > HALT_MARKET > ALLOW). Pre-fix, a fresh engine that hit
+      HALT_ALL via `update_portfolio` would still return ALLOW from
+      `update_market` because the market peak was freshly seeded.
+
+  Coverage: 12 new tests in
+  [tests/test_operator_halt_mtm_gap.py](tests/test_operator_halt_mtm_gap.py)
+  + 1 updated `tests/test_kill_trigger_paths.py` test that flips its
+  assertion from "short-circuits when halted" to "reaches the Binance
+  probe even when halted." Session-7 C1 kill-gate suite still 4/4
+  green; in-scope repo test sweep 710/710 pass.
+
+  **D.6 chip-away (lint).** Six more silent-except hits closed:
+    - `execution/paper_trader.py:94, 106, 111` — sqlite3
+      `OperationalError` migration handlers now `log.debug` the
+      exception. Same pattern session-7 applied to `idempotency.py`.
+    - `execution/status_db.py:50` — same pattern for the
+      `engine_status` migration loop. Required adding a module-level
+      logger; the module had none.
+    - `foundation/mode_manager.py:128` — LIVE-activation Telegram
+      alert failure now `log.warning`s rather than passing silently.
+      Caveat embedded: mode switch still committed, alert is
+      best-effort.
+    - `diagnostics/d2_ml_dist.py:116` — per-bar `score_signal`
+      exception now `print`s symbol + bar index instead of silently
+      dropping the row.
+  Net: `silent-except` 77 → 71 (-6). `loguru-printf` unchanged at 181.
+  Baseline ratcheted.
+
+  **Alerts-log smoke (session-7 deferred verification) — GREEN.**
+  Synthetic `send_alert('TEST session 8 smoke 2026-05-23', market='crypto')`
+  inside `aaats-paper-crypto` created
+  `/home/aaats/aaats/data/alerts_log.json` (188 bytes, one row). Lazy
+  creation contract holds; daily digest "Alerts fired" row will
+  populate naturally on next watchdog tick after a real alert lands.
+
+  **Loguru-only rule scoping — DEFERRED.** Chip-away has been
+  progressing fine without the rule narrowing; save the Haiku session
+  for when the queue runs lean.
+
+  **Next D-track steps:**
+    - D.5 day-1 begin — still parked, same conditions as session 7.
+    - D.6 chip-away ongoing — 252 remaining hits (71 silent-except,
+      181 loguru-printf).
+    - Loguru-rule refinement still queued for a Haiku session.
+    - Runner-halt-stops-MTM semantic gap — CLOSED this session.

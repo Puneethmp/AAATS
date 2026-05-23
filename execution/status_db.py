@@ -16,6 +16,10 @@ from typing import Any
 
 import pandas as pd
 
+from foundation.logger import get_logger
+
+_log = get_logger("execution", "status_db")
+
 _DEFAULT_DB = str(Path(__file__).parent.parent / "data" / "status.db")
 
 _CREATE = """
@@ -47,8 +51,8 @@ def _conn(db_path: str = _DEFAULT_DB) -> sqlite3.Connection:
     for col, coldef in _MIGRATE_COLS:
         try:
             c.execute(f"ALTER TABLE engine_status ADD COLUMN {col} {coldef}")
-        except sqlite3.OperationalError:
-            pass  # column already exists
+        except sqlite3.OperationalError as exc:
+            _log.debug(f"engine_status migration noop ({col}): {exc}")
     c.commit()
     return c
 

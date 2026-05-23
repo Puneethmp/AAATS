@@ -945,6 +945,38 @@ def _fill_price(price: float, action: str, market: str,
 
 # ── Risk kill-switch gate (shared by execute() and standalone strategies) ────
 
+def _mark_to_market_and_decide(
+    market: str,
+    symbol: str,
+    last_price: float,
+    positions: dict,
+    portfolio: dict,
+):
+    """Internal: drive the engine MTM once per emission, return the worst
+    of the portfolio-level and market-level decisions.
+
+    Always advances portfolio + market equity (so peaks/drawdowns track even
+    when the caller is going to skip the emission). Decision precedence:
+    HALT_ALL (portfolio-level catastrophe) > HALT_MARKET (per-market kill)
+    > ALLOW. Returning only update_market's decision would miss HALT_ALL on
+    a fresh engine where the per-market state has not yet been seeded —
+    update_market seeds peak=current and returns ALLOW for a never-seen
+    market even when update_portfolio just set _all_halted=True.
+
+    The cached singleton in _get_risk_engine means callers can re-fetch the
+    engine after this returns without double-initialising it.
+    """
+    engine = _get_risk_engine(portfolio)
+    total_equity = _compute_current_equity(positions, portfolio, market, symbol, last_price)
+    portfolio_decision = engine.update_portfolio(total_equity)
+    market_equity = _compute_market_equity(positions, portfolio, market, symbol, last_price)
+    market_decision = engine.update_market(market, market_equity)
+    # Escalate to the more severe decision.
+    if portfolio_decision.action == "HALT_ALL":
+        return portfolio_decision
+    return market_decision
+
+
 def apply_kill_switch_gate(
     market: str,
     symbol: str,
@@ -952,26 +984,71 @@ def apply_kill_switch_gate(
     positions: dict,
     portfolio: dict,
 ) -> tuple[bool, str]:
-    """Single source of truth for the portfolio/market HALT gate.
+    """ENTRY kill-switch gate (operator halt + engine HALT_ALL/HALT_MARKET).
 
-    Returns (allowed, reason). On HALT_ALL or HALT_MARKET the gate ALSO logs
-    a warning and sends the Telegram alert (same side-effects execute() used
-    to emit inline at the original block), then returns (False, reason).
+    Returns (allowed, reason). Always advances the engine MTM via
+    _mark_to_market_and_decide() so peaks/drawdowns track regardless of the
+    decision. Blocks emission on any of:
+      - data/halt_state.json says is_halted(market) (operator/CLI channel),
+      - engine decision HALT_ALL (portfolio drawdown <= -20%),
+      - engine decision HALT_MARKET (this market's drawdown <= -15%).
 
-    Behavior is byte-equivalent to the legacy execute() block (formerly lines
-    879–894): _get_risk_engine -> _compute_current_equity -> update_portfolio
-    -> _compute_market_equity -> update_market. The cached singleton in
-    _get_risk_engine means callers can re-fetch the engine after this returns
-    without double-initialising it.
+    On engine HALT, logs a warning + Telegram alert. On operator halt, logs
+    a warning only (the operator already alerted when they pulled kill.py).
+
+    Use this for BUY emissions only. SELL/EXIT paths must use
+    apply_kill_switch_exit_gate() — the engine kill's documented semantics
+    are 'block new entries, keep MTM' (per
+    docs/known_issues/2026-05-23_kill_trigger_investigation.md), so exits
+    must continue to fire on HALT_MARKET and operator halt.
     """
-    engine = _get_risk_engine(portfolio)
-    total_equity = _compute_current_equity(positions, portfolio, market, symbol, last_price)
-    engine.update_portfolio(total_equity)
-    market_equity = _compute_market_equity(positions, portfolio, market, symbol, last_price)
-    decision = engine.update_market(market, market_equity)
+    # 1. Operator halt (persistent, set by kill.py CLI). Short-circuit
+    #    BEFORE engine MTM so the engine peak is not advanced by a stale
+    #    operator-halt cycle — but the operator-halt cycle is one where
+    #    no entries fire anyway, so MTM is still meaningful. Run MTM first
+    #    to keep peak/drawdown tracking accurate.
+    decision = _mark_to_market_and_decide(market, symbol, last_price, positions, portfolio)
+    try:
+        from foundation.kill_switch import is_halted as _is_halted
+        if _is_halted(market):
+            reason = f"operator halt active for {market}"
+            log.warning(f"  🛑 OPERATOR HALT [{market}]: blocks entry {symbol}")
+            return False, reason
+    except ImportError as exc:
+        log.debug(f"  kill_switch import unavailable in entry gate: {exc}")
+    # 2. Engine drawdown halt (per-market and portfolio).
     if decision.action in ("HALT_ALL", "HALT_MARKET"):
         log.warning(f"  🛑 RISK HALT [{market}]: {decision.reason}")
         send_alert(f"🛑 HALT {market.upper()} — {decision.reason}", market=market)
+        return False, decision.reason
+    return True, ""
+
+
+def apply_kill_switch_exit_gate(
+    market: str,
+    symbol: str,
+    last_price: float,
+    positions: dict,
+    portfolio: dict,
+) -> tuple[bool, str]:
+    """EXIT kill-switch gate (only catastrophic HALT_ALL blocks).
+
+    Companion to apply_kill_switch_gate() for SELL emissions. Always runs
+    engine MTM via _mark_to_market_and_decide(). Only blocks on engine
+    HALT_ALL (portfolio drawdown past -20% — system-wide stop). Does NOT
+    consult the operator-halt channel and does NOT block on HALT_MARKET:
+    a halted market should still bleed open positions to ATR / per-trade
+    stop / converge signals, per engine kill semantics.
+
+    No Telegram alert on HALT_ALL block here — the entry path would have
+    already alerted when the portfolio crossed -20%, and re-alerting on
+    every blocked exit would be spam.
+    """
+    decision = _mark_to_market_and_decide(market, symbol, last_price, positions, portfolio)
+    if decision.action == "HALT_ALL":
+        log.warning(
+            f"  🛑 RISK HALT_ALL blocks exit [{market} {symbol}]: {decision.reason}"
+        )
         return False, decision.reason
     return True, ""
 
@@ -1000,11 +1077,31 @@ def execute(
     # the C3/C6 standalone path can honor the same kill switch without
     # routing through execute() (Option B' per
     # docs/decisions/2026-05-20_g2_execute_routing_hs4.md).
-    allowed, _halt_reason = apply_kill_switch_gate(
-        market, symbol, last_price, positions, portfolio,
-    )
-    if not allowed:
-        return
+    #
+    # Signal-aware gating (session 8, 2026-05-23): BUYs use the ENTRY gate
+    # (blocks on operator halt + HALT_ALL + HALT_MARKET); SELLs use the
+    # EXIT gate (blocks only on catastrophic HALT_ALL). This preserves the
+    # documented engine-kill semantics "block new entries, keep MTM" — open
+    # positions continue to bleed via ATR trailing stops, per-trade stops,
+    # and SELL signals even during a market-level drawdown halt or operator
+    # halt.
+    if signal == "BUY":
+        allowed, _halt_reason = apply_kill_switch_gate(
+            market, symbol, last_price, positions, portfolio,
+        )
+        if not allowed:
+            return
+    elif signal == "SELL":
+        allowed, _halt_reason = apply_kill_switch_exit_gate(
+            market, symbol, last_price, positions, portfolio,
+        )
+        if not allowed:
+            return
+    else:
+        # HOLD or other non-emitting signals still advance the engine MTM
+        # so the existing-position branch below can run the -2% stop check
+        # against fresh peak/drawdown state.
+        _mark_to_market_and_decide(market, symbol, last_price, positions, portfolio)
 
     engine = _get_risk_engine(portfolio)
     sizer  = _get_sizer(market, capital)
@@ -1472,11 +1569,20 @@ def _check_trailing_stops(
 
 def run_india(positions: dict, portfolio: dict) -> None:
     """Run one India NSE paper-trading cycle across the full watchlist."""
+    # Operator halt semantics (session 8, 2026-05-23): parity with
+    # run_crypto — log the halt and continue so open positions can MTM
+    # and exit. The per-emission entry gate
+    # (apply_kill_switch_gate via execute() BUY branch) blocks new entries,
+    # and the exit gate allows SELLs through except on catastrophic
+    # HALT_ALL. See docs/known_issues/2026-05-23_kill_trigger_investigation.md.
     try:
         from foundation.kill_switch import is_halted as _is_halted
         if _is_halted("india"):
-            log.warning("India market HALTED (kill switch) — skipping cycle")
-            return
+            log.warning(
+                "India market under OPERATOR HALT — new entries blocked; "
+                "open positions continue to MTM and may exit on ATR / "
+                "per-trade stop / SELL signal."
+            )
     except ImportError:
         pass
     from execution.market_hours import require_market_open
@@ -1573,15 +1679,23 @@ def run_india(positions: dict, portfolio: dict) -> None:
 
 def run_crypto(positions: dict, portfolio: dict) -> None:
     """Run one crypto paper-trading cycle across CRYPTO_SYMBOLS."""
-    # Parity with run_india: short-circuit on operator/CLI kill switch
-    # (data/halt_state.json). The risk-engine kill is per-order and
-    # in-memory; this is the persistent operator channel set by kill.py.
-    # See docs/known_issues/2026-05-23_kill_trigger_investigation.md.
+    # Operator halt semantics (session 8, 2026-05-23): when
+    # data/halt_state.json reports is_halted("crypto"), open positions still
+    # need to mark-to-market, hit ATR trailing stops, run the per-trade -2%
+    # stop, and accept SELL signals — only NEW entries are blocked. The
+    # per-emission BUY gate (apply_kill_switch_gate) consults is_halted()
+    # so BUYs from execute() and from C1/C3/C6 standalone strategies all
+    # short-circuit. SELL emissions route through
+    # apply_kill_switch_exit_gate which only blocks on catastrophic
+    # HALT_ALL. See docs/known_issues/2026-05-23_kill_trigger_investigation.md.
     try:
         from foundation.kill_switch import is_halted as _is_halted
         if _is_halted("crypto"):
-            log.warning("Crypto market HALTED (kill switch) — skipping cycle")
-            return
+            log.warning(
+                "Crypto market under OPERATOR HALT — new entries blocked; "
+                "open positions continue to MTM and may exit on ATR / "
+                "per-trade stop / SELL signal."
+            )
     except ImportError:
         pass
 

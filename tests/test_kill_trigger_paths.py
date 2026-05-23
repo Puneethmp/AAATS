@@ -79,20 +79,35 @@ def test_engine_does_not_halt_at_negative_14_pct(tmp_path: Path, monkeypatch) ->
     )
 
 
-# ── (2) run_crypto: short-circuits on is_halted("crypto") ───────────────────
+# ── (2) run_crypto: proceeds past is_halted to MTM and exits ────────────────
+#
+# Session 8 (2026-05-23) revised semantics: the operator halt is a
+# "block new entries" channel, NOT a "freeze the book" channel. run_crypto
+# must reach _binance_healthy and _check_trailing_stops even when
+# is_halted("crypto") is True, otherwise open positions silently
+# accumulate stale pnl that the engine kill was specifically designed to
+# keep visible. The per-emission entry gate (apply_kill_switch_gate)
+# blocks new BUYs; exits route through apply_kill_switch_exit_gate.
+# See: docs/known_issues/2026-05-23_kill_trigger_investigation.md and
+# tests/test_operator_halt_mtm_gap.py for the new entry/exit-gate
+# coverage.
 
 
-def test_run_crypto_short_circuits_when_halted() -> None:
-    """When foundation/kill_switch.is_halted("crypto") returns True,
-    run_crypto must return BEFORE the Binance health probe (i.e. without
-    touching the network, the DB, or the order path)."""
+def test_run_crypto_reaches_binance_probe_even_when_halted() -> None:
+    """When is_halted('crypto')=True, run_crypto must still reach the
+    Binance health probe so the cycle can MTM open positions and run
+    _check_trailing_stops. Pre-session-8 the runner short-circuited
+    before _binance_healthy; post-session-8 it proceeds and lets the
+    per-emission entry gate block BUYs."""
     from trading import live_paper_runner
 
     binance_called = {"n": 0}
 
     def fake_binance_healthy() -> bool:
         binance_called["n"] += 1
-        return True
+        # Return False so the cycle exits before any actual trading;
+        # we just need to assert the probe was reached.
+        return False
 
     with (
         patch("foundation.kill_switch.is_halted", return_value=True),
@@ -103,9 +118,9 @@ def test_run_crypto_short_circuits_when_halted() -> None:
             portfolio={"crypto": {"capital": 100.0}},
         )
 
-    assert binance_called["n"] == 0, (
-        "run_crypto reached the Binance health probe even though the kill "
-        "switch flagged crypto halted"
+    assert binance_called["n"] == 1, (
+        "run_crypto short-circuited before _binance_healthy under operator "
+        "halt — pre-session-8 bug regression. MTM + exits would never fire."
     )
 
 

@@ -113,8 +113,8 @@ def regenerate_training_conf() -> pd.DataFrame:
                         "symbol": sym,
                         "conf": float(conf),
                     })
-                except Exception:
-                    pass
+                except Exception as exc:
+                    print(f"  score_signal skip {sym} bar {i}: {exc}")
         except Exception as e:
             print(f"  FAIL {sym}: {e}")
     return pd.DataFrame(rows)

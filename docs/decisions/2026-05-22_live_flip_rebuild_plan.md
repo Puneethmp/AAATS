@@ -135,19 +135,88 @@ to flip.
 #### Phase A.4 — Pre-flights against the new path
 
 - **Scope:** PF1 (clean readiness without override), PF2 (reconcile clean),
-  PF3 (Telegram synthetic), plus a **new PF4** — live-broker DRY_RUN shadow
-  trade matches paper signal within tolerance over N cycles. X (tolerance)
-  and Y (cycle count) determined empirically during A.2 — the working
-  hypothesis is X ≤ 0.3% mid-spread slippage and Y ≥ 20 cycles.
+  PF3 (Telegram synthetic), PF4 (live-broker DRY_RUN shadow trade matches
+  paper signal within tolerance over N cycles; X ≤ 0.3% mid-spread slippage
+  and Y ≥ 20 cycles, pinned during A.2), and **PF5** (failure-mode stress
+  tests — see PF5 subsection below).
 - **Files touched:** runbook update at `docs/runbooks/2026-05-22_live_capital_go.md`;
-  new PF4 recipe.
-- **Tests required:** PF1–PF4 all green from the operator side without any
+  new PF4 recipe; new PF5 recipes in `tests/preflight/test_pf5_*.py` and a
+  PF5 runbook at `docs/runbooks/2026-05-24_pf5_failure_mode_stress.md`.
+- **Tests required:** PF1–PF5 all green from the operator side without any
   override flag.
-- **Rollback baseline:** runbook is reversible; no code rollback needed.
+- **Rollback baseline:** runbook is reversible; no code rollback needed
+  (PF5 uses synthetic injection, not production code changes).
 - **Exit criteria:** PF1=green, PF2=green, PF3=Telegram delivered, PF4=DRY_RUN
-  reconciliation passes.
-- **Estimate:** 1 session.
-- **Dependencies:** A.3.
+  reconciliation passes, PF5=all 8 scenarios pass with no manual intervention.
+- **Estimate:** 2 sessions (1 for PF1–PF4 as previously scoped, 1 for PF5
+  scenario implementation + run).
+- **Dependencies:** A.3 for PF1–PF4; PF5 has no additional code dependency
+  but operationally requires the box to be running and the watchdog/metrics
+  containers reachable.
+
+##### PF5 — Failure-mode stress test scenarios (added 2026-05-24, Cowork pass)
+
+**Purpose:** verify the resilience paths already shipped (D.1 strategy
+isolation, D.2 watchdog, three-channel kill switch, idempotency, reconciler)
+actually behave correctly end-to-end under synthetic-but-realistic failure
+injection. PF5 is NOT net-new resilience code — it is verification that the
+existing code works as advertised. Without PF5, the C.1 claim "PF1–PF4 pass
+without override" certifies the happy path only.
+
+**Scope discipline (anti-drift):** PF5 covers failure modes that have either
+already hit AAATS in production (rate limits, container crashes, exchange
+flakes) or are guaranteed to hit it given enough live calendar time
+(latency spikes, slippage, network partitions). PF5 explicitly does NOT
+cover: futures/perpetuals/funding-rate scenarios (out of doctrine; spot
+only), liquidation cascades (no leverage), regime-detection logic
+(premature — needs B.3 + C.7 first), Monte Carlo simulations (needs the
+B.1.5 backtest harness, deferred to post-B.2). If a stress-test idea
+doesn't fit one of the 8 scenarios below, it belongs in a new memo, not
+a PF5 expansion.
+
+**Each scenario specifies:** trigger recipe (synthetic), expected system
+behavior, observable signal, pass criterion. All triggers run against a
+dedicated `state-crypto-stress` volume to avoid contaminating
+`state-crypto-paper`.
+
+| # | Scenario | Trigger recipe | Expected behavior | Observable signal | Pass criterion |
+|---|---|---|---|---|---|
+| **PF5.1** | Binance API rate limit (429) | `ccxt` monkeypatch: raise `RateLimitExceeded` on next 3 `create_order` calls, then succeed | Backoff/retry succeeds; no duplicate orders placed; idempotency key honored | `data/orders.db` has 1 row per intended order (not 3); logs contain "retrying after rate limit" with attempt count | Order eventually fills; share-equality reconciler shows zero divergence; total elapsed ≤ 60s |
+| **PF5.2** | Binance API transient 5xx | `ccxt` monkeypatch: raise `ExchangeNotAvailable` on next 2 calls then succeed | Exponential backoff retry; succeed on 3rd attempt | Log entry "retry attempt 3/3 succeeded"; ledger has correct single fill | Order completes within 30s; zero manual intervention; reconciler clean |
+| **PF5.3** | Network partition (cannot reach exchange) | On box: `sudo iptables -A OUTPUT -d api.binance.com -j DROP` for 60s, then flush | Orders queue or fail-fast; no zombie orders placed; on reconnect, reconciler catches up via Binance order history | `alerts_log.json` has "exchange unreachable" event with start+end timestamps; recovers when iptables flushed | No double-fill on recovery; final ledger matches Binance order history; gap visible in heartbeat but watchdog does not restart container (network failure is not container failure) |
+| **PF5.4** | Order placed but ack timeout (latency spike) | `ccxt` monkeypatch: `sleep(90)` before returning ack (longer than runner's `ORDER_ACK_TIMEOUT`) | Runner times out, marks order as "ack-pending"; reconciler later detects the placed-but-unacked order via Binance order history and reconciles | Order visible in Binance's history but missing in local ledger initially; reconciler logs "found unacked order, reconciling" within next cycle | Ledger eventually consistent; no duplicate placement; share-equality clean within 2 cycles |
+| **PF5.5** | Slippage spike (fill far from quoted price) | Synthetic order injection with `execution_price` 5% off `quoted_mid_at_decision` | Per-trade -2% stop fires on next mark-to-market cycle | Position SELL emitted within 1 cycle; realized PNL ≈ -2% + slippage; `alerts_log.json` records the stop firing | Position closed; no runaway loss; total realized loss ≤ -2.5% of position notional |
+| **PF5.6** | Consecutive strategy exceptions trigger D.1 auto-halt | Monkeypatch one strategy's `generate_signals()` to raise `RuntimeError` 3 times consecutively | D.1 isolation halts that strategy (writes to `strategy_halt_state.json` with halt_reason + timestamp) | `strategy_halt_state.json` contains the strategy key with `halted=true, reason="3 consec exceptions"`; daily digest "Halted strategies" row updates | Other strategies continue running uninterrupted; halted strategy stops emitting signals; container does NOT restart |
+| **PF5.7** | Container crash + D.2 watchdog restart | On box: `docker exec aaats-paper-crypto kill -9 1` | Docker restart policy + watchdog noticed the heartbeat gap, restart container | Container restart count incremented; watchdog log entry "heartbeat stale > threshold, restart attempted"; new heartbeat write within 60s of restart | No lost orders (any in-flight orders reconcile via PF5.4 path); reconciler shows zero divergence post-restart; `aaats_metrics_exporter_up` returns to 1.0 within 60s |
+| **PF5.8** | Flash crash (instantaneous mark drop ≥ -20%) | Inject synthetic mark drop in `mark_to_market` path: force market equity to 0.79 × persisted peak for one cycle | Engine portfolio-kill fires (`HALT_ALL`); all new entries blocked; MTM continues for open positions | Digest shows "portfolio-kill threshold reached"; `risk_engine_state.paper.json` reflects the synthetic equity; `halt_state.json` crypto STAYS false (operator channel untouched — verify the kill channels are not cross-contaminating) | Zero new BUYs placed for next 3 cycles; existing positions still marked-to-market; engine kill auto-clears on next cycle if synthetic mark restored (re-derives from peak) |
+
+**Scenarios deliberately excluded (with reason, so they cannot be added by drift):**
+
+- **Futures funding spike**: not applicable — AAATS is spot-only per locked doctrine (`aaats_locked_doctrine_2026_05_14.md`). Adding futures = Track E (new broker adapter, new liquidation engine, new state schemas). PF5 cannot certify what AAATS does not trade.
+- **Leverage liquidation cascade**: same reason as above. Spot has no liquidation.
+- **Correlation crash across pairs**: requires N≥100 trade sample for statistical correlation. Pre-B.3, the sample doesn't exist.
+- **Multi-strategy cascading failure**: D.1 isolation is the existing mitigation; PF5.6 verifies it. A multi-strategy cascade would mean D.1 failed, which is the PF5.6 failure case.
+- **Operator phishing / API key compromise**: out of scope — operational security, not platform code.
+
+**Implementation order:** PF5.1, PF5.2, PF5.5, PF5.6, PF5.8 first (pure
+in-process monkeypatch, no box network changes). PF5.7 next (single
+`docker exec kill -9`, low blast radius). PF5.3 last (iptables on the
+box — schedule for a window when the operator is online and can flush
+the rule if anything goes sideways).
+
+**Test artifacts:** each scenario gets a `tests/preflight/test_pf5_N_<slug>.py`
+file. Scenarios that require synthetic injection in production code
+(PF5.5 slippage, PF5.8 flash crash) use existing test seams in
+`risk/engine.py` and `execution/paper_executor.py` — no new production
+hooks. PF5.3 and PF5.7 are operator-run from a checklist in the PF5
+runbook, not pytest-driven (they require root on the box).
+
+**Cross-references:** Mitigations under test live at `risk/strategy_halt.py`
+(D.1, PF5.6), `aaats-watchdog` container (D.2, PF5.7), `risk/engine.py:39`
+(market kill, PF5.8), `execution/idempotency.py` (PF5.1–PF5.4), `risk/engine.py:340-368`
+(per-trade -2% stop, PF5.5). The Cowork triage that produced this PF5 list
+lives at the Cowork chat dated 2026-05-23 ("institutional-grade prompt"
+triage) and is summarized in memory `aaats_2026_05_23_wishlist_triage.md`.
 
 ### Track B — Strategy profitability (parallel to A, ~4–6 sessions)
 
@@ -219,9 +288,10 @@ to flip.
 
 Each criterion is binary and citable to evidence.
 
-- **C.1** All Track A phases (A.0 through A.4) complete and merged; PF1–PF4
+- **C.1** All Track A phases (A.0 through A.4) complete and merged; PF1–PF5
   pass without override. Cite: PF1 output, PF2 reconcile JSON, PF3 Telegram
-  screenshot, PF4 DRY_RUN reconciliation report.
+  screenshot, PF4 DRY_RUN reconciliation report, PF5 stress-test summary
+  (8 scenarios × pass/fail × elapsed time × observable signal).
 - **C.2** Paper book is in an acceptable starting state for live flip, by
   one of two paths:
   - **(a)** organic recovery: paper equity drawdown shallower than -5% from
@@ -264,6 +334,88 @@ Each criterion is binary and citable to evidence.
     unblock anything else — it just prevents proceeding when the engineering
     is correct but the edge is absent.
 
+### Track E — Operator-away autonomous-soak setup (added 2026-05-23)
+
+**Why this track exists:** the operator is going out of station on
+2026-05-25 for a multi-day-to-multi-week period. The D.5 30-day no-intervention
+soak must START before departure so the calendar clock runs while the
+operator is away. This requires (a) the operator-halt MTM gap from session 7
+to ship, (b) the strategy stack to be backtest-validated for likely
+profitability, (c) the paper book to be reset to a clean state ($200 per
+doctrine amendment), (d) the pre-auth runbook to be in place, (e) PF5
+stress tests to pass, (f) the Telegram pager chain to be validated.
+
+Track E does NOT change C.1–C.7 gates. Live flip still requires Track C
+evaluation post-soak. Track E ONLY enables autonomous paper soak.
+
+#### Phase E.1 — Operator-halt MTM gap fix + open-position reconciliation
+
+- **Scope:** session 8 [0a]/[0]/[0c] per `docs/decisions/2026-05-21_next_session_prompt.md`. Verify open positions, hoist MTM above is_halted check, second failing-then-passing test for per-trade -2% stop firing under operator halt.
+- **Why ship-blocker:** without this, post-reset positions could re-freeze under any operator halt, breaking the autonomous soak.
+- **Estimate:** session 8 (~90 min).
+- **Dependencies:** none — already queued.
+- **Exit criteria:** session 8 ships + box deploy + post-deploy verification (operator halt set → take-profit position still closes).
+
+#### Phase E.2 — B.1.5 backtest harness build + run
+
+- **Scope:** build minimal backtest harness per `docs/decisions/2026-05-22_b15_backtest_harness.md`. Run C3 against 60 days of historical Binance USDT OHLCV. Compute: P&L, Sharpe, win rate, profitable-in-2-of-3-regimes, slippage-sensitivity at 0.5%. Output: `data/backtest_results/c3_60d_summary.json` with a `recommendation: GO|PARTIAL|NO-GO` field.
+- **Why ship-blocker:** without backtest-driven GO/NO-GO, starting a 30-day soak on -$5.63/9d-trending strategy is throwing 30 days at a likely losing system. Operator explicitly requested "stress test profitability before paper trade" 2026-05-23.
+- **Estimate:** 1–2 sessions (1 to build, 1 to run + analyze; could compress if harness is simple).
+- **Dependencies:** none — parallel-safe with E.1.
+- **Exit criteria:** summary JSON exists; recommendation field is GO, PARTIAL, or NO-GO; downstream reset script can read it.
+
+#### Phase E.3 — PF5 stress-test scenarios (subset for soak-readiness)
+
+- **Scope:** ship PF5.1, PF5.2, PF5.5, PF5.6, PF5.7, PF5.8 per A.4 PF5 spec. Defer PF5.3 (iptables — requires operator online) and PF5.4 (latency — needs careful timing) to post-departure if time-constrained.
+- **Why ship-blocker:** stress tests verify the resilience paths the bot will need to use autonomously. PF5.7 (container restart) and PF5.6 (D.1 strategy halt) are the highest-frequency in-soak scenarios.
+- **Estimate:** 1 session.
+- **Dependencies:** A.4 PF5 spec (already in plan, this doc).
+- **Exit criteria:** 6 of 8 PF5 scenarios pass with no manual intervention; PF5.3/PF5.4 documented as post-departure.
+
+#### Phase E.4 — Reset paper book to $200 + start D.5 day-1
+
+- **Scope:** ship `scripts/reset_paper_book_200.py` that (1) reads backtest GO/NO-GO file from E.2, (2) refuses to run if NO-GO, (3) stops aaats-paper-crypto, (4) wipes `deployment_state-crypto-paper`, (5) reinitializes at $200 baseline, (6) restarts container, (7) waits for first NONE-NONE digest and writes timestamp to D.5 day-1 marker.
+- **Why ship-blocker:** the actual mechanism for starting the autonomous soak.
+- **Estimate:** 0.5 session.
+- **Dependencies:** E.1 + E.2 must ship first.
+- **Exit criteria:** script runs on Day 3, first NONE-NONE digest fires within 24h, D.5 day-1 marker file exists.
+
+#### Phase E.5 — Operator-away runbook validation
+
+- **Scope:** validate `docs/runbooks/2026-05-23_operator_away_protocol.md`:
+  1. Send synthetic pager-level Telegram message via `send_alert(..., level='pager')`. Confirm receipt on operator phone.
+  2. Send synthetic "Action needed != NONE" digest. Confirm pager fires after 3 consecutive (synthetic).
+  3. Simulate B.2 P1/P2/P3 all-green response and verify auto-proceed-to-B.3 logic runs.
+  4. Simulate F1 fire and verify auto-HALT-C3 logic runs.
+  5. Operator reviews runbook end-to-end and signs off in Telegram chat.
+- **Why ship-blocker:** the runbook IS the operator's contract for the away period. Untested = false confidence.
+- **Estimate:** 0.5 session.
+- **Dependencies:** E.4 (runbook references a running bot).
+- **Exit criteria:** all 5 validation steps pass; operator types departure-bye in Telegram.
+
+#### Phase E.6 — Telegram CLI bot for remote /kill-all /resume (optional)
+
+- **Scope:** Telegram bot listening on `1946109268` for `/kill-all` (invokes `kill.py halt --all`) and `/resume` (clears strategy_halt_state.json for a specific strategy). Auth: operator's Telegram user_id only.
+- **Why optional:** SSH-from-laptop covers this; only needed if operator is phone-only.
+- **Estimate:** 0.5–1 session.
+- **Dependencies:** E.1 (bot needs MTM gap fix to safely resume halted strategies).
+- **Exit criteria:** bot receives commands; commands execute; operator confirms phone-side test.
+
+#### Track E execution schedule (3-day ship)
+
+| Day | Critical-path work | Parallel work | Exit gate |
+|---|---|---|---|
+| **Day 1: 2026-05-23** | E.1 (session 8 — running). E.2.a (build B.1.5 harness — session 9). | This Cowork doc + doctrine amendment + runbook + memory updates. | Session 8 ships clean; harness skeleton runs end-to-end on a 1-day historical sample. |
+| **Day 2: 2026-05-24** | E.2.b (run backtest on 60-day historical, compute GO/NO-GO). E.3 (PF5 scenarios). | E.6 if time permits. | Backtest summary JSON exists with GO/PARTIAL/NO-GO recommendation. 6/8 PF5 scenarios pass. |
+| **Day 3: 2026-05-25** | E.4 (reset script + run if GO/PARTIAL). E.5 (runbook validation). | Final commit + push. | D.5 day-1 marker file exists; operator-bye Telegram sent. |
+
+#### Track E failure modes (what happens if E doesn't ship by 2026-05-25)
+
+- **If E.1 (MTM gap fix) doesn't ship by Day 1:** Day 2-3 can still build B.1.5, PF5, runbook, but the reset on Day 3 will leave open positions vulnerable to any future operator halt re-freezing them. Risk: low if operator doesn't set halt during away period. Recommendation: ship E.4 anyway, document the gap, fix on operator return.
+- **If E.2 (backtest) returns NO-GO:** Day 3 reset does NOT run. Bot stays in current halted state. Operator returns to halted bot. **This is the correct behavior** — better than 30 days of validated bleeding.
+- **If E.3 (PF5) only ships 3-4 scenarios:** Day 3 reset runs anyway IF the most critical scenarios (PF5.6, PF5.7, PF5.8) passed. PF5.1/PF5.2/PF5.5 cover the in-trade failure modes; if some are skipped, document and finish post-departure (no operator-online dependency).
+- **If E.5 (runbook validation) fails:** Day 3 reset does NOT run. The runbook IS the operator's safety harness; an untested harness is worse than no harness because it gives false confidence. Operator stays on-station an extra day or accepts a paused soak start.
+
 ---
 
 ## Dependencies and parallelism
@@ -275,11 +427,11 @@ Week 1: [A.0] -----------------> [A.1]
 Week 2: [A.1] --> [A.2]
         [B.1] --> [B.2]
 
-Week 3: [A.2] --> [A.3] -------> [A.4]
+Week 3: [A.2] --> [A.3] -------> [A.4 (PF1-PF4)] --> [A.4 PF5 stress tests]
         [B.2] --> [B.3 (soak begins, runs 4 weeks)]
 
 Week 4-7: [B.3 soak] --------------> Track C gate evaluation
-          [A.4 stays green via PF1-PF4 weekly re-run]
+          [A.4 stays green via PF1-PF5 weekly re-run]
 
 Week 7+: Track C gate review --> GO/NO-GO on $25 tranche
 ```
@@ -1246,6 +1398,138 @@ this.
   **Operator pings this session:** one — clarification on the operator
   halt_state divergence surfaced in [0]. Resolved with operator's
   "best recommendation" preference; keep-halted chosen.
+
+- **2026-05-23 (session 8)** — Operator-halt MTM gap resolution +
+  alerts-log smoke confirmation + lint chip-away. B.2 still ineligible
+  (< 2026-05-29). D.5 day-1 still parked (action != NONE).
+
+  **[0a] Open-position verification — ZERO open positions.** Box query
+  against `paper_trades.db` with `status='open' OR quantity != 0` returned
+  0 rows. State files `risk_engine_state.paper.json`,
+  `portfolio_state.paper.json`, `equity_curve.json` are MISSING from
+  `/app/data/` (filed as ancillary; secondary to [0] and didn't gate it).
+  `halt_state.json` mtime confirms session-7 finding: set
+  2026-05-22T15:41:25Z, ~16h pre-deploy. Branch logic: -33.4% is realized
+  loss, no stale MTM exposure, [0c] forced-MTM is NOT needed. Recovery
+  clock starts cleanly when operator clears halt.
+
+  **[0] Operator-halt MTM gap — SHIPPED (workstation; pending box deploy
+  this session).** Adopted option (a) from the session-8 prompt: split
+  the per-emission kill gate into ENTRY and EXIT variants so the
+  operator halt blocks new entries without freezing open positions or
+  per-trade stops. Layout:
+    - New private helper `_mark_to_market_and_decide()` in
+      [trading/live_paper_runner.py](trading/live_paper_runner.py) drives
+      `engine.update_portfolio` + `engine.update_market` once per
+      emission and returns the more severe of the two decisions
+      (HALT_ALL > HALT_MARKET > ALLOW). Fixes a latent bug where
+      `update_market`'s decision was returned even when
+      `update_portfolio` had already set `_all_halted=True` — on a fresh
+      engine the freshly-seeded market peak gave ALLOW.
+    - `apply_kill_switch_gate` (ENTRY) now consults
+      `foundation.kill_switch.is_halted(market)` BEFORE the engine
+      decision. Blocks BUY emission on operator halt + HALT_ALL +
+      HALT_MARKET.
+    - New `apply_kill_switch_exit_gate` (EXIT) only blocks on
+      catastrophic HALT_ALL. HALT_MARKET and operator halt allow the
+      SELL through so positions can bleed via ATR / per-trade /
+      converge.
+    - `execute()` routes BUY through the entry gate and SELL through
+      the exit gate. HOLD signals still MTM the engine so the
+      existing-position branch (per-trade -2% stop check) operates
+      against fresh peak/drawdown state.
+    - `run_crypto` + `run_india` no longer short-circuit on
+      `is_halted`. They log the halt once and proceed — `_check_trailing_stops`,
+      MTM, exit signals, and standalone-strategy exits all fire.
+    - C3 [`trading/altcoin_reversion.py`](trading/altcoin_reversion.py)
+      and C6 [`trading/bollinger_range.py`](trading/bollinger_range.py)
+      import the new exit-gate alias `_exit_gate_check` and use it on
+      the SELL branch. C1 [`trading/stat_arb.py`](trading/stat_arb.py)
+      `_run_pair` accepts a new `exit_gate_check` kwarg propagated by
+      `run_stat_arb_crypto`.
+    - Coverage: 12 new tests in
+      [tests/test_operator_halt_mtm_gap.py](tests/test_operator_halt_mtm_gap.py)
+      (entry-gate / exit-gate / execute() routing / runner reaches
+      trailing-stops / C3-C6-C1 import wire-ups). Session-7 C1 kill-gate
+      tests still 4/4 green.
+    - Existing [tests/test_kill_trigger_paths.py](tests/test_kill_trigger_paths.py)
+      `test_run_crypto_short_circuits_when_halted` updated to
+      `test_run_crypto_reaches_binance_probe_even_when_halted` — old
+      assertion captured the pre-fix bug, new assertion captures the
+      desired post-fix invariant.
+    - Documented in
+      [docs/known_issues/2026-05-23_kill_trigger_investigation.md](docs/known_issues/2026-05-23_kill_trigger_investigation.md)
+      via inline doctrings on the new helpers; CLAUDE.md "Kill-switch
+      semantics" section already reflects the engine-vs-operator split
+      and remains accurate.
+
+  **[3] Alerts-log smoke — CONFIRMED FIRING.** Sent
+  `send_alert('TEST session 8 smoke 2026-05-23', market='crypto')`
+  inside `aaats-paper-crypto`. `/home/aaats/aaats/data/alerts_log.json`
+  was newly created (188 bytes) with one row containing the timestamp,
+  market, severity inference (`info`), message, and UUID4
+  correlation_id. Session-7's lazy-creation contract holds: the writer
+  fires on first `send_alert` call rather than at runner init. Daily
+  digest's "Alerts fired" row will populate on the next watchdog tick
+  that runs after a real (non-test) alert lands.
+
+  **[2] Lint chip-away — SHIPPED.** Six silent-except hits closed; new
+  baseline `silent-except: 71` (was 77, -6 net). Loguru-printf
+  unchanged at 181 — `[2b]` rule refinement deferred.
+    - `execution/paper_trader.py:94, 106, 111` — sqlite3.OperationalError
+      handlers (column-already-exists / index-already-exists / view-rebuild)
+      now `log.debug` the exception text rather than silently passing.
+    - `execution/status_db.py:50` — same pattern for the
+      engine_status migration loop. Added module-level logger
+      (`get_logger("execution", "status_db")`); the module had been
+      logger-less.
+    - `foundation/mode_manager.py:128` — LIVE-activation Telegram
+      alert failure now `log.warning`s rather than silently swallowing,
+      with the explicit caveat that the mode switch itself still
+      committed (the alert is best-effort).
+    - `diagnostics/d2_ml_dist.py:116` — per-bar `score_signal`
+      exception now `print`s the symbol + bar index instead of
+      silently dropping the row.
+    - `tools/lint/silent_except_baseline.txt` ratcheted 77 → 71;
+      `tests/test_lint_silent_except.py` green at the new floor.
+
+  **[2b] Loguru-only scoping — DEFERRED.** Triage holds: most
+  `loguru-printf` hits are doctrine-neutral and chipping by hand reaches
+  hot paths without needing rule narrowing. Save for a Haiku-grade
+  session when the chip-away queue runs lean.
+
+  **[4] D.5 day-1 — STILL PARKED.** Crypto remains under operator halt,
+  drawdown -33.4%. Action-needed band continues to fire. Day-1 clock
+  resumes only after the halt clears AND drawdown recovers above the
+  -10% session-7 band wording threshold.
+
+  **Cross-cutting findings:**
+    - `_mark_to_market_and_decide` more-severe-of-two precedence is a
+      net behavior change beyond the operator-halt fix. The session-7
+      gate would have under-reported HALT_ALL on the first cycle after
+      a restart when `update_market` had not yet been called for the
+      market. Worth a watchdog look if any unexpected HALT_ALL alerts
+      land in the next 7 days — they may have been silently masked
+      before this session.
+    - On-disk state file absences (`risk_engine_state.paper.json`,
+      `portfolio_state.paper.json`, `equity_curve.json`) in
+      `/app/data/` are surprising given runner had been alive for 16h
+      pre-deploy. Possibly the persistence path moved to
+      `data/state/risk_engine_state.json` (which DOES exist on box per
+      session-7 doctrine; the paper-suffixed path
+      `state/risk_engine_state.paper.json` is what the new isolated
+      mode would write). Filed as follow-up for session 9 — does NOT
+      gate the operator-halt fix.
+    - Operator parallel-edit observed: untracked files
+      `docs/decisions/2026-05-23_doctrine_amendment_200_floor.md` and
+      `docs/runbooks/2026-05-23_operator_away_protocol.md` and an
+      unstaged edit to this very plan adding the PF5 subsection
+      appeared during my session. Treated as out-of-band operator
+      work; my commit does NOT include them.
+
+  **Operator pings this session:** none required. The MTM-gap fix was
+  the documented option (a) recommendation from the prompt; no
+  divergence from the design recommendation, no surprises.
 
 ---
 

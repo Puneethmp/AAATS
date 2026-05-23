@@ -251,12 +251,17 @@ def run_bollinger_range_crypto(
       full_portfolio:   Full portfolio dict, same role as full_positions.
     """
     _gate_check = None
+    _exit_gate_check = None
     if full_positions is not None and full_portfolio is not None:
         try:
-            from trading.live_paper_runner import apply_kill_switch_gate as _gate_check
+            from trading.live_paper_runner import (
+                apply_kill_switch_gate as _gate_check,
+                apply_kill_switch_exit_gate as _exit_gate_check,
+            )
         except Exception as exc:
             log.warning("[c6] kill-switch helper unavailable (%s) — proceeding ungated", exc)
             _gate_check = None
+            _exit_gate_check = None
     state   = _load_state()
     changed = False
     capital = portfolio.get("capital", 0.0)
@@ -330,17 +335,20 @@ def run_bollinger_range_crypto(
                     exit_reason = f"regime_flip({regime})"
 
                 if exit_reason:
-                    # Kill-switch gate (B') — block SELL emission BEFORE any
-                    # state mutation, DB write, or capital adjustment. If
-                    # tripped, hold the position and re-evaluate next cycle.
-                    if _gate_check is not None:
-                        _allowed, _kill_reason = _gate_check(
+                    # EXIT gate (session 8, 2026-05-23): only catastrophic
+                    # HALT_ALL blocks. Per-market HALT_MARKET (drawdown <=
+                    # -15%) and operator halt allow the SELL through —
+                    # those are 'block new entries' channels, not 'block
+                    # all activity' channels. See
+                    # docs/known_issues/2026-05-23_kill_trigger_investigation.md.
+                    if _exit_gate_check is not None:
+                        _allowed, _kill_reason = _exit_gate_check(
                             "crypto", sym, price,
                             full_positions, full_portfolio,
                         )
                         if not _allowed:
                             log.info(
-                                "[c6] %s: SKIP SELL — kill switch active (%s)",
+                                "[c6] %s: SKIP SELL — HALT_ALL active (%s)",
                                 sym, _kill_reason,
                             )
                             continue

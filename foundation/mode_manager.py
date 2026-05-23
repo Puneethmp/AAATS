@@ -125,8 +125,8 @@ class ModeManager:
                 f"Capital: ₹{capital:,.0f}",
                 market="all",
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.warning(f"LIVE-activation alert failed (mode switch still applied): {exc}")
 
     def switch_to_paper(self, authorized_by: str, reason: str) -> None:
         """Emergency downgrade to paper trading."""
