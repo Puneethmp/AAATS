@@ -1,0 +1,56 @@
+ROLLBACK BASELINE - 2026-05-23 Session 12 [0] D.5 soak counter
+================================================================================
+
+DEPLOYED_AT_UTC               = 2026-05-23T15:23:25Z
+PRE_PAPER_IMAGE_SHA           = sha256:7001c5e9233fcf08e5738c43973735a704c2c3d8596fb7484bacdcfd45801bc4
+POST_PAPER_IMAGE_SHA          = sha256:b4a8f5906339e727c2843874996a2a18aaaaae458b31b9f7b39f6aeb8dbf94cf
+PRE_WATCHDOG_IMAGE_SHA        = sha256:1faac514d6e7cea97f76a9c6395157c5b787e5ffbde77610a5310fc355dabf17
+POST_WATCHDOG_IMAGE_SHA       = sha256:f828f7892163ca8d84df1d127121555a6cc63adb87a2460840806ef03968258f
+POST_PAPER_STATUS             = running health=healthy
+POST_WATCHDOG_STATUS          = running
+SMOKE_A_COUNTER_SYMBOLS       = True
+SMOKE_B_MARKER_BACKFILLED     = True
+SMOKE_C_DIGEST_RENDERS_ROW    = True
+GATE_PAPER_RUNNING            = True
+GATE_WATCHDOG_RUNNING         = True
+
+Pre-deploy marker:
+  {
+  "day1_at": "2026-05-23T12:46:32.841501+00:00",
+  "starting_equity_usd": 200.0,
+  "divergence_watcher_armed": true,
+  "watcher_window_days": 7,
+  "c3_threshold_low_usd": -2.0,
+  "c3_threshold_high_usd": 2.0
+}
+
+Backfilled anomaly window:
+  {"start": "2026-05-23T13:29:44+00:00", "end": "2026-05-23T15:07:46+00:00", "reason": "phantom_ena_crash_loop"}
+
+File SHAs (pre -> post):
+  monitoring/daily_digest.py               : 83074d9ebf29e7e9d12e366dec1aa4319dfa83fb3d90f0c43cd55234eabdcb7c -> 2eebb8d25ee8f189280868e61d1d21e080cda0ce5cdefe521072c6a45b719cd5
+
+Smoke (c) digest dry-run tail:
+  AAATS daily digest -- 2026-05-23 (T+11 since rebuild)
+  
+  P&L (24h)
+    Realized:   $+0.00
+    Unrealized: $-0.00
+    Equity:     $25191.48  (peak $25200.02, dd -0.0%)
+  
+  Operational
+    Cycles run:        1 (expected 96, 1.0% uptime)
+    Exceptions:        0  (0 auto-halted)
+    Container restarts: 0  (auto: 0, manual: 0)
+    Alerts fired:      69  (open: 69, resolved: 0)
+  
+  Strategies (24h)
+    Firing:   C3_altcoin_reversion (1 trades)
+    Silent:   C1_stat_arb, C2_momentum, C5b_funding_arb, C6_bollinger_range
+    Halted:   (none)
+  
+  C3 P&L since day-1: $+0.00 (watcher active, days 0/7)
+  
+  Soak day 0 of 30 (calendar day 0)
+  
+  Action needed: 69 open alerts in last 24h
