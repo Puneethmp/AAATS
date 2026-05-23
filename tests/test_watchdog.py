@@ -97,7 +97,7 @@ class TestWatchdogTickIntegration:
         monkeypatch.setattr(wd, "_restart_container",
                             lambda c: called.__setitem__("restart", called["restart"] + 1) or True)
         monkeypatch.setattr(wd, "_send_alert",
-                            lambda m: called.__setitem__("alert", called["alert"] + 1))
+                            lambda m, **kw: called.__setitem__("alert", called["alert"] + 1))
 
         _write_heartbeat(tmp_heartbeat, age_seconds=60)
         watchdog = wd.Watchdog(heartbeat_path=tmp_heartbeat)
@@ -114,7 +114,7 @@ class TestWatchdogTickIntegration:
         monkeypatch.setattr(wd, "_restart_container",
                             lambda c: called.__setitem__("restart", called["restart"] + 1) or True)
         monkeypatch.setattr(wd, "_send_alert",
-                            lambda m: called["alerts"].append(m))
+                            lambda m, **kw: called["alerts"].append(m))
 
         # 60min old > 45min threshold (3 × 15min cycle).
         _write_heartbeat(tmp_heartbeat, age_seconds=3600)
@@ -132,7 +132,7 @@ class TestWatchdogTickIntegration:
         monkeypatch.setattr(wd, "_restart_container",
                             lambda c: called.__setitem__("restart", called["restart"] + 1) or True)
         monkeypatch.setattr(wd, "_send_alert",
-                            lambda m: called["alerts"].append(m))
+                            lambda m, **kw: called["alerts"].append(m))
 
         # Heartbeat timestamped 1h before the synthetic `now`.
         now = 1_000_000.0
@@ -155,7 +155,7 @@ class TestWatchdogTickIntegration:
         monkeypatch.setattr(wd, "_restart_container",
                             lambda c: called.__setitem__("restart", called["restart"] + 1) or True)
         monkeypatch.setattr(wd, "_send_alert",
-                            lambda m: called["alerts"].append(m))
+                            lambda m, **kw: called["alerts"].append(m))
 
         # No file at all (don't create it).
         watchdog = wd.Watchdog(heartbeat_path=tmp_heartbeat)
@@ -169,7 +169,7 @@ class TestWatchdogTickIntegration:
 
         called = {"alerts": []}
         monkeypatch.setattr(wd, "_restart_container", lambda c: False)
-        monkeypatch.setattr(wd, "_send_alert", lambda m: called["alerts"].append(m))
+        monkeypatch.setattr(wd, "_send_alert", lambda m, **kw: called["alerts"].append(m))
 
         _write_heartbeat(tmp_heartbeat, age_seconds=3600)
         watchdog = wd.Watchdog(heartbeat_path=tmp_heartbeat)

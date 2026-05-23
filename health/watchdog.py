@@ -50,9 +50,19 @@ POLL_INTERVAL_SEC = int(os.environ.get("WATCHDOG_POLL_INTERVAL_SEC", "60"))
 RATE_LIMIT_MAX_RESTARTS = int(os.environ.get("WATCHDOG_MAX_RESTARTS", "3"))
 RATE_LIMIT_WINDOW_SEC = int(os.environ.get("WATCHDOG_RATE_WINDOW_SEC", "1800"))
 
+# Daily pager threshold (2026-05-23 session 12 [1] fix). Per the
+# operator-away protocol: "5+ container restarts in one calendar day"
+# triggers a pager-level Telegram alert + auto-HALT_ALL via kill_switch.
+# Implemented as a rolling 24h window (TTL=86400s) of restart timestamps
+# persisted to data/watchdog_state.json so the count survives the
+# watchdog process restarting.
+DAILY_RESTART_PAGER_THRESHOLD = int(os.environ.get("WATCHDOG_DAILY_PAGER_THRESHOLD", "5"))
+DAILY_RESTART_TTL_SEC = 24 * 3600
+
 DATA_DIR = Path(os.environ.get("AAATS_DATA", "/app/data"))
 HEARTBEAT_PATH = DATA_DIR / "heartbeat.json"
 WATCHDOG_HEARTBEAT_PATH = DATA_DIR / "watchdog_heartbeat.json"
+WATCHDOG_STATE_PATH = DATA_DIR / "watchdog_state.json"
 
 # D.4 daily digest dispatch: fire once per IST calendar day at >= DIGEST_HOUR_IST
 # (default 09:00 IST). Guard with a digest_log.json check so the watchdog's
@@ -142,13 +152,93 @@ def _read_heartbeat_ts(path: Path) -> float | None:
         return None
 
 
-def _send_alert(msg: str) -> None:
-    """Best-effort Telegram alert. Silently swallows on any failure."""
+def _send_alert(msg: str, severity: str | None = None, market: str = "system") -> None:
+    """Best-effort Telegram alert. Silently swallows on any failure.
+
+    severity: forwarded to observability.alerts.send_alert when supplied
+    (valid values: 'info' | 'warn' | 'critical'). None lets the alerts
+    module auto-infer from the message body."""
     try:
         from observability.alerts import send_alert
-        send_alert(msg, market="system")
+        kwargs: dict[str, str] = {"market": market}
+        if severity is not None:
+            kwargs["severity"] = severity
+        send_alert(msg, **kwargs)
     except Exception as exc:
         log.warning("telegram send failed: %s", exc)
+
+
+def _load_persistent_restart_history(now_ts: float | None = None) -> list[float]:
+    """Read restart timestamps from WATCHDOG_STATE_PATH, dropping entries
+    older than DAILY_RESTART_TTL_SEC. Returns an empty list on any read
+    failure (the watchdog must remain functional even if the state file
+    is missing/corrupt)."""
+    now_ts = time.time() if now_ts is None else now_ts
+    cutoff = now_ts - DAILY_RESTART_TTL_SEC
+    try:
+        raw = json.loads(WATCHDOG_STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return []
+    if not isinstance(raw, dict):
+        return []
+    history = raw.get("restart_history_24h", [])
+    if not isinstance(history, list):
+        return []
+    out: list[float] = []
+    for ts in history:
+        try:
+            f = float(ts)
+        except (TypeError, ValueError):
+            continue
+        if f >= cutoff:
+            out.append(f)
+    return out
+
+
+def _save_persistent_restart_history(history: list[float]) -> None:
+    """Write the restart-history list back to WATCHDOG_STATE_PATH. Atomic."""
+    try:
+        WATCHDOG_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = WATCHDOG_STATE_PATH.with_suffix(".tmp")
+        payload = {"restart_history_24h": list(history)}
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.replace(WATCHDOG_STATE_PATH)
+    except OSError as exc:
+        log.warning("watchdog_state.json write failed: %s", exc)
+
+
+def _check_daily_pager_threshold(
+    history: list[float],
+    threshold: int = DAILY_RESTART_PAGER_THRESHOLD,
+    target_market: str = "crypto",
+) -> bool:
+    """If the rolling 24h restart count meets the pager threshold, fire
+    a pager-level Telegram alert AND auto-halt the trading market.
+
+    Returns True when the threshold path fired (caller may want to skip
+    further actions). Idempotent against the *same* count crossing —
+    successive restarts above the threshold each refire, since the cost
+    of a duplicate pager is small compared to missing a real failure."""
+    if len(history) < threshold:
+        return False
+
+    msg = (
+        f"[PAGER] D.2 watchdog: {len(history)} restarts of "
+        f"aaats-paper-crypto in last 24h (threshold {threshold}). "
+        f"Auto-halting {target_market}. Operator intervention required."
+    )
+    _send_alert(msg, severity="critical", market=target_market)
+
+    try:
+        from foundation import kill_switch
+        kill_switch.halt(
+            target_market,
+            reason=f"watchdog: {len(history)} restarts in 24h",
+            triggered_by="watchdog_daily_threshold",
+        )
+    except Exception as exc:
+        log.error("kill_switch.halt(%s) failed: %s", target_market, exc)
+    return True
 
 
 def _restart_container(container: str = TARGET_CONTAINER) -> bool:
@@ -199,6 +289,15 @@ class Watchdog:
         self.heartbeat_path = heartbeat_path
         self.target_container = target_container
         self.state = state if state is not None else WatchdogState()
+        # 24h cumulative restart counter, distinct from the in-memory
+        # rate-limit window. Hydrated from data/watchdog_state.json so a
+        # watchdog process restart doesn't reset the 24h count.
+        self._daily_history: list[float] = _load_persistent_restart_history()
+        if self._daily_history:
+            log.info(
+                "watchdog hydrated %d restart timestamps from %s (last 24h)",
+                len(self._daily_history), WATCHDOG_STATE_PATH,
+            )
 
     def tick(self, now_ts: float | None = None) -> str:
         """One observation + decision + action. Returns the decision verb."""
@@ -225,19 +324,34 @@ class Watchdog:
             _send_alert(msg)
             ok = _restart_container(self.target_container)
             self.state.record_restart(now_ts)
+            # Persist + check the 24h pager threshold (session 12 [1] fix
+            # for "5+ restarts/calendar day" pre-auth row in the
+            # operator-away runbook).
+            self._daily_history.append(now_ts)
+            # Prune in-place to 24h.
+            cutoff = now_ts - DAILY_RESTART_TTL_SEC
+            self._daily_history = [t for t in self._daily_history if t >= cutoff]
+            _save_persistent_restart_history(self._daily_history)
+            _check_daily_pager_threshold(self._daily_history)
             if not ok:
                 _send_alert(
-                    f"[D.2] docker restart {self.target_container} FAILED — "
-                    "operator intervention required"
+                    f"[PAGER] [D.2] docker restart {self.target_container} "
+                    "FAILED — operator intervention required",
+                    severity="critical",
                 )
             return verb
 
-        # verb == "escalate"
+        # verb == "escalate" — 3 restarts in 30 min and rate-limit hit.
+        # This is exactly the failure mode that warrants a phone-buzz,
+        # so upgrade to pager-level (session 12 [1] fix). The cumulative
+        # 24h threshold above also catches this independently if 5+
+        # restarts have happened across multiple rate windows.
         _send_alert(
-            f"[D.2] ESCALATION: heartbeat stale (age={age_str}) but rate "
+            f"[PAGER] [D.2] ESCALATION: heartbeat stale (age={age_str}) but rate "
             f"limit hit ({self.state.rate_limit_max} restarts in "
             f"{self.state.rate_limit_window_sec}s). No further auto-restart; "
-            "operator must intervene."
+            "operator must intervene.",
+            severity="critical",
         )
         return verb
 
