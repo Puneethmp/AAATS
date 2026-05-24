@@ -263,3 +263,9 @@ Reporting at session end
 
 - **First anomaly window:** phantom_ena_crash_loop
   2026-05-23T13:29:44Z → 2026-05-23T15:07:46Z (~98 min).
+
+---
+
+## PHASE -1: pre-departure PnL grading (day 1 of D.5 soak)
+
+Snapshot taken 2026-05-24T14:35Z, ~26h after D.5 reset (2026-05-23T12:46:32Z). Bot PnL +$0.189 on $200 baseline (+0.094%). CoinGecko 24h moves at snapshot: BTC +1.41%, ETH +2.17% — both clearly positive (>0.5%). Verdict: **MISS**. Market was up ~1.8% on average and the crypto book was effectively flat; defensive gates (C3/C6 sentiment, ML gate, regime detector) held entries off in a regime where being long would have paid. Not a bug — strategies are correctly conservative — but the ML gate threshold and entry-bias logic look over-defensive in calm-uptrend conditions. Worth a Track B post-return ticket to recalibrate against the full 30d soak distribution before changing anything. Do NOT touch thresholds mid-soak; we need the clean 30d baseline.
