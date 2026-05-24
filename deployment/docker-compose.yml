@@ -166,6 +166,10 @@ services:
     volumes:
       - ../logs:/app/logs
       - ../data:/app/data
+      # L8 (2026-05-24): mount the named volume read-only so collect_drawdown
+      # can read peak / market_peaks from risk_engine_state.paper.json.
+      # Mirrors aaats-watchdog's mount at the same path.
+      - state-crypto-paper:/app/data/state-paper:ro
     environment:
       - PYTHONPATH=/app
     command: python monitoring/metrics_exporter.py

@@ -7,7 +7,11 @@ Start: python monitoring/metrics_exporter.py
 """
 
 from __future__ import annotations
-import json, logging, os, sqlite3, threading, time
+import json
+import logging
+import sqlite3
+import threading
+import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -16,18 +20,18 @@ import psutil
 log = logging.getLogger("metrics_exporter")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-ROOT           = Path(__file__).resolve().parent.parent
-DB_TRADES      = ROOT / "data" / "paper_trades.db"
-DB_POSITIONS   = ROOT / "data" / "positions.db"
+ROOT = Path(__file__).resolve().parent.parent
+DB_TRADES = ROOT / "data" / "paper_trades.db"
+DB_POSITIONS = ROOT / "data" / "positions.db"
 PORTFOLIO_FILE = ROOT / "data" / "paper_portfolio.json"
-PHASE1_FILE    = ROOT / "data" / "phase1_checkpoint.json"
-FUNDING_STATE  = ROOT / "data" / "funding_arb_state.json"
+PHASE1_FILE = ROOT / "data" / "phase1_checkpoint.json"
+FUNDING_STATE = ROOT / "data" / "funding_arb_state.json"
 MOMENTUM_STATE = ROOT / "data" / "momentum_state.json"
-STAT_ARB_HEALTH= ROOT / "data" / "stat_arb_health.json"
+STAT_ARB_HEALTH = ROOT / "data" / "stat_arb_health.json"
 HEARTBEAT_FILE = ROOT / "data" / "heartbeat.json"
-ML_META_FILE   = ROOT / "data" / "ml" / "training_meta.json"
-FG_CACHE       = ROOT / "data" / "fear_greed_cache.json"
-PORT           = 9091
+ML_META_FILE = ROOT / "data" / "ml" / "training_meta.json"
+FG_CACHE = ROOT / "data" / "fear_greed_cache.json"
+PORT = 9091
 SCRAPE_INTERVAL = 30
 _lock = threading.Lock()
 _cached_metrics = ""
@@ -45,7 +49,9 @@ def _c(name, value, labels=None, help_text=""):
     lstr = ""
     if labels:
         lstr = "{" + ",".join(f'{k}="{v}"' for k, v in labels.items()) + "}"
-    return f"# HELP {name} {help_text}\n# TYPE {name} counter\n{name}{lstr} {value:.6f}\n"
+    return (
+        f"# HELP {name} {help_text}\n# TYPE {name} counter\n{name}{lstr} {value:.6f}\n"
+    )
 
 
 def _read_json(path):
@@ -74,53 +80,127 @@ def collect_portfolio():
     c6 = _read_json(ROOT / "data" / "bollinger_range_state.json")
     deployed_by_market = {"crypto": 0.0}
     for d in (c3, c6):
-        if not isinstance(d, dict): continue
+        if not isinstance(d, dict):
+            continue
         for v in d.values():
             if isinstance(v, dict):
                 deployed_by_market["crypto"] += float(v.get("size_usd", 0) or 0)
     total = 0.0
     for market, data in portfolio.items():
-        if not isinstance(data, dict): continue
+        if not isinstance(data, dict):
+            continue
         cash = float(data.get("capital", 0))
         deployed = deployed_by_market.get(market, 0.0)
         # Budget = cash + deployed. Halt state means deployed should be 0 anyway.
         budget = cash + deployed
         total += budget
         # aaats_portfolio_capital now reports BUDGET (cash + open position notional)
-        out.append(_g("aaats_portfolio_capital", budget, {"market": market}, "Portfolio budget (cash + open positions)"))
+        out.append(
+            _g(
+                "aaats_portfolio_capital",
+                budget,
+                {"market": market},
+                "Portfolio budget (cash + open positions)",
+            )
+        )
         # Separate cash-only metric for accuracy
-        out.append(_g("aaats_portfolio_cash", cash, {"market": market}, "Available cash (excl. open positions)"))
-        out.append(_g("aaats_portfolio_deployed", deployed, {"market": market}, "Capital currently deployed in open positions"))
-        out.append(_g("aaats_realized_pnl", float(data.get("realized_pnl", 0)), {"market": market}, "Realized PnL"))
-        out.append(_g("aaats_trade_count", float(data.get("trade_count", 0)), {"market": market}, "Total trades"))
-        out.append(_g("aaats_win_count", float(data.get("win_count", 0)), {"market": market}, "Wins"))
-    out.append(_g("aaats_total_capital_usd", total, help_text="Total portfolio budget across all markets (cash + deployed)"))
+        out.append(
+            _g(
+                "aaats_portfolio_cash",
+                cash,
+                {"market": market},
+                "Available cash (excl. open positions)",
+            )
+        )
+        out.append(
+            _g(
+                "aaats_portfolio_deployed",
+                deployed,
+                {"market": market},
+                "Capital currently deployed in open positions",
+            )
+        )
+        out.append(
+            _g(
+                "aaats_realized_pnl",
+                float(data.get("realized_pnl", 0)),
+                {"market": market},
+                "Realized PnL",
+            )
+        )
+        out.append(
+            _g(
+                "aaats_trade_count",
+                float(data.get("trade_count", 0)),
+                {"market": market},
+                "Total trades",
+            )
+        )
+        out.append(
+            _g(
+                "aaats_win_count",
+                float(data.get("win_count", 0)),
+                {"market": market},
+                "Wins",
+            )
+        )
+    out.append(
+        _g(
+            "aaats_total_capital_usd",
+            total,
+            help_text="Total portfolio budget across all markets (cash + deployed)",
+        )
+    )
     return out
 
 
 def collect_trades():
     out = []
-    rows = _query_db(DB_TRADES, """
+    rows = _query_db(
+        DB_TRADES,
+        """
         SELECT market, action, COUNT(*) as cnt, SUM(pnl) as total_pnl,
                AVG(pnl) as avg_pnl
         FROM paper_trades GROUP BY market, action
-    """)
+    """,
+    )
     for r in rows:
         lbl = {"market": r["market"], "action": r["action"]}
         out.append(_g("aaats_trades_total", float(r["cnt"] or 0), lbl, "Trade count"))
         out.append(_g("aaats_pnl_sum", float(r["total_pnl"] or 0), lbl, "Summed PnL"))
         out.append(_g("aaats_pnl_avg", float(r["avg_pnl"] or 0), lbl, "Avg PnL"))
-    rows_24h = _query_db(DB_TRADES, """
+    rows_24h = _query_db(
+        DB_TRADES,
+        """
         SELECT SUM(pnl) as p, COUNT(*) as c FROM paper_trades
-        WHERE timestamp > datetime('now', '-1 day')""")
+        WHERE timestamp > datetime('now', '-1 day')""",
+    )
     if rows_24h:
-        out.append(_g("aaats_pnl_24h", float(rows_24h[0].get("p") or 0), help_text="PnL 24H"))
-        out.append(_g("aaats_trades_24h", float(rows_24h[0].get("c") or 0), help_text="Trades 24H"))
-    wr = _query_db(DB_TRADES, """
+        out.append(
+            _g("aaats_pnl_24h", float(rows_24h[0].get("p") or 0), help_text="PnL 24H")
+        )
+        out.append(
+            _g(
+                "aaats_trades_24h",
+                float(rows_24h[0].get("c") or 0),
+                help_text="Trades 24H",
+            )
+        )
+    wr = _query_db(
+        DB_TRADES,
+        """
         SELECT market, 100.0*SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END)/MAX(COUNT(*),1) as wr
-        FROM paper_trades GROUP BY market""")
+        FROM paper_trades GROUP BY market""",
+    )
     for r in wr:
-        out.append(_g("aaats_win_rate_pct", float(r.get("wr") or 0), {"market": r["market"]}, "Win rate %"))
+        out.append(
+            _g(
+                "aaats_win_rate_pct",
+                float(r.get("wr") or 0),
+                {"market": r["market"]},
+                "Win rate %",
+            )
+        )
     return out
 
 
@@ -128,10 +208,26 @@ def collect_phase():
     out = []
     cp = _read_json(PHASE1_FILE)
     if cp:
-        out.append(_g("aaats_phase_cycle",  float(cp.get("cycle", 0)),     help_text="Phase cycle"))
-        out.append(_g("aaats_phase_trades", float(cp.get("trades", 0)),    help_text="Phase trades"))
-        out.append(_g("aaats_phase_errors", float(cp.get("errors", 0)),    help_text="Phase errors"))
-        out.append(_g("aaats_phase_pnl",    float(cp.get("total_pnl", 0)), help_text="Phase PnL"))
+        out.append(
+            _g("aaats_phase_cycle", float(cp.get("cycle", 0)), help_text="Phase cycle")
+        )
+        out.append(
+            _g(
+                "aaats_phase_trades",
+                float(cp.get("trades", 0)),
+                help_text="Phase trades",
+            )
+        )
+        out.append(
+            _g(
+                "aaats_phase_errors",
+                float(cp.get("errors", 0)),
+                help_text="Phase errors",
+            )
+        )
+        out.append(
+            _g("aaats_phase_pnl", float(cp.get("total_pnl", 0)), help_text="Phase PnL")
+        )
     return out
 
 
@@ -143,41 +239,127 @@ def collect_strategies():
     # ── Active sprint strategies (C3 altcoin reversion, C6 bollinger range)
     c3 = _read_json(ROOT / "data" / "altcoin_reversion_state.json")
     c6 = _read_json(ROOT / "data" / "bollinger_range_state.json")
-    out.append(_g("aaats_strategy_positions", float(len(fa)), {"strategy": "C5b_funding_arb"}, "Open positions"))
-    out.append(_g("aaats_strategy_positions", float(len(mb)), {"strategy": "C2_momentum"}, "Open positions"))
-    out.append(_g("aaats_strategy_positions", float(len(c3) if isinstance(c3, dict) else 0), {"strategy": "C3_altcoin_reversion"}, "Open positions"))
-    out.append(_g("aaats_strategy_positions", float(len(c6) if isinstance(c6, dict) else 0), {"strategy": "C6_bollinger_range"}, "Open positions"))
-    fa_income = sum(float(v.get("total_income",0)) for v in fa.values() if isinstance(v,dict))
-    out.append(_g("aaats_strategy_income", fa_income, {"strategy": "C5b_funding_arb"}, "Accrued income"))
+    out.append(
+        _g(
+            "aaats_strategy_positions",
+            float(len(fa)),
+            {"strategy": "C5b_funding_arb"},
+            "Open positions",
+        )
+    )
+    out.append(
+        _g(
+            "aaats_strategy_positions",
+            float(len(mb)),
+            {"strategy": "C2_momentum"},
+            "Open positions",
+        )
+    )
+    out.append(
+        _g(
+            "aaats_strategy_positions",
+            float(len(c3) if isinstance(c3, dict) else 0),
+            {"strategy": "C3_altcoin_reversion"},
+            "Open positions",
+        )
+    )
+    out.append(
+        _g(
+            "aaats_strategy_positions",
+            float(len(c6) if isinstance(c6, dict) else 0),
+            {"strategy": "C6_bollinger_range"},
+            "Open positions",
+        )
+    )
+    fa_income = sum(
+        float(v.get("total_income", 0)) for v in fa.values() if isinstance(v, dict)
+    )
+    out.append(
+        _g(
+            "aaats_strategy_income",
+            fa_income,
+            {"strategy": "C5b_funding_arb"},
+            "Accrued income",
+        )
+    )
     for pair_key, h in sa.items():
-        if not isinstance(h, dict): continue
-        out.append(_g("aaats_stat_arb_coint_p", float(h.get("coint_pvalue", 0.05)), {"pair": pair_key}, "Coint p-value"))
-        out.append(_g("aaats_stat_arb_correlation", float(h.get("correlation", 0.8)), {"pair": pair_key}, "Correlation"))
+        if not isinstance(h, dict):
+            continue
+        out.append(
+            _g(
+                "aaats_stat_arb_coint_p",
+                float(h.get("coint_pvalue", 0.05)),
+                {"pair": pair_key},
+                "Coint p-value",
+            )
+        )
+        out.append(
+            _g(
+                "aaats_stat_arb_correlation",
+                float(h.get("correlation", 0.8)),
+                {"pair": pair_key},
+                "Correlation",
+            )
+        )
     # Ensure stat_arb_coint_p / correlation always have at least one series for the dashboard
     if not any(isinstance(h, dict) for h in sa.values()):
-        out.append(_g("aaats_stat_arb_coint_p", 0.05, {"pair": "BTC_ETH"}, "Coint p-value (default)"))
-        out.append(_g("aaats_stat_arb_correlation", 0.8, {"pair": "BTC_ETH"}, "Correlation (default)"))
+        out.append(
+            _g(
+                "aaats_stat_arb_coint_p",
+                0.05,
+                {"pair": "BTC_ETH"},
+                "Coint p-value (default)",
+            )
+        )
+        out.append(
+            _g(
+                "aaats_stat_arb_correlation",
+                0.8,
+                {"pair": "BTC_ETH"},
+                "Correlation (default)",
+            )
+        )
     c3_n = len(c3) if isinstance(c3, dict) else 0
     c6_n = len(c6) if isinstance(c6, dict) else 0
-    for strat, n in [("C1_stat_arb", 0), ("C2_momentum", len(mb)), ("C5b_funding_arb", len(fa)),
-                     ("C3_altcoin_reversion", c3_n), ("C6_bollinger_range", c6_n)]:
+    for strat, n in [
+        ("C1_stat_arb", 0),
+        ("C2_momentum", len(mb)),
+        ("C5b_funding_arb", len(fa)),
+        ("C3_altcoin_reversion", c3_n),
+        ("C6_bollinger_range", c6_n),
+    ]:
         score = min(100, 50 + (20 if n > 0 else 0) + (20 if fa_income > 0 else 0))
-        out.append(_g("aaats_strategy_health", float(score), {"strategy": strat}, "Health 0-100"))
+        out.append(
+            _g(
+                "aaats_strategy_health",
+                float(score),
+                {"strategy": strat},
+                "Health 0-100",
+            )
+        )
     return out
 
 
 def collect_funnel():
     out = []
-    exec_r = _query_db(DB_TRADES, "SELECT COUNT(*) as c FROM paper_trades WHERE timestamp > datetime('now', '-15 minutes')")
+    exec_r = _query_db(
+        DB_TRADES,
+        "SELECT COUNT(*) as c FROM paper_trades WHERE timestamp > datetime('now', '-15 minutes')",
+    )
     executed = int((exec_r[0].get("c") or 0)) if exec_r else 0
-    setups_r = _query_db(DB_TRADES, "SELECT COUNT(*) as c FROM paper_trades WHERE timestamp > datetime('now', '-1 hour') AND signal NOT LIKE '%EXIT%'")
+    setups_r = _query_db(
+        DB_TRADES,
+        "SELECT COUNT(*) as c FROM paper_trades WHERE timestamp > datetime('now', '-1 hour') AND signal NOT LIKE '%EXIT%'",
+    )
     setups = int((setups_r[0].get("c") or 0)) if setups_r else max(1, executed)
     candidates = max(setups * 2, 3)
     scanned = 8
-    out.append(_g("aaats_funnel_scanned",    float(scanned),    help_text="Assets scanned"))
+    out.append(_g("aaats_funnel_scanned", float(scanned), help_text="Assets scanned"))
     out.append(_g("aaats_funnel_candidates", float(candidates), help_text="Candidates"))
-    out.append(_g("aaats_funnel_setups",     float(setups),     help_text="High-conf setups"))
-    out.append(_g("aaats_funnel_executed",   float(executed),   help_text="Executed trades"))
+    out.append(_g("aaats_funnel_setups", float(setups), help_text="High-conf setups"))
+    out.append(
+        _g("aaats_funnel_executed", float(executed), help_text="Executed trades")
+    )
     return out
 
 
@@ -188,49 +370,97 @@ def collect_ml():
         for mkt in ("crypto", "india"):
             acc = meta.get(f"val_acc_{mkt}")
             if acc is not None:
-                out.append(_g("aaats_ml_val_acc", float(acc), {"market": mkt}, "ML val accuracy"))
-            out.append(_g("aaats_ml_skipped", 1.0 if meta.get(f"skipped_{mkt}") else 0.0, {"market": mkt}, "Skipped flag"))
+                out.append(
+                    _g(
+                        "aaats_ml_val_acc",
+                        float(acc),
+                        {"market": mkt},
+                        "ML val accuracy",
+                    )
+                )
+            out.append(
+                _g(
+                    "aaats_ml_skipped",
+                    1.0 if meta.get(f"skipped_{mkt}") else 0.0,
+                    {"market": mkt},
+                    "Skipped flag",
+                )
+            )
         ta = meta.get("trained_at", "")
         if ta:
             try:
                 dt = datetime.fromisoformat(ta)
-                if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
-                out.append(_g("aaats_ml_retrain_age_hours", (datetime.now(timezone.utc)-dt).total_seconds()/3600, help_text="Hours since retrain"))
-            except Exception: pass
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                out.append(
+                    _g(
+                        "aaats_ml_retrain_age_hours",
+                        (datetime.now(timezone.utc) - dt).total_seconds() / 3600,
+                        help_text="Hours since retrain",
+                    )
+                )
+            except Exception:
+                pass
     fg = _read_json(FG_CACHE)
     if fg:
-        out.append(_g("aaats_fear_greed_index", float(fg.get("value", 50)), help_text="Fear & Greed 0-100"))
+        out.append(
+            _g(
+                "aaats_fear_greed_index",
+                float(fg.get("value", 50)),
+                help_text="Fear & Greed 0-100",
+            )
+        )
     return out
 
 
 def collect_system():
     out = []
     try:
-        out.append(_g("aaats_cpu_percent",    psutil.cpu_percent(interval=1), help_text="CPU %"))
-        out.append(_g("aaats_memory_percent", psutil.virtual_memory().percent, help_text="RAM %"))
-        out.append(_g("aaats_disk_percent",   psutil.disk_usage("/").percent,  help_text="Disk %"))
-    except Exception: pass
+        out.append(
+            _g("aaats_cpu_percent", psutil.cpu_percent(interval=1), help_text="CPU %")
+        )
+        out.append(
+            _g(
+                "aaats_memory_percent",
+                psutil.virtual_memory().percent,
+                help_text="RAM %",
+            )
+        )
+        out.append(
+            _g("aaats_disk_percent", psutil.disk_usage("/").percent, help_text="Disk %")
+        )
+    except Exception:
+        pass
     hb = _read_json(HEARTBEAT_FILE)
     hb_age = None
     if hb:
         try:
             dt = datetime.fromisoformat(hb.get("timestamp", ""))
-            if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
-            hb_age = (datetime.now(timezone.utc)-dt).total_seconds()
-        except Exception: pass
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            hb_age = (datetime.now(timezone.utc) - dt).total_seconds()
+        except Exception:
+            pass
     if hb_age is None:
         # Fallback: file mtime, or "very stale" so the panel renders rather than going No-data
         try:
-            hb_age = (datetime.now(timezone.utc).timestamp() - HEARTBEAT_FILE.stat().st_mtime) if HEARTBEAT_FILE.exists() else 999999.0
+            hb_age = (
+                (
+                    datetime.now(timezone.utc).timestamp()
+                    - HEARTBEAT_FILE.stat().st_mtime
+                )
+                if HEARTBEAT_FILE.exists()
+                else 999999.0
+            )
         except Exception:
             hb_age = 999999.0
-    out.append(_g("aaats_heartbeat_age_seconds", float(hb_age), help_text="Heartbeat age (s)"))
+    out.append(
+        _g("aaats_heartbeat_age_seconds", float(hb_age), help_text="Heartbeat age (s)")
+    )
     for name, path in [("trades", DB_TRADES), ("positions", DB_POSITIONS)]:
         alive = 1.0 if path.exists() and path.stat().st_size > 0 else 0.0
         out.append(_g("aaats_db_health", alive, {"db": name}, "DB health 1=ok"))
     return out
-
-
 
 
 def collect_production_readiness():
@@ -240,8 +470,8 @@ def collect_production_readiness():
     # ── deployment_decision.json (system-computed go/no-go) ─────────────────
     dec = _read_json(ROOT_DATA / "deployment_decision.json")
     if dec:
-        score    = float(dec.get("readiness_score", 0))
-        allowed  = 1.0 if dec.get("allowed") else 0.0
+        score = float(dec.get("readiness_score", 0))
+        allowed = 1.0 if dec.get("allowed") else 0.0
         blockers = len(dec.get("blockers", []))
     else:
         # Compute live readiness from current state so the panel never shows "No data"
@@ -249,9 +479,23 @@ def collect_production_readiness():
         score = 0.0
         allowed = 0.0
         blockers = 1  # at least "deployment_decision.json missing"
-    out.append(_g("aaats_prod_readiness_score", float(score),    help_text="Production readiness score 0-100"))
-    out.append(_g("aaats_prod_go_nogo",         float(allowed),  help_text="Go/No-Go: 1=GO 0=NO-GO"))
-    out.append(_g("aaats_prod_blocker_count",   float(blockers), help_text="Number of active blockers"))
+    out.append(
+        _g(
+            "aaats_prod_readiness_score",
+            float(score),
+            help_text="Production readiness score 0-100",
+        )
+    )
+    out.append(
+        _g("aaats_prod_go_nogo", float(allowed), help_text="Go/No-Go: 1=GO 0=NO-GO")
+    )
+    out.append(
+        _g(
+            "aaats_prod_blocker_count",
+            float(blockers),
+            help_text="Number of active blockers",
+        )
+    )
 
     # ── Phase completion status ──────────────────────────────────────────────
     p0 = _read_json(ROOT_DATA / "phase0_checkpoint.json")
@@ -259,26 +503,73 @@ def collect_production_readiness():
     p0_done = 1.0 if p0.get("status") in ("COMPLETED", "COMPLETE") else 0.0
     p1_done = 1.0 if p1.get("status") == "COMPLETED" else 0.0
     p1_running = 1.0 if p1.get("status") == "RUNNING" else 0.0
-    out.append(_g("aaats_phase_status", p0_done,     {"phase": "0_build"},        "Phase complete: 1=done"))
-    out.append(_g("aaats_phase_status", p1_done,     {"phase": "1_crypto_24h"},   "Phase complete: 1=done"))
-    out.append(_g("aaats_phase_status", p1_running,  {"phase": "1_running"},      "Phase 1 currently running"))
-    out.append(_g("aaats_phase_status", 0.0,         {"phase": "2_both_48h"},     "Phase complete: 1=done"))
-    out.append(_g("aaats_phase_status", 0.0,         {"phase": "3_go_nogo"},      "Phase complete: 1=done"))
-    out.append(_g("aaats_phase_status", 0.0,         {"phase": "4_paper_28d"},    "Phase complete: 1=done"))
+    out.append(
+        _g(
+            "aaats_phase_status",
+            p0_done,
+            {"phase": "0_build"},
+            "Phase complete: 1=done",
+        )
+    )
+    out.append(
+        _g(
+            "aaats_phase_status",
+            p1_done,
+            {"phase": "1_crypto_24h"},
+            "Phase complete: 1=done",
+        )
+    )
+    out.append(
+        _g(
+            "aaats_phase_status",
+            p1_running,
+            {"phase": "1_running"},
+            "Phase 1 currently running",
+        )
+    )
+    out.append(
+        _g("aaats_phase_status", 0.0, {"phase": "2_both_48h"}, "Phase complete: 1=done")
+    )
+    out.append(
+        _g("aaats_phase_status", 0.0, {"phase": "3_go_nogo"}, "Phase complete: 1=done")
+    )
+    out.append(
+        _g(
+            "aaats_phase_status",
+            0.0,
+            {"phase": "4_paper_28d"},
+            "Phase complete: 1=done",
+        )
+    )
 
     # ── Paper trading thresholds ─────────────────────────────────────────────
     # Trades
     trade_rows = _query_db(
         ROOT / "data" / "paper_trades.db",
-        "SELECT COUNT(*) as c FROM paper_trades WHERE signal NOT LIKE \'%EXIT%\'"
+        "SELECT COUNT(*) as c FROM paper_trades WHERE signal NOT LIKE '%EXIT%'",
     )
     total_trades = int((trade_rows[0].get("c") or 0)) if trade_rows else 0
-    out.append(_g("aaats_prod_trades_actual",   float(total_trades), help_text="Total paper trades executed"))
-    out.append(_g("aaats_prod_trades_required", 50.0,                help_text="Min trades required for live"))
-    out.append(_g("aaats_prod_trades_pct",      min(100.0, total_trades / 50.0 * 100), help_text="Trades goal completion %"))
+    out.append(
+        _g(
+            "aaats_prod_trades_actual",
+            float(total_trades),
+            help_text="Total paper trades executed",
+        )
+    )
+    out.append(
+        _g("aaats_prod_trades_required", 50.0, help_text="Min trades required for live")
+    )
+    out.append(
+        _g(
+            "aaats_prod_trades_pct",
+            min(100.0, total_trades / 50.0 * 100),
+            help_text="Trades goal completion %",
+        )
+    )
 
     # Paper trading duration (days since phase 1 start)
     import datetime as _dt
+
     start_str = p1.get("start_time", "")
     paper_days = 0.0
     if start_str:
@@ -286,69 +577,137 @@ def collect_production_readiness():
             start_dt = _dt.datetime.fromisoformat(start_str)
             if start_dt.tzinfo is None:
                 start_dt = start_dt.replace(tzinfo=_dt.timezone.utc)
-            paper_days = ((_dt.datetime.now(_dt.timezone.utc) - start_dt).total_seconds() / 86400)
+            paper_days = (
+                _dt.datetime.now(_dt.timezone.utc) - start_dt
+            ).total_seconds() / 86400
         except Exception:
             pass
-    out.append(_g("aaats_prod_paper_days_actual",   paper_days, help_text="Days of paper trading elapsed"))
-    out.append(_g("aaats_prod_paper_days_required", 14.0,       help_text="Min paper trading days required"))
-    out.append(_g("aaats_prod_paper_days_pct",      min(100.0, paper_days / 14.0 * 100), help_text="Paper days goal %"))
+    out.append(
+        _g(
+            "aaats_prod_paper_days_actual",
+            paper_days,
+            help_text="Days of paper trading elapsed",
+        )
+    )
+    out.append(
+        _g(
+            "aaats_prod_paper_days_required",
+            14.0,
+            help_text="Min paper trading days required",
+        )
+    )
+    out.append(
+        _g(
+            "aaats_prod_paper_days_pct",
+            min(100.0, paper_days / 14.0 * 100),
+            help_text="Paper days goal %",
+        )
+    )
 
     # Win rate from trades DB
     wr_rows = _query_db(
         ROOT / "data" / "paper_trades.db",
-        "SELECT 100.0 * SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) / MAX(COUNT(*), 1) as wr FROM paper_trades"
+        "SELECT 100.0 * SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) / MAX(COUNT(*), 1) as wr FROM paper_trades",
     )
     win_rate = float((wr_rows[0].get("wr") or 0)) if wr_rows else 0.0
-    out.append(_g("aaats_prod_win_rate_pct",      win_rate, help_text="Overall paper win rate %"))
-    out.append(_g("aaats_prod_win_rate_required", 50.0,     help_text="Min win rate required for live"))
+    out.append(
+        _g("aaats_prod_win_rate_pct", win_rate, help_text="Overall paper win rate %")
+    )
+    out.append(
+        _g(
+            "aaats_prod_win_rate_required",
+            50.0,
+            help_text="Min win rate required for live",
+        )
+    )
 
     # Max drawdown from equity curve DB (approximate from PnL)
     dd_rows = _query_db(
-        ROOT / "data" / "paper_trades.db",
-        "SELECT MIN(pnl) as worst FROM paper_trades"
+        ROOT / "data" / "paper_trades.db", "SELECT MIN(pnl) as worst FROM paper_trades"
     )
     worst_trade = float((dd_rows[0].get("worst") or 0)) if dd_rows else 0.0
     max_dd_pct = abs(worst_trade) / 110.0 * 100 if worst_trade < 0 else 0.0
-    out.append(_g("aaats_prod_max_drawdown_pct",      max_dd_pct, help_text="Max single-trade drawdown %"))
-    out.append(_g("aaats_prod_max_drawdown_required", 20.0,       help_text="Max drawdown limit for live %"))
+    out.append(
+        _g(
+            "aaats_prod_max_drawdown_pct",
+            max_dd_pct,
+            help_text="Max single-trade drawdown %",
+        )
+    )
+    out.append(
+        _g(
+            "aaats_prod_max_drawdown_required",
+            20.0,
+            help_text="Max drawdown limit for live %",
+        )
+    )
 
     # ── Kill switch & halt state ─────────────────────────────────────────────
     halt = _read_json(ROOT_DATA / "halt_state.json")
     for market in ("crypto", "india", "us"):
         halted = 1.0 if halt.get(market) else 0.0
-        out.append(_g("aaats_market_halted", halted, {"market": market}, "Market halted: 1=halted"))
+        out.append(
+            _g(
+                "aaats_market_halted",
+                halted,
+                {"market": market},
+                "Market halted: 1=halted",
+            )
+        )
     any_halted = 1.0 if any(halt.get(m) for m in ("crypto", "india", "us")) else 0.0
-    out.append(_g("aaats_any_market_halted", any_halted, help_text="Any market currently halted"))
+    out.append(
+        _g(
+            "aaats_any_market_halted",
+            any_halted,
+            help_text="Any market currently halted",
+        )
+    )
 
     # ── ML model readiness ──────────────────────────────────────────────────
     ml_meta = _read_json(ROOT_DATA / "ml" / "training_meta.json")
     crypto_trained = 1.0 if ml_meta and not ml_meta.get("skipped_crypto") else 0.0
-    crypto_acc     = float(ml_meta.get("val_acc_crypto") or 0) if ml_meta else 0.0
-    acc_ok         = 1.0 if crypto_acc >= 0.52 else 0.0
-    out.append(_g("aaats_prod_ml_trained",  crypto_trained, help_text="Crypto ML model trained"))
-    out.append(_g("aaats_prod_ml_acc_ok",   acc_ok,         help_text="ML val_acc above 52% threshold"))
+    crypto_acc = float(ml_meta.get("val_acc_crypto") or 0) if ml_meta else 0.0
+    acc_ok = 1.0 if crypto_acc >= 0.52 else 0.0
+    out.append(
+        _g("aaats_prod_ml_trained", crypto_trained, help_text="Crypto ML model trained")
+    )
+    out.append(
+        _g("aaats_prod_ml_acc_ok", acc_ok, help_text="ML val_acc above 52% threshold")
+    )
 
     # ── Infra checks: key files present ─────────────────────────────────────
     required_files = {
-        "env_file":         ROOT / ".env",
-        "trades_db":        ROOT / "data" / "paper_trades.db",
-        "positions_db":     ROOT / "data" / "positions.db",
-        "stat_arb":         ROOT / "trading" / "stat_arb.py",
-        "funding_arb":      ROOT / "trading" / "funding_arb.py",
-        "momentum":         ROOT / "trading" / "momentum_breakout.py",
-        "ml_model":         ROOT / "data" / "ml" / "model_crypto.json",
-        "calibrator":       ROOT / "data" / "ml" / "calibrator_crypto.pkl",
+        "env_file": ROOT / ".env",
+        "trades_db": ROOT / "data" / "paper_trades.db",
+        "positions_db": ROOT / "data" / "positions.db",
+        "stat_arb": ROOT / "trading" / "stat_arb.py",
+        "funding_arb": ROOT / "trading" / "funding_arb.py",
+        "momentum": ROOT / "trading" / "momentum_breakout.py",
+        "ml_model": ROOT / "data" / "ml" / "model_crypto.json",
+        "calibrator": ROOT / "data" / "ml" / "calibrator_crypto.pkl",
     }
     all_present = True
     for name, path in required_files.items():
         present = 1.0 if path.exists() and path.stat().st_size > 0 else 0.0
         if not present:
             all_present = False
-        out.append(_g("aaats_prod_file_present", present, {"file": name}, "Required file present"))
-    out.append(_g("aaats_prod_all_files_ok", 1.0 if all_present else 0.0, help_text="All required files present"))
+        out.append(
+            _g(
+                "aaats_prod_file_present",
+                present,
+                {"file": name},
+                "Required file present",
+            )
+        )
+    out.append(
+        _g(
+            "aaats_prod_all_files_ok",
+            1.0 if all_present else 0.0,
+            help_text="All required files present",
+        )
+    )
 
     return out
-
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -358,26 +717,51 @@ def collect_ai_decisions() -> list[str]:
     """Recent trade decision metadata: confidence, regime, signal breakdown."""
     out = []
     # Default emissions so the panels never go to "No data" while we accumulate trades
-    out.append(_g("aaats_avg_r_multiple", 0.0, {"strategy": "all"}, "Avg R-multiple (default 0 when no trades have notes.r_multiple)"))
-    out.append(_g("aaats_regime_gate_blocks_total", 0.0, {"strategy": "all"}, "Regime-gate blocks (default 0 when no trades have notes.skipped_regime)"))
+    out.append(
+        _g(
+            "aaats_avg_r_multiple",
+            0.0,
+            {"strategy": "all"},
+            "Avg R-multiple (default 0 when no trades have notes.r_multiple)",
+        )
+    )
+    out.append(
+        _g(
+            "aaats_regime_gate_blocks_total",
+            0.0,
+            {"strategy": "all"},
+            "Regime-gate blocks (default 0 when no trades have notes.skipped_regime)",
+        )
+    )
     db = ROOT / "data" / "paper_trades.db"
     if not db.exists():
         return out
     try:
-        import sqlite3, json as _json
+        import sqlite3
+
         con = sqlite3.connect(db)
         # Aggregate: avg confidence per strategy in last 50 trades
-        rows = con.execute("""
+        rows = (
+            con.execute("""
             SELECT strategy, AVG(CAST(json_extract(notes,'$.confidence') AS REAL)) as avg_conf,
                    COUNT(*) as n
             FROM trades
             WHERE json_extract(notes,'$.confidence') IS NOT NULL
             ORDER BY entry_time DESC LIMIT 50
-        """).fetchall() if _table_exists(con, "trades") else []
+        """).fetchall()
+            if _table_exists(con, "trades")
+            else []
+        )
         for strat, avg_conf, n in rows:
             if avg_conf is not None:
-                out.append(_g("aaats_ai_avg_confidence", avg_conf,
-                              {"strategy": strat}, "Avg ML confidence last 50 trades"))
+                out.append(
+                    _g(
+                        "aaats_ai_avg_confidence",
+                        avg_conf,
+                        {"strategy": strat},
+                        "Avg ML confidence last 50 trades",
+                    )
+                )
         # (exit_reason distribution handled exclusively in collect_trade_lifecycle)
         # Regime gate blocks (trades skipped due to regime)
         if _table_exists(con, "trades"):
@@ -387,8 +771,14 @@ def collect_ai_decisions() -> list[str]:
                 GROUP BY strategy
             """).fetchall()
             for strat, cnt in blocks:
-                out.append(_g("aaats_regime_gate_blocks_total", float(cnt),
-                              {"strategy": strat}, "Trades skipped by regime gate"))
+                out.append(
+                    _g(
+                        "aaats_regime_gate_blocks_total",
+                        float(cnt),
+                        {"strategy": strat},
+                        "Trades skipped by regime gate",
+                    )
+                )
         # Avg R-multiple achieved
         if _table_exists(con, "trades"):
             rmults = con.execute("""
@@ -399,8 +789,14 @@ def collect_ai_decisions() -> list[str]:
             """).fetchall()
             for strat, avg_r in rmults:
                 if avg_r is not None:
-                    out.append(_g("aaats_avg_r_multiple", avg_r,
-                                  {"strategy": strat}, "Avg R-multiple achieved"))
+                    out.append(
+                        _g(
+                            "aaats_avg_r_multiple",
+                            avg_r,
+                            {"strategy": strat},
+                            "Avg R-multiple achieved",
+                        )
+                    )
         con.close()
     except Exception as e:
         log.debug(f"collect_ai_decisions: {e}")
@@ -408,7 +804,10 @@ def collect_ai_decisions() -> list[str]:
 
 
 def _table_exists(con, table: str) -> bool:
-    r = con.execute("SELECT name FROM sqlite_master WHERE name=? AND type IN ('table','view')", (table,)).fetchone()
+    r = con.execute(
+        "SELECT name FROM sqlite_master WHERE name=? AND type IN ('table','view')",
+        (table,),
+    ).fetchone()
     return r is not None
 
 
@@ -421,40 +820,66 @@ def collect_performance_timeline() -> list[str]:
     if not db.exists():
         return out
     try:
-        import sqlite3, math
+        import sqlite3
+        import math
         from datetime import datetime, timezone, timedelta
+
         con = sqlite3.connect(db)
         if not _table_exists(con, "trades"):
             con.close()
             return out
 
         cutoff_14d = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
-        strategies = [r[0] for r in con.execute("SELECT DISTINCT strategy FROM trades").fetchall()]
+        strategies = [
+            r[0] for r in con.execute("SELECT DISTINCT strategy FROM trades").fetchall()
+        ]
 
         for strat in strategies:
-            rows = con.execute("""
+            rows = con.execute(
+                """
                 SELECT pnl_pct FROM trades
                 WHERE strategy=? AND exit_time IS NOT NULL AND exit_time >= ?
                 ORDER BY exit_time ASC
-            """, (strat, cutoff_14d)).fetchall()
+            """,
+                (strat, cutoff_14d),
+            ).fetchall()
             pnls = [r[0] for r in rows if r[0] is not None]
             if len(pnls) >= 2:
                 mean_r = sum(pnls) / len(pnls)
-                var_r = sum((x - mean_r)**2 for x in pnls) / len(pnls)
+                var_r = sum((x - mean_r) ** 2 for x in pnls) / len(pnls)
                 std_r = math.sqrt(var_r) if var_r > 0 else 0.001
                 sharpe = (mean_r / std_r) * math.sqrt(252) if std_r > 0 else 0.0
-                out.append(_g("aaats_rolling_sharpe_14d", sharpe,
-                              {"strategy": strat}, "Rolling 14d Sharpe ratio"))
+                out.append(
+                    _g(
+                        "aaats_rolling_sharpe_14d",
+                        sharpe,
+                        {"strategy": strat},
+                        "Rolling 14d Sharpe ratio",
+                    )
+                )
 
                 wins = sum(1 for x in pnls if x > 0)
-                out.append(_g("aaats_rolling_win_rate_14d", wins / len(pnls),
-                              {"strategy": strat}, "Rolling 14d win rate"))
+                out.append(
+                    _g(
+                        "aaats_rolling_win_rate_14d",
+                        wins / len(pnls),
+                        {"strategy": strat},
+                        "Rolling 14d win rate",
+                    )
+                )
 
             # Max drawdown from all closed trades
-            all_pnls = [r[0] for r in con.execute("""
+            all_pnls = [
+                r[0]
+                for r in con.execute(
+                    """
                 SELECT pnl_pct FROM trades WHERE strategy=? AND exit_time IS NOT NULL
                 ORDER BY exit_time ASC
-            """, (strat,)).fetchall() if r[0] is not None]
+            """,
+                    (strat,),
+                ).fetchall()
+                if r[0] is not None
+            ]
             if all_pnls:
                 equity = [1.0]
                 for p in all_pnls:
@@ -467,16 +892,32 @@ def collect_performance_timeline() -> list[str]:
                     dd = (peak - v) / peak if peak > 0 else 0
                     if dd > max_dd:
                         max_dd = dd
-                out.append(_g("aaats_max_drawdown_pct", max_dd * 100,
-                              {"strategy": strat}, "Max drawdown pct from peak"))
+                out.append(
+                    _g(
+                        "aaats_max_drawdown_pct",
+                        max_dd * 100,
+                        {"strategy": strat},
+                        "Max drawdown pct from peak",
+                    )
+                )
 
             # Profit factor
             wins_pnl = sum(p for p in pnls if p > 0) if pnls else 0
             loss_pnl = abs(sum(p for p in pnls if p < 0)) if pnls else 0.001
-            pf = wins_pnl / loss_pnl if loss_pnl > 0 else (1.0 if wins_pnl == 0 else 99.0)
+            pf = (
+                wins_pnl / loss_pnl
+                if loss_pnl > 0
+                else (1.0 if wins_pnl == 0 else 99.0)
+            )
             if pnls:
-                out.append(_g("aaats_profit_factor", pf,
-                              {"strategy": strat}, "Profit factor gross wins/losses"))
+                out.append(
+                    _g(
+                        "aaats_profit_factor",
+                        pf,
+                        {"strategy": strat},
+                        "Profit factor gross wins/losses",
+                    )
+                )
         con.close()
     except Exception as e:
         log.debug(f"collect_performance_timeline: {e}")
@@ -492,38 +933,60 @@ def collect_volatility_radar() -> list[str]:
     emitted_symbols = set()
     try:
         import json as _json
+
         # Look for cached OHLCV state files written by paper runner
         for state_file in (ROOT / "data").glob("*_price_cache.json"):
             symbol = state_file.stem.replace("_price_cache", "")
             try:
                 data = _json.loads(state_file.read_text())
                 closes = data.get("closes", [])
-                highs  = data.get("highs",  [])
-                lows   = data.get("lows",   [])
+                highs = data.get("highs", [])
+                lows = data.get("lows", [])
                 if len(closes) < 20:
                     continue
                 # True Range → ATR(14)
                 trs = []
                 for i in range(1, len(closes)):
                     hl = highs[i] - lows[i]
-                    hc = abs(highs[i] - closes[i-1])
-                    lc = abs(lows[i]  - closes[i-1])
+                    hc = abs(highs[i] - closes[i - 1])
+                    lc = abs(lows[i] - closes[i - 1])
                     trs.append(max(hl, hc, lc))
                 atr14 = sum(trs[-14:]) / 14
                 atr_pct = (atr14 / closes[-1]) * 100 if closes[-1] > 0 else 0
-                out.append(_g("aaats_vol_atr_pct", atr_pct,
-                              {"symbol": symbol}, "ATR(14) as % of price"))
+                out.append(
+                    _g(
+                        "aaats_vol_atr_pct",
+                        atr_pct,
+                        {"symbol": symbol},
+                        "ATR(14) as % of price",
+                    )
+                )
                 emitted_symbols.add(symbol)
                 # Vol percentile vs 90-day history
                 if len(trs) >= 90:
-                    hist_atrs = [sum(trs[max(0,i-14):i])/min(14,i) for i in range(14, len(trs))]
+                    hist_atrs = [
+                        sum(trs[max(0, i - 14) : i]) / min(14, i)
+                        for i in range(14, len(trs))
+                    ]
                     rank = sum(1 for x in hist_atrs if x < atr14) / len(hist_atrs) * 100
-                    out.append(_g("aaats_vol_percentile", rank,
-                                  {"symbol": symbol}, "Current ATR percentile vs 90d history"))
+                    out.append(
+                        _g(
+                            "aaats_vol_percentile",
+                            rank,
+                            {"symbol": symbol},
+                            "Current ATR percentile vs 90d history",
+                        )
+                    )
                     # Regime: 0=low(<33), 1=med(33-66), 2=high(>66)
                     regime_val = 0.0 if rank < 33 else (1.0 if rank < 66 else 2.0)
-                    out.append(_g("aaats_vol_regime", regime_val,
-                                  {"symbol": symbol}, "Vol regime: 0=low 1=med 2=high"))
+                    out.append(
+                        _g(
+                            "aaats_vol_regime",
+                            regime_val,
+                            {"symbol": symbol},
+                            "Vol regime: 0=low 1=med 2=high",
+                        )
+                    )
             except Exception:
                 continue
     except Exception as e:
@@ -531,9 +994,30 @@ def collect_volatility_radar() -> list[str]:
     # Always emit defaults for BTC_USDT and ETH_USDT so the dashboard panels render
     for sym in ("BTC_USDT", "ETH_USDT"):
         if sym not in emitted_symbols:
-            out.append(_g("aaats_vol_atr_pct", 0.0, {"symbol": sym}, "ATR(14) % — pending price cache"))
-            out.append(_g("aaats_vol_percentile", 50.0, {"symbol": sym}, "ATR percentile — default 50 until 90d cache"))
-            out.append(_g("aaats_vol_regime", 1.0, {"symbol": sym}, "Vol regime — default MED until 90d cache"))
+            out.append(
+                _g(
+                    "aaats_vol_atr_pct",
+                    0.0,
+                    {"symbol": sym},
+                    "ATR(14) % — pending price cache",
+                )
+            )
+            out.append(
+                _g(
+                    "aaats_vol_percentile",
+                    50.0,
+                    {"symbol": sym},
+                    "ATR percentile — default 50 until 90d cache",
+                )
+            )
+            out.append(
+                _g(
+                    "aaats_vol_regime",
+                    1.0,
+                    {"symbol": sym},
+                    "Vol regime — default MED until 90d cache",
+                )
+            )
     return out
 
 
@@ -545,31 +1029,60 @@ def collect_correlation_map() -> list[str]:
     out = []
     # Compute concentration directly from strategy state files (covers C3/C6 which don't write notes JSON yet)
     try:
-        import json as _json
         c3 = _read_json(ROOT / "data" / "altcoin_reversion_state.json")
         c6 = _read_json(ROOT / "data" / "bollinger_range_state.json")
         sizes = {}
         if isinstance(c3, dict):
-            sizes["C3_altcoin_reversion"] = sum(float(v.get("size_usd", 0) or 0) for v in c3.values() if isinstance(v, dict))
+            sizes["C3_altcoin_reversion"] = sum(
+                float(v.get("size_usd", 0) or 0)
+                for v in c3.values()
+                if isinstance(v, dict)
+            )
         if isinstance(c6, dict):
-            sizes["C6_bollinger_range"] = sum(float(v.get("size_usd", 0) or 0) for v in c6.values() if isinstance(v, dict))
+            sizes["C6_bollinger_range"] = sum(
+                float(v.get("size_usd", 0) or 0)
+                for v in c6.values()
+                if isinstance(v, dict)
+            )
         total = sum(sizes.values()) or 1.0
         for strat, sz in sizes.items():
             pct = (sz / total * 100) if sz > 0 else 0.0
-            out.append(_g("aaats_position_concentration", pct, {"strategy": strat}, "% of total deployed capital (from state files)"))
+            out.append(
+                _g(
+                    "aaats_position_concentration",
+                    pct,
+                    {"strategy": strat},
+                    "% of total deployed capital (from state files)",
+                )
+            )
         # Always emit a default correlation so the panel renders
         if len(sizes) >= 2:
             keys = list(sizes.keys())
-            out.append(_g("aaats_strategy_correlation", 0.0, {"pair": f"{keys[0]}__{keys[1]}"}, "Default correlation until ≥5 closed trades each"))
+            out.append(
+                _g(
+                    "aaats_strategy_correlation",
+                    0.0,
+                    {"pair": f"{keys[0]}__{keys[1]}"},
+                    "Default correlation until ≥5 closed trades each",
+                )
+            )
         else:
-            out.append(_g("aaats_strategy_correlation", 0.0, {"pair": "C3__C6"}, "Default correlation"))
+            out.append(
+                _g(
+                    "aaats_strategy_correlation",
+                    0.0,
+                    {"pair": "C3__C6"},
+                    "Default correlation",
+                )
+            )
     except Exception:
         pass
     db = ROOT / "data" / "paper_trades.db"
     if not db.exists():
         return out
     try:
-        import sqlite3, json as _json
+        import sqlite3
+
         con = sqlite3.connect(db)
         if not _table_exists(con, "trades"):
             con.close()
@@ -584,41 +1097,56 @@ def collect_correlation_map() -> list[str]:
         total_deployed = sum(r[1] for r in open_rows if r[1]) or 1.0
         for strat, cap in open_rows:
             if cap:
-                out.append(_g("aaats_position_concentration",
-                              cap / total_deployed * 100,
-                              {"strategy": strat}, "% of total deployed capital"))
+                out.append(
+                    _g(
+                        "aaats_position_concentration",
+                        cap / total_deployed * 100,
+                        {"strategy": strat},
+                        "% of total deployed capital",
+                    )
+                )
 
         # Simple pairwise return correlation on last 30 closed trades per strategy
         strat_returns: dict[str, list[float]] = {}
         for (strat,) in con.execute("SELECT DISTINCT strategy FROM trades").fetchall():
-            rows = con.execute("""
+            rows = con.execute(
+                """
                 SELECT pnl_pct FROM trades WHERE strategy=? AND exit_time IS NOT NULL
                 ORDER BY exit_time DESC LIMIT 30
-            """, (strat,)).fetchall()
+            """,
+                (strat,),
+            ).fetchall()
             pnls = [r[0] for r in rows if r[0] is not None]
             if len(pnls) >= 5:
                 strat_returns[strat] = pnls
 
         import math
+
         def _corr(a: list, b: list) -> float:
             n = min(len(a), len(b))
             if n < 3:
                 return 0.0
             a, b = a[:n], b[:n]
-            ma, mb = sum(a)/n, sum(b)/n
-            num = sum((a[i]-ma)*(b[i]-mb) for i in range(n))
-            da = math.sqrt(sum((x-ma)**2 for x in a)) or 1e-9
-            db_ = math.sqrt(sum((x-mb)**2 for x in b)) or 1e-9
+            ma, mb = sum(a) / n, sum(b) / n
+            num = sum((a[i] - ma) * (b[i] - mb) for i in range(n))
+            da = math.sqrt(sum((x - ma) ** 2 for x in a)) or 1e-9
+            db_ = math.sqrt(sum((x - mb) ** 2 for x in b)) or 1e-9
             return num / (da * db_)
 
         strats = list(strat_returns.keys())
         for i in range(len(strats)):
-            for j in range(i+1, len(strats)):
+            for j in range(i + 1, len(strats)):
                 sa, sb = strats[i], strats[j]
                 c = _corr(strat_returns[sa], strat_returns[sb])
                 label = f"{sa}__{sb}"
-                out.append(_g("aaats_strategy_correlation", c,
-                              {"pair": label}, "Pairwise strategy return correlation"))
+                out.append(
+                    _g(
+                        "aaats_strategy_correlation",
+                        c,
+                        {"pair": label},
+                        "Pairwise strategy return correlation",
+                    )
+                )
         con.close()
     except Exception as e:
         log.debug(f"collect_correlation_map: {e}")
@@ -632,28 +1160,48 @@ def collect_trade_lifecycle() -> list[str]:
     """Hold times, entry-to-exit anatomy, time-stop vs target rate."""
     out = []
     # Defaults so dashboards render even before any trade closes
-    out.append(_g("aaats_avg_hold_hours", 0.0, {"strategy": "all", "outcome": "win"}, "Avg hold hours (win) — default until first winning close"))
-    out.append(_g("aaats_avg_hold_hours", 0.0, {"strategy": "all", "outcome": "loss"}, "Avg hold hours (loss) — default until first losing close"))
+    out.append(
+        _g(
+            "aaats_avg_hold_hours",
+            0.0,
+            {"strategy": "all", "outcome": "win"},
+            "Avg hold hours (win) — default until first winning close",
+        )
+    )
+    out.append(
+        _g(
+            "aaats_avg_hold_hours",
+            0.0,
+            {"strategy": "all", "outcome": "loss"},
+            "Avg hold hours (loss) — default until first losing close",
+        )
+    )
     db = ROOT / "data" / "paper_trades.db"
     if not db.exists():
         return out
     try:
         import sqlite3
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         con = sqlite3.connect(db)
         if not _table_exists(con, "trades"):
             con.close()
             return out
 
-        strategies = [r[0] for r in con.execute("SELECT DISTINCT strategy FROM trades").fetchall()]
+        strategies = [
+            r[0] for r in con.execute("SELECT DISTINCT strategy FROM trades").fetchall()
+        ]
         for strat in strategies:
-            rows = con.execute("""
+            rows = con.execute(
+                """
                 SELECT entry_time, exit_time, pnl_pct,
                        json_extract(notes,'$.exit_reason') as reason
                 FROM trades
                 WHERE strategy=? AND exit_time IS NOT NULL
                 ORDER BY exit_time DESC LIMIT 100
-            """, (strat,)).fetchall()
+            """,
+                (strat,),
+            ).fetchall()
 
             hold_hours_win, hold_hours_loss = [], []
             exit_counts: dict[str, int] = {}
@@ -661,8 +1209,9 @@ def collect_trade_lifecycle() -> list[str]:
                 try:
                     # Parse timestamps (ISO format)
                     def _parse(ts):
-                        ts = ts.replace("Z","+00:00")
+                        ts = ts.replace("Z", "+00:00")
                         return datetime.fromisoformat(ts)
+
                     h = (_parse(exit_t) - _parse(entry_t)).total_seconds() / 3600
                     if pnl is not None and pnl > 0:
                         hold_hours_win.append(h)
@@ -674,33 +1223,60 @@ def collect_trade_lifecycle() -> list[str]:
                 exit_counts[reason] = exit_counts.get(reason, 0) + 1
 
             if hold_hours_win:
-                out.append(_g("aaats_avg_hold_hours",
-                              sum(hold_hours_win)/len(hold_hours_win),
-                              {"strategy": strat, "outcome": "win"},
-                              "Avg hold hours for winning trades"))
+                out.append(
+                    _g(
+                        "aaats_avg_hold_hours",
+                        sum(hold_hours_win) / len(hold_hours_win),
+                        {"strategy": strat, "outcome": "win"},
+                        "Avg hold hours for winning trades",
+                    )
+                )
             if hold_hours_loss:
-                out.append(_g("aaats_avg_hold_hours",
-                              sum(hold_hours_loss)/len(hold_hours_loss),
-                              {"strategy": strat, "outcome": "loss"},
-                              "Avg hold hours for losing trades"))
+                out.append(
+                    _g(
+                        "aaats_avg_hold_hours",
+                        sum(hold_hours_loss) / len(hold_hours_loss),
+                        {"strategy": strat, "outcome": "loss"},
+                        "Avg hold hours for losing trades",
+                    )
+                )
             for reason, cnt in exit_counts.items():
-                out.append(_g("aaats_exit_reason_count",
-                              float(cnt),
-                              {"strategy": strat, "reason": reason},
-                              "Exit reason frequency"))
+                out.append(
+                    _g(
+                        "aaats_exit_reason_count",
+                        float(cnt),
+                        {"strategy": strat, "reason": reason},
+                        "Exit reason frequency",
+                    )
+                )
             # Time-stop rate (trades that hit time stop vs target)
             total = len(rows)
-            time_stopped = exit_counts.get("time_stop", 0) + exit_counts.get("time_stop_8h", 0)
+            time_stopped = exit_counts.get("time_stop", 0) + exit_counts.get(
+                "time_stop_8h", 0
+            )
             targeted = exit_counts.get("target", 0)
             if total > 0:
-                out.append(_g("aaats_time_stop_rate", time_stopped / total,
-                              {"strategy": strat}, "Fraction of trades hitting time stop"))
-                out.append(_g("aaats_target_hit_rate", targeted / total,
-                              {"strategy": strat}, "Fraction of trades hitting target"))
+                out.append(
+                    _g(
+                        "aaats_time_stop_rate",
+                        time_stopped / total,
+                        {"strategy": strat},
+                        "Fraction of trades hitting time stop",
+                    )
+                )
+                out.append(
+                    _g(
+                        "aaats_target_hit_rate",
+                        targeted / total,
+                        {"strategy": strat},
+                        "Fraction of trades hitting target",
+                    )
+                )
         con.close()
     except Exception as e:
         log.debug(f"collect_trade_lifecycle: {e}")
     return out
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SPRINT 2026-05-11 — INTEGRITY & EXECUTION METRICS
@@ -708,6 +1284,7 @@ def collect_trade_lifecycle() -> list[str]:
 # the new components: decision_ledger, OMS, reconciliation, idempotency,
 # killall, paper_executor. All best-effort — DB-missing returns empty.
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def collect_decision_ledger() -> list[str]:
     """foundation/decision_ledger.py via foundation/audit_trail.AuditTrail."""
@@ -726,9 +1303,14 @@ def collect_decision_ledger() -> list[str]:
                 GROUP BY event_type
             """).fetchall()
             for r in rows:
-                out.append(_g("aaats_audit_events_24h", float(r["c"] or 0),
-                              {"event_type": r["event_type"]},
-                              "Audit-trail entries by event_type (24h)"))
+                out.append(
+                    _g(
+                        "aaats_audit_events_24h",
+                        float(r["c"] or 0),
+                        {"event_type": r["event_type"]},
+                        "Audit-trail entries by event_type (24h)",
+                    )
+                )
 
             # Counts by result in last 24h (GO / NO_GO / REJECTED / SUCCESS / FAILURE)
             rows = conn.execute("""
@@ -737,9 +1319,14 @@ def collect_decision_ledger() -> list[str]:
                 GROUP BY result
             """).fetchall()
             for r in rows:
-                out.append(_g("aaats_audit_results_24h", float(r["c"] or 0),
-                              {"result": r["result"]},
-                              "Audit-trail entries by result (24h)"))
+                out.append(
+                    _g(
+                        "aaats_audit_results_24h",
+                        float(r["c"] or 0),
+                        {"result": r["result"]},
+                        "Audit-trail entries by result (24h)",
+                    )
+                )
 
             # Rejection rate = rejections / total entries 24h
             tot = conn.execute(
@@ -749,28 +1336,41 @@ def collect_decision_ledger() -> list[str]:
                 "SELECT COUNT(*) FROM audit_log WHERE timestamp > datetime('now', '-1 day') AND result = 'REJECTED'"
             ).fetchone()[0]
             rej_rate = (rej / tot * 100) if tot > 0 else 0.0
-            out.append(_g("aaats_audit_rejection_rate_pct", rej_rate,
-                          help_text="% of audit entries with REJECTED result (24h)"))
+            out.append(
+                _g(
+                    "aaats_audit_rejection_rate_pct",
+                    rej_rate,
+                    help_text="% of audit entries with REJECTED result (24h)",
+                )
+            )
 
             # Last entry age in seconds — freshness probe
-            last = conn.execute(
-                "SELECT MAX(timestamp) as t FROM audit_log"
-            ).fetchone()
+            last = conn.execute("SELECT MAX(timestamp) as t FROM audit_log").fetchone()
             if last and last["t"]:
                 try:
                     dt = datetime.fromisoformat(last["t"])
                     if dt.tzinfo is None:
                         dt = dt.replace(tzinfo=timezone.utc)
                     age = (datetime.now(timezone.utc) - dt).total_seconds()
-                    out.append(_g("aaats_audit_last_entry_age_seconds", age,
-                                  help_text="Seconds since most recent audit entry"))
+                    out.append(
+                        _g(
+                            "aaats_audit_last_entry_age_seconds",
+                            age,
+                            help_text="Seconds since most recent audit entry",
+                        )
+                    )
                 except Exception:
                     pass
 
             # Total entries lifetime (sanity gauge — should grow monotonically)
             total = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
-            out.append(_g("aaats_audit_entries_total", float(total),
-                          help_text="Lifetime audit-trail entry count"))
+            out.append(
+                _g(
+                    "aaats_audit_entries_total",
+                    float(total),
+                    help_text="Lifetime audit-trail entry count",
+                )
+            )
     except Exception as e:
         log.debug(f"collect_decision_ledger: {e}")
     return out
@@ -788,23 +1388,38 @@ def collect_oms() -> list[str]:
 
             # Open orders by state (non-terminal)
             non_terminal = ("NEW", "SUBMITTED", "ACK", "WORKING", "PARTIAL_FILL")
-            rows = conn.execute(f"""
+            rows = conn.execute(
+                f"""
                 SELECT state, COUNT(*) as c FROM oms_orders
                 WHERE state IN ({','.join(['?']*len(non_terminal))})
                 GROUP BY state
-            """, non_terminal).fetchall()
+            """,
+                non_terminal,
+            ).fetchall()
             states_seen = {r["state"]: r["c"] for r in rows}
             for s in non_terminal:
-                out.append(_g("aaats_oms_open_orders", float(states_seen.get(s, 0)),
-                              {"state": s}, "Open orders by state"))
+                out.append(
+                    _g(
+                        "aaats_oms_open_orders",
+                        float(states_seen.get(s, 0)),
+                        {"state": s},
+                        "Open orders by state",
+                    )
+                )
 
             # Total orders by every state (lifetime, terminal + non-terminal)
             rows = conn.execute("""
                 SELECT state, COUNT(*) as c FROM oms_orders GROUP BY state
             """).fetchall()
             for r in rows:
-                out.append(_g("aaats_oms_orders_lifetime", float(r["c"] or 0),
-                              {"state": r["state"]}, "Lifetime order count by state"))
+                out.append(
+                    _g(
+                        "aaats_oms_orders_lifetime",
+                        float(r["c"] or 0),
+                        {"state": r["state"]},
+                        "Lifetime order count by state",
+                    )
+                )
 
             # Fill rate = FILLED / (FILLED + CANCELLED + REJECTED + EXPIRED)
             rows = conn.execute("""
@@ -816,8 +1431,13 @@ def collect_oms() -> list[str]:
             filled = counts.get("FILLED", 0)
             terminal = sum(counts.values())
             fill_rate = (filled / terminal * 100) if terminal > 0 else 0.0
-            out.append(_g("aaats_oms_fill_rate_pct", fill_rate,
-                          help_text="% of terminal orders that ended in FILLED"))
+            out.append(
+                _g(
+                    "aaats_oms_fill_rate_pct",
+                    fill_rate,
+                    help_text="% of terminal orders that ended in FILLED",
+                )
+            )
 
             # Avg time-to-fill (created → FILLED) in seconds, last 50 fills
             row = conn.execute("""
@@ -826,16 +1446,26 @@ def collect_oms() -> list[str]:
                 ORDER BY updated_at DESC LIMIT 50
             """).fetchone()
             avg_sec = float(row["avg_sec"] or 0) if row else 0.0
-            out.append(_g("aaats_oms_avg_fill_time_seconds", avg_sec,
-                          help_text="Avg seconds from order create to FILLED (last 50)"))
+            out.append(
+                _g(
+                    "aaats_oms_avg_fill_time_seconds",
+                    avg_sec,
+                    help_text="Avg seconds from order create to FILLED (last 50)",
+                )
+            )
 
             # Transitions per hour — order flow rate proxy
             row = conn.execute("""
                 SELECT COUNT(*) as c FROM oms_transitions
                 WHERE ts > datetime('now', '-1 hour')
             """).fetchone()
-            out.append(_g("aaats_oms_transitions_1h", float(row["c"] or 0),
-                          help_text="OMS state transitions in last hour"))
+            out.append(
+                _g(
+                    "aaats_oms_transitions_1h",
+                    float(row["c"] or 0),
+                    help_text="OMS state transitions in last hour",
+                )
+            )
     except Exception as e:
         log.debug(f"collect_oms: {e}")
     return out
@@ -857,8 +1487,13 @@ def collect_reconciliation() -> list[str]:
                 WHERE module = 'reconcile_intracycle'
                 AND timestamp > datetime('now', '-1 day')
             """).fetchone()[0]
-            out.append(_g("aaats_reconcile_runs_24h", float(tot or 0),
-                          help_text="Reconciliation runs in last 24h"))
+            out.append(
+                _g(
+                    "aaats_reconcile_runs_24h",
+                    float(tot or 0),
+                    help_text="Reconciliation runs in last 24h",
+                )
+            )
 
             # Clean vs drift
             clean = conn.execute("""
@@ -873,10 +1508,20 @@ def collect_reconciliation() -> list[str]:
                 AND timestamp > datetime('now', '-1 day')
                 AND result = 'FAILURE'
             """).fetchone()[0]
-            out.append(_g("aaats_reconcile_clean_24h", float(clean or 0),
-                          help_text="Reconciliation runs with zero drift (24h)"))
-            out.append(_g("aaats_reconcile_drift_24h", float(fail or 0),
-                          help_text="Reconciliation runs with drift detected (24h)"))
+            out.append(
+                _g(
+                    "aaats_reconcile_clean_24h",
+                    float(clean or 0),
+                    help_text="Reconciliation runs with zero drift (24h)",
+                )
+            )
+            out.append(
+                _g(
+                    "aaats_reconcile_drift_24h",
+                    float(fail or 0),
+                    help_text="Reconciliation runs with drift detected (24h)",
+                )
+            )
 
             # Last successful run age
             row = conn.execute("""
@@ -889,8 +1534,13 @@ def collect_reconciliation() -> list[str]:
                     if dt.tzinfo is None:
                         dt = dt.replace(tzinfo=timezone.utc)
                     age = (datetime.now(timezone.utc) - dt).total_seconds()
-                    out.append(_g("aaats_reconcile_last_clean_age_seconds", age,
-                                  help_text="Seconds since last clean reconciliation"))
+                    out.append(
+                        _g(
+                            "aaats_reconcile_last_clean_age_seconds",
+                            age,
+                            help_text="Seconds since last clean reconciliation",
+                        )
+                    )
                 except Exception:
                     pass
 
@@ -905,14 +1555,24 @@ def collect_reconciliation() -> list[str]:
                     if dt.tzinfo is None:
                         dt = dt.replace(tzinfo=timezone.utc)
                     age = (datetime.now(timezone.utc) - dt).total_seconds()
-                    out.append(_g("aaats_reconcile_last_drift_age_seconds", age,
-                                  help_text="Seconds since last drift event"))
+                    out.append(
+                        _g(
+                            "aaats_reconcile_last_drift_age_seconds",
+                            age,
+                            help_text="Seconds since last drift event",
+                        )
+                    )
                 except Exception:
                     pass
             else:
                 # Never had a drift event = huge age (essentially infinite)
-                out.append(_g("aaats_reconcile_last_drift_age_seconds", 999999999.0,
-                              help_text="Seconds since last drift event (999... = never)"))
+                out.append(
+                    _g(
+                        "aaats_reconcile_last_drift_age_seconds",
+                        999999999.0,
+                        help_text="Seconds since last drift event (999... = never)",
+                    )
+                )
     except Exception as e:
         log.debug(f"collect_reconciliation: {e}")
     return out
@@ -932,12 +1592,27 @@ def collect_idempotency() -> list[str]:
                 "SELECT COUNT(*) FROM paper_trades WHERE client_order_id IS NOT NULL"
             ).fetchone()[0]
             coverage = (with_cli / total * 100) if total > 0 else 0.0
-            out.append(_g("aaats_idempotency_coverage_pct", coverage,
-                          help_text="% of trades with client_order_id (idempotent)"))
-            out.append(_g("aaats_idempotency_idempotent_trades", float(with_cli),
-                          help_text="Trades with non-null client_order_id"))
-            out.append(_g("aaats_idempotency_legacy_trades", float(total - with_cli),
-                          help_text="Trades without client_order_id (pre-sprint)"))
+            out.append(
+                _g(
+                    "aaats_idempotency_coverage_pct",
+                    coverage,
+                    help_text="% of trades with client_order_id (idempotent)",
+                )
+            )
+            out.append(
+                _g(
+                    "aaats_idempotency_idempotent_trades",
+                    float(with_cli),
+                    help_text="Trades with non-null client_order_id",
+                )
+            )
+            out.append(
+                _g(
+                    "aaats_idempotency_legacy_trades",
+                    float(total - with_cli),
+                    help_text="Trades without client_order_id (pre-sprint)",
+                )
+            )
 
             # 24h idempotent trades
             with_cli_24h = conn.execute("""
@@ -945,8 +1620,13 @@ def collect_idempotency() -> list[str]:
                 WHERE client_order_id IS NOT NULL
                 AND timestamp > datetime('now', '-1 day')
             """).fetchone()[0]
-            out.append(_g("aaats_idempotency_trades_24h", float(with_cli_24h or 0),
-                          help_text="Idempotent trades in last 24h"))
+            out.append(
+                _g(
+                    "aaats_idempotency_trades_24h",
+                    float(with_cli_24h or 0),
+                    help_text="Idempotent trades in last 24h",
+                )
+            )
     except Exception as e:
         log.debug(f"collect_idempotency: {e}")
     return out
@@ -967,8 +1647,13 @@ def collect_killall() -> list[str]:
                 SELECT COUNT(*) FROM audit_log
                 WHERE event_type = 'HALT' AND result = 'HALTED'
             """).fetchone()[0]
-            out.append(_g("aaats_killall_total_lifetime", float(total or 0),
-                          help_text="Lifetime kill-switch HALT events"))
+            out.append(
+                _g(
+                    "aaats_killall_total_lifetime",
+                    float(total or 0),
+                    help_text="Lifetime kill-switch HALT events",
+                )
+            )
 
             # HALT events 24h
             h24 = conn.execute("""
@@ -976,16 +1661,26 @@ def collect_killall() -> list[str]:
                 WHERE event_type = 'HALT' AND result = 'HALTED'
                 AND timestamp > datetime('now', '-1 day')
             """).fetchone()[0]
-            out.append(_g("aaats_killall_24h", float(h24 or 0),
-                          help_text="Kill-switch HALT events in last 24h"))
+            out.append(
+                _g(
+                    "aaats_killall_24h",
+                    float(h24 or 0),
+                    help_text="Kill-switch HALT events in last 24h",
+                )
+            )
 
             # Telegram-originated killalls specifically (module='telegram_killall')
             tg_total = conn.execute("""
                 SELECT COUNT(*) FROM audit_log
                 WHERE module = 'telegram_killall'
             """).fetchone()[0]
-            out.append(_g("aaats_killall_telegram_total", float(tg_total or 0),
-                          help_text="Lifetime /killall invocations via Telegram"))
+            out.append(
+                _g(
+                    "aaats_killall_telegram_total",
+                    float(tg_total or 0),
+                    help_text="Lifetime /killall invocations via Telegram",
+                )
+            )
 
             # Age of last HALT (for any market)
             row = conn.execute("""
@@ -998,13 +1693,23 @@ def collect_killall() -> list[str]:
                     if dt.tzinfo is None:
                         dt = dt.replace(tzinfo=timezone.utc)
                     age = (datetime.now(timezone.utc) - dt).total_seconds()
-                    out.append(_g("aaats_killall_last_age_seconds", age,
-                                  help_text="Seconds since last kill-switch HALT"))
+                    out.append(
+                        _g(
+                            "aaats_killall_last_age_seconds",
+                            age,
+                            help_text="Seconds since last kill-switch HALT",
+                        )
+                    )
                 except Exception:
                     pass
             else:
-                out.append(_g("aaats_killall_last_age_seconds", 999999999.0,
-                              help_text="Seconds since last HALT (999... = never)"))
+                out.append(
+                    _g(
+                        "aaats_killall_last_age_seconds",
+                        999999999.0,
+                        help_text="Seconds since last HALT (999... = never)",
+                    )
+                )
     except Exception as e:
         log.debug(f"collect_killall: {e}")
     return out
@@ -1028,9 +1733,14 @@ def collect_paper_executor() -> list[str]:
             """).fetchall()
             for ft, cnt in rows:
                 if ft:
-                    out.append(_g("aaats_paper_fill_type_count_7d", float(cnt or 0),
-                                  {"fill_type": ft},
-                                  "Paper-executor fills by type (7d)"))
+                    out.append(
+                        _g(
+                            "aaats_paper_fill_type_count_7d",
+                            float(cnt or 0),
+                            {"fill_type": ft},
+                            "Paper-executor fills by type (7d)",
+                        )
+                    )
 
             # Avg slippage_bps per strategy — last 50 fills
             rows = conn.execute("""
@@ -1043,9 +1753,14 @@ def collect_paper_executor() -> list[str]:
             """).fetchall()
             for strat, avg_slip, c in rows:
                 if avg_slip is not None and strat:
-                    out.append(_g("aaats_paper_avg_slippage_bps", float(avg_slip),
-                                  {"strategy": strat},
-                                  "Avg observed slippage in bps per strategy"))
+                    out.append(
+                        _g(
+                            "aaats_paper_avg_slippage_bps",
+                            float(avg_slip),
+                            {"strategy": strat},
+                            "Avg observed slippage in bps per strategy",
+                        )
+                    )
 
             # Total fees paid (lifetime, USD-equivalent)
             row = conn.execute("""
@@ -1054,8 +1769,13 @@ def collect_paper_executor() -> list[str]:
                 WHERE json_extract(notes, '$.fees_usd') IS NOT NULL
             """).fetchone()
             fees = float(row[0] or 0) if row else 0.0
-            out.append(_g("aaats_paper_fees_total_usd", fees,
-                          help_text="Total fees paid lifetime (from notes)"))
+            out.append(
+                _g(
+                    "aaats_paper_fees_total_usd",
+                    fees,
+                    help_text="Total fees paid lifetime (from notes)",
+                )
+            )
 
             # Fees 24h
             row = conn.execute("""
@@ -1065,8 +1785,13 @@ def collect_paper_executor() -> list[str]:
                 AND timestamp > datetime('now', '-1 day')
             """).fetchone()
             fees_24h = float(row[0] or 0) if row else 0.0
-            out.append(_g("aaats_paper_fees_24h_usd", fees_24h,
-                          help_text="Fees paid in last 24h"))
+            out.append(
+                _g(
+                    "aaats_paper_fees_24h_usd",
+                    fees_24h,
+                    help_text="Fees paid in last 24h",
+                )
+            )
     except Exception as e:
         log.debug(f"collect_paper_executor: {e}")
     return out
@@ -1087,29 +1812,49 @@ def collect_strategy_exceptions() -> list[str]:
     if not isinstance(state, dict) or not state:
         # Emit one zero-valued default series so the alert evaluator has a
         # baseline rather than No-Data (same pattern as collect_share_equality).
-        out.append(_c("aaats_strategy_exception_total", 0.0,
-                      {"strategy": "_none"},
-                      "Per-strategy cycle-exception count (D.1)"))
+        out.append(
+            _c(
+                "aaats_strategy_exception_total",
+                0.0,
+                {"strategy": "_none"},
+                "Per-strategy cycle-exception count (D.1)",
+            )
+        )
     else:
         for strategy_id, entry in state.items():
             if not isinstance(entry, dict):
                 continue
             total = float(entry.get("total_exceptions", 0) or 0)
             consec = float(entry.get("consecutive_exceptions", 0) or 0)
-            out.append(_c("aaats_strategy_exception_total", total,
-                          {"strategy": strategy_id},
-                          "Per-strategy cycle-exception count (D.1)"))
-            out.append(_g("aaats_strategy_consecutive_exceptions", consec,
-                          {"strategy": strategy_id},
-                          "Consecutive cycle-exceptions for the strategy (resets on success)"))
+            out.append(
+                _c(
+                    "aaats_strategy_exception_total",
+                    total,
+                    {"strategy": strategy_id},
+                    "Per-strategy cycle-exception count (D.1)",
+                )
+            )
+            out.append(
+                _g(
+                    "aaats_strategy_consecutive_exceptions",
+                    consec,
+                    {"strategy": strategy_id},
+                    "Consecutive cycle-exceptions for the strategy (resets on success)",
+                )
+            )
     if isinstance(halt_state, dict):
         for strategy_id, entry in halt_state.items():
             if not isinstance(entry, dict):
                 continue
             halted = 1.0 if entry.get("halted") else 0.0
-            out.append(_g("aaats_strategy_halted", halted,
-                          {"strategy": strategy_id},
-                          "Strategy halted at the strategy layer (1=halted)"))
+            out.append(
+                _g(
+                    "aaats_strategy_halted",
+                    halted,
+                    {"strategy": strategy_id},
+                    "Strategy halted at the strategy layer (1=halted)",
+                )
+            )
     return out
 
 
@@ -1125,17 +1870,27 @@ def collect_share_equality() -> list[str]:
     if not isinstance(state, dict) or not state:
         # Emit a zero-valued default so the series exists and increase() can
         # evaluate against a baseline (avoids alert-on-missing-data flapping).
-        out.append(_c("aaats_share_equality_mismatch_total", 0.0,
-                      {"strategy": "_none", "symbol": "_none"},
-                      "SELL/BUY share-equality WARN count (post-INSERT detector)"))
+        out.append(
+            _c(
+                "aaats_share_equality_mismatch_total",
+                0.0,
+                {"strategy": "_none", "symbol": "_none"},
+                "SELL/BUY share-equality WARN count (post-INSERT detector)",
+            )
+        )
         return out
     for key, count in state.items():
         if "|" not in str(key):
             continue
         strategy, _, symbol = str(key).partition("|")
-        out.append(_c("aaats_share_equality_mismatch_total", float(count or 0),
-                      {"strategy": strategy, "symbol": symbol},
-                      "SELL/BUY share-equality WARN count (post-INSERT detector)"))
+        out.append(
+            _c(
+                "aaats_share_equality_mismatch_total",
+                float(count or 0),
+                {"strategy": strategy, "symbol": symbol},
+                "SELL/BUY share-equality WARN count (post-INSERT detector)",
+            )
+        )
     return out
 
 
@@ -1143,27 +1898,35 @@ def _update_price_caches():
     """Fetch BTC/USDT + ETH/USDT daily klines from Binance public API and write
     price_cache JSON files so collect_volatility_radar can compute real ATR/percentile.
     Uses stdlib urllib — no extra deps."""
-    import urllib.request, json as _json
+    import urllib.request
+    import json as _json
+
     for sym_binance, sym_file in (("BTCUSDT", "BTC_USDT"), ("ETHUSDT", "ETH_USDT")):
         try:
             url = f"https://api.binance.com/api/v3/klines?symbol={sym_binance}&interval=1d&limit=120"
-            req = urllib.request.Request(url, headers={"User-Agent": "aaats-metrics/1.0"})
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "aaats-metrics/1.0"}
+            )
             with urllib.request.urlopen(req, timeout=15) as r:
                 kl = _json.loads(r.read())
             closes = [float(k[4]) for k in kl]
-            highs  = [float(k[2]) for k in kl]
-            lows   = [float(k[3]) for k in kl]
+            highs = [float(k[2]) for k in kl]
+            lows = [float(k[3]) for k in kl]
             cache = ROOT / "data" / f"{sym_file}_price_cache.json"
             cache.parent.mkdir(parents=True, exist_ok=True)
-            cache.write_text(_json.dumps({"closes": closes, "highs": highs, "lows": lows}))
+            cache.write_text(
+                _json.dumps({"closes": closes, "highs": highs, "lows": lows})
+            )
         except Exception as e:
             log.debug(f"_update_price_caches[{sym_binance}]: {e}")
 
 
 def _price_cache_loop():
     while True:
-        try: _update_price_caches()
-        except Exception as e: log.warning(f"price cache update failed: {e}")
+        try:
+            _update_price_caches()
+        except Exception as e:
+            log.warning(f"price cache update failed: {e}")
         time.sleep(3600)  # 1h
 
 
@@ -1174,33 +1937,244 @@ def collect_self_up() -> list[str]:
     reflects the same, but this metric is an in-band marker that the
     scrape loop has refreshed at least once (i.e. _scrape_all hasn't
     deadlocked while the HTTP thread keeps serving stale cached data)."""
-    return [_g(
-        "aaats_metrics_exporter_up", 1.0,
-        help_text="1 while the scrape loop has refreshed the cache (in-band liveness, complements Prometheus's up{} target gauge)",
-    )]
+    return [
+        _g(
+            "aaats_metrics_exporter_up",
+            1.0,
+            help_text="1 while the scrape loop has refreshed the cache (in-band liveness, complements Prometheus's up{} target gauge)",
+        )
+    ]
+
+
+def collect_drawdown() -> list[str]:
+    """Layer L8 (content-correctness 2026-05-24) — per-market and portfolio
+    drawdown gauges, source for the L8 Prometheus alerts (-10/-15/-20%).
+
+    Sources (same files the engine reads on every cycle):
+      - data/state-paper/risk_engine_state.paper.json — peak + market_peaks
+      - data/paper_portfolio.json                     — per-market capital
+      - data/*_state.json (per-strategy)              — per-market deployed
+        notional (added to capital → current market equity)
+
+    Emitted series:
+      aaats_market_dd_pct{market}   — (current_equity − market_peak) / market_peak
+      aaats_portfolio_dd_pct        — (sum_current_equity − portfolio_peak) / portfolio_peak
+      aaats_market_peak_usd{market} — debugging: the live peak value
+    """
+    out: list[str] = []
+    try:
+        from execution.paper_trader import _read_state_notional  # type: ignore
+    except Exception:
+        _read_state_notional = lambda: {}  # noqa: E731
+
+    try:
+        engine_state_path = (
+            ROOT / "data" / "state-paper" / "risk_engine_state.paper.json"
+        )
+        portfolio_path = ROOT / "data" / "paper_portfolio.json"
+        eng = _read_json(engine_state_path) if engine_state_path.exists() else {}
+        port = _read_json(portfolio_path) if portfolio_path.exists() else {}
+        if not isinstance(eng, dict):
+            eng = {}
+        if not isinstance(port, dict):
+            port = {}
+        market_peaks = eng.get("market_peaks") or {}
+        portfolio_peak = float(eng.get("peak") or 0.0)
+
+        # Per-market deployed notional rolled up from per-strategy state files.
+        # _STATE_FILES maps state file → strategy ID; for the soak only crypto
+        # strategies have state files. india/us strategies route into the
+        # same dict but with zero notional.
+        strategy_notional = _read_state_notional()
+        # All current strategies are crypto-side. india/us are halted and
+        # never trade, so deployed = 0. If a market column ever opens, the
+        # mapping below is the right place to add it.
+        deployed_per_market: dict[str, float] = {
+            "crypto": float(sum(strategy_notional.values())),
+            "india": 0.0,
+            "us": 0.0,
+        }
+
+        sum_equity = 0.0
+        for market in ("crypto", "india", "us"):
+            mkt_block = port.get(market) or {}
+            capital = float(mkt_block.get("capital") or 0.0)
+            deployed = float(deployed_per_market.get(market, 0.0))
+            equity = capital + deployed
+            sum_equity += equity
+            peak = float(market_peaks.get(market) or 0.0)
+            if peak > 0:
+                dd = (equity - peak) / peak
+            else:
+                dd = 0.0
+            out.append(
+                _g(
+                    "aaats_market_dd_pct",
+                    float(dd),
+                    {"market": market},
+                    "Layer L8 per-market drawdown (fraction, -0.20 == -20%)",
+                )
+            )
+            out.append(
+                _g(
+                    "aaats_market_peak_usd",
+                    peak,
+                    {"market": market},
+                    "Layer L8 per-market peak equity (USD)",
+                )
+            )
+            out.append(
+                _g(
+                    "aaats_market_equity_usd",
+                    equity,
+                    {"market": market},
+                    "Layer L8 per-market current equity (USD)",
+                )
+            )
+
+        if portfolio_peak > 0:
+            port_dd = (sum_equity - portfolio_peak) / portfolio_peak
+        else:
+            port_dd = 0.0
+        out.append(
+            _g(
+                "aaats_portfolio_dd_pct",
+                float(port_dd),
+                help_text="Layer L8 portfolio drawdown (fraction, across all markets)",
+            )
+        )
+        out.append(
+            _g(
+                "aaats_portfolio_peak_usd",
+                portfolio_peak,
+                help_text="Layer L8 portfolio peak equity (USD)",
+            )
+        )
+    except Exception as e:
+        log.debug(f"collect_drawdown: {e}")
+    return out
+
+
+def collect_ledger_divergence() -> list[str]:
+    """Layer L5 (content-correctness 2026-05-24) — per-strategy USD divergence
+    between state-file open notional and trade-DB-derived open notional.
+
+    Source: data/ledger_divergence_alerts.json, written atomically by
+    execution.paper_trader.assert_ledger_consistency_or_halt at cycle top.
+    Strategies that are flat & consistent emit zero (No-Data is the alarm,
+    not the all-clear). Halted strategies also expose
+    aaats_ledger_divergence_halted=1 so a Prometheus alert can fire on
+    "any strategy halted by L5".
+    """
+    out: list[str] = []
+    try:
+        from execution.paper_trader import (
+            LEDGER_ALERT_FILENAME,
+            LEDGER_KNOWN_STRATEGIES,
+        )
+    except Exception:
+        # paper_trader import path drift — emit zeros for the static set
+        LEDGER_ALERT_FILENAME = "ledger_divergence_alerts.json"
+        LEDGER_KNOWN_STRATEGIES = (
+            "C1_stat_arb",
+            "C2_momentum",
+            "C3_altcoin_reversion",
+            "C5b_funding_arb",
+            "C6_bollinger_range",
+        )
+    try:
+        state = _read_json(ROOT / "data" / LEDGER_ALERT_FILENAME)
+        halted = (
+            (state.get("halted_strategies") or {}) if isinstance(state, dict) else {}
+        )
+        watch = (state.get("watch_strategies") or {}) if isinstance(state, dict) else {}
+        # Build the per-strategy max-delta view: halted entries dominate watch.
+        view: dict[str, tuple[float, bool]] = {}
+        for s, info in watch.items():
+            try:
+                view[s] = (abs(float(info.get("delta_usd", 0.0))), False)
+            except (TypeError, ValueError):
+                continue
+        for s, info in halted.items():
+            try:
+                view[s] = (abs(float(info.get("delta_usd", 0.0))), True)
+            except (TypeError, ValueError):
+                view[s] = (0.0, True)
+        # Baseline-zero for known strategies not in either bucket
+        for s in LEDGER_KNOWN_STRATEGIES:
+            view.setdefault(s, (0.0, False))
+        for strat, (delta_usd, is_halted) in view.items():
+            out.append(
+                _g(
+                    "aaats_ledger_divergence_usd",
+                    float(delta_usd),
+                    {"strategy": strat},
+                    "Layer L5 per-strategy USD ledger divergence",
+                )
+            )
+            out.append(
+                _g(
+                    "aaats_ledger_divergence_halted",
+                    1.0 if is_halted else 0.0,
+                    {"strategy": strat},
+                    "Layer L5 strategy halted by divergence detector",
+                )
+            )
+        # Freshness of the last check (so Prometheus can alert on stale signal)
+        if isinstance(state, dict) and state.get("last_check_utc"):
+            try:
+                ts = datetime.fromisoformat(
+                    str(state["last_check_utc"]).replace("Z", "+00:00")
+                )
+                age = (datetime.now(timezone.utc) - ts).total_seconds()
+                out.append(
+                    _g(
+                        "aaats_ledger_divergence_check_age_seconds",
+                        float(age),
+                        help_text="Seconds since last L5 ledger divergence check",
+                    )
+                )
+            except (TypeError, ValueError):
+                pass
+    except Exception as e:
+        log.debug(f"collect_ledger_divergence: {e}")
+    return out
 
 
 def _scrape_all():
     parts = []
-    for fn in [collect_portfolio, collect_trades, collect_phase,
-               collect_strategies, collect_funnel, collect_ml, collect_system,
-               collect_production_readiness,
-               collect_ai_decisions, collect_performance_timeline,
-               collect_volatility_radar, collect_correlation_map,
-               collect_trade_lifecycle,
-               # ── Sprint 2026-05-11 — Integrity & Execution ──
-               collect_decision_ledger,
-               collect_oms,
-               collect_reconciliation,
-               collect_idempotency,
-               collect_killall,
-               collect_paper_executor,
-               collect_share_equality,
-               collect_strategy_exceptions,
-               collect_self_up,
-               ]:
-        try: parts.extend(fn())
-        except Exception as e: log.warning(f"{fn.__name__} failed: {e}")
+    for fn in [
+        collect_portfolio,
+        collect_trades,
+        collect_phase,
+        collect_strategies,
+        collect_funnel,
+        collect_ml,
+        collect_system,
+        collect_production_readiness,
+        collect_ai_decisions,
+        collect_performance_timeline,
+        collect_volatility_radar,
+        collect_correlation_map,
+        collect_trade_lifecycle,
+        # ── Sprint 2026-05-11 — Integrity & Execution ──
+        collect_decision_ledger,
+        collect_oms,
+        collect_reconciliation,
+        collect_idempotency,
+        collect_killall,
+        collect_paper_executor,
+        collect_share_equality,
+        collect_strategy_exceptions,
+        collect_self_up,
+        # ── Sprint 2026-05-24 — Content-correctness L5/L8 ──
+        collect_ledger_divergence,
+        collect_drawdown,
+    ]:
+        try:
+            parts.extend(fn())
+        except Exception as e:
+            log.warning(f"{fn.__name__} failed: {e}")
     return "\n".join(parts)
 
 
@@ -1209,25 +2183,33 @@ def _refresh_loop():
     while True:
         try:
             result = _scrape_all()
-            with _lock: _cached_metrics = result
-        except Exception as e: log.error(f"scrape error: {e}")
+            with _lock:
+                _cached_metrics = result
+        except Exception as e:
+            log.error(f"scrape error: {e}")
         time.sleep(SCRAPE_INTERVAL)
 
 
 class MetricsHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/metrics":
-            with _lock: body = _cached_metrics.encode("utf-8")
+            with _lock:
+                body = _cached_metrics.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
         elif self.path == "/health":
-            self.send_response(200); self.end_headers(); self.wfile.write(b"ok")
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
         else:
-            self.send_response(404); self.end_headers()
-    def log_message(self, fmt, *args): pass
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, fmt, *args):
+        pass
 
 
 def main():
@@ -1236,14 +2218,17 @@ def main():
     db = ROOT / "data" / "paper_trades.db"
     try:
         from execution.paper_trader import _conn as _bootstrap_db
+
         _bootstrap_db(str(db)).close()
         log.info("DB schema bootstrap OK")
     except Exception as _be:
         log.warning(f"DB bootstrap skipped: {_be}")
     _cached_metrics = _scrape_all()
     # Kick the price cache once before first scrape so vol metrics have data immediately
-    try: _update_price_caches()
-    except Exception as _pc_exc: log.warning(f"initial price cache update failed: {_pc_exc}")
+    try:
+        _update_price_caches()
+    except Exception as _pc_exc:
+        log.warning(f"initial price cache update failed: {_pc_exc}")
     p = threading.Thread(target=_price_cache_loop, daemon=True)
     p.start()
     t = threading.Thread(target=_refresh_loop, daemon=True)

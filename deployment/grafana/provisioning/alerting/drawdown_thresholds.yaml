@@ -1,0 +1,167 @@
+apiVersion: 1
+
+# Layer L8 (content-correctness 2026-05-24) — per-market drawdown alerts.
+# Three thresholds at -10/-15/-20% on aaats_market_dd_pct, each requiring
+# 5 minutes of sustained breach to fire (rules out single-cycle spikes).
+#
+# These alerts are NOTIFICATIONS ONLY. They do NOT halt the runner — L9
+# (risk/auto_halt.py) is the auto-halt layer and fires from inside the
+# trading cycle, not Grafana. The page-level alert here exists so the
+# operator gets a Telegram heads-up that L9 has fired (matching the
+# "auto-halt fired" sequence in the operator-return runbook).
+#
+# Source metric: aaats_market_dd_pct{market}
+# Produced by:   monitoring/metrics_exporter.py:collect_drawdown()
+#                reads data/state-paper/risk_engine_state.paper.json (peak)
+#                + data/paper_portfolio.json (current capital)
+#                + per-strategy state files (deployed notional)
+# Scraped by:    aaats-metrics:9091 → Prometheus (job_name=aaats-metrics)
+# Telegram:      via the same `telegram` receiver share_equality uses,
+#                provisioned at telegram_contact.yaml.
+
+groups:
+  - orgId: 1
+    name: market_drawdown
+    folder: AAATS
+    interval: 1m
+    rules:
+      - uid: aaats_market_dd_warn
+        title: Market drawdown WARN (-10%)
+        condition: A_below_warn
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: aaats-prom
+            model:
+              expr: |
+                min by (market) (aaats_market_dd_pct{market!="us"})
+              instant: true
+              intervalMs: 60000
+              maxDataPoints: 43200
+              refId: A
+          - refId: A_below_warn
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              refId: A_below_warn
+              expression: A
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [-0.10]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Market drawdown breached -10% (WARN)"
+          description: "aaats_market_dd_pct dropped below -10% for >5m. Investigate the offending market in Grafana. Source: monitoring/metrics_exporter.py:collect_drawdown."
+        labels:
+          severity: warn
+          component: drawdown
+
+      - uid: aaats_market_dd_critical
+        title: Market drawdown CRITICAL (-15%)
+        condition: A_below_crit
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: aaats-prom
+            model:
+              expr: |
+                min by (market) (aaats_market_dd_pct{market!="us"})
+              instant: true
+              intervalMs: 60000
+              maxDataPoints: 43200
+              refId: A
+          - refId: A_below_crit
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              refId: A_below_crit
+              expression: A
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [-0.15]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Market drawdown breached -15% (CRITICAL)"
+          description: "aaats_market_dd_pct dropped below -15% for >5m. Per-trade -2% stop should be unwinding losing positions. Manual intervention warranted."
+        labels:
+          severity: high
+          component: drawdown
+
+      - uid: aaats_market_dd_page
+        title: Market drawdown PAGE (-20% — L9 auto-halt fired)
+        condition: A_below_page
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: aaats-prom
+            model:
+              expr: |
+                min by (market) (aaats_market_dd_pct{market!="us"})
+              instant: true
+              intervalMs: 60000
+              maxDataPoints: 43200
+              refId: A
+          - refId: A_below_page
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              refId: A_below_page
+              expression: A
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [-0.20]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Market drawdown breached -20% — L9 auto-halt fired"
+          description: "Layer L9 (risk/auto_halt.py) has set the operator halt for the offending market — see data/halt_state.json. DO NOT reset remotely. Follow docs/runbooks/operator_return_resume_procedure.md."
+        labels:
+          severity: high
+          component: drawdown

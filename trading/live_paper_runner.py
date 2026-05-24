@@ -37,7 +37,6 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 # ── project root ──────────────────────────────────────────────────────────────
@@ -46,79 +45,83 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 # ── AAATS imports ─────────────────────────────────────────────────────────────
-from indicators.features import compute_features
-from execution.paper_trader import record_trade
-from execution.market_hours import is_market_open
-from decision.consensus_voting import ConsensusVoting, StrategyVote
-from risk.engine import RiskEngine, RiskDecision
-from risk.position_sizer import PositionSizer
-from observability.alerts import send_alert
-from config.doctrine import LOCKED_STARTING_EQUITY
-from trading.strategy_isolation import run_strategy_with_isolation
+# E402 noqa: these must come after the sys.path.insert above so absolute
+# AAATS package imports resolve in script-mode execution.
+from indicators.features import compute_features  # noqa: E402
+from execution.paper_trader import record_trade  # noqa: E402
+from decision.consensus_voting import ConsensusVoting, StrategyVote  # noqa: E402
+from risk.engine import RiskEngine  # noqa: E402
+from risk.position_sizer import PositionSizer  # noqa: E402
+from observability.alerts import send_alert  # noqa: E402
+from config.doctrine import LOCKED_STARTING_EQUITY  # noqa: E402
+from trading.strategy_isolation import run_strategy_with_isolation  # noqa: E402
 
 # ── Config ────────────────────────────────────────────────────────────────────
-DB_PATH        = str(_ROOT / "data" / "paper_trades.db")
+DB_PATH = str(_ROOT / "data" / "paper_trades.db")
 POSITIONS_FILE = _ROOT / "data" / "paper_positions.json"
 PORTFOLIO_FILE = _ROOT / "data" / "paper_portfolio.json"
-LOG_FILE       = _ROOT / "logs" / "paper_runner.log"
-ENV_FILE       = _ROOT / ".env"
+LOG_FILE = _ROOT / "logs" / "paper_runner.log"
+ENV_FILE = _ROOT / ".env"
 
-N_BARS_HOURLY  = 400   # hourly bars for signal generation (need ≥336 for C1 14d corr; binance allows 1000)
-N_BARS_DAILY   = 500   # daily bars for HMM regime training
+N_BARS_HOURLY = 400  # hourly bars for signal generation (need ≥336 for C1 14d corr; binance allows 1000)
+N_BARS_DAILY = 500  # daily bars for HMM regime training
 
 # Slippage model (fraction of price)
-SLIPPAGE = {"india": 0.0005, "crypto": 0.001}   # NSE 0.05%, Binance 0.10%
+SLIPPAGE = {"india": 0.0005, "crypto": 0.001}  # NSE 0.05%, Binance 0.10%
 
 # Portfolio heat caps
 MAX_PORTFOLIO_HEAT = 0.20  # max 20 % total risk deployed
-MAX_SECTOR_OPEN    = 2     # max open NSE positions per sector
+MAX_SECTOR_OPEN = 2  # max open NSE positions per sector
 
 # ── NSE watchlist: 20 stocks across 6 sectors ─────────────────────────────────
 # (symbol, angel_token, exchange, sector)
 NSE_WATCHLIST = [
     # Financials (6 stocks → max 2 open at a time)
-    ("HDFCBANK",   "1333",  "NSE", "financials"),
-    ("ICICIBANK",  "4963",  "NSE", "financials"),
-    ("KOTAKBANK",  "1922",  "NSE", "financials"),
-    ("SBIN",       "3045",  "NSE", "financials"),
-    ("BAJFINANCE", "317",   "NSE", "financials"),
-    ("AXISBANK",   "5900",  "NSE", "financials"),
+    ("HDFCBANK", "1333", "NSE", "financials"),
+    ("ICICIBANK", "4963", "NSE", "financials"),
+    ("KOTAKBANK", "1922", "NSE", "financials"),
+    ("SBIN", "3045", "NSE", "financials"),
+    ("BAJFINANCE", "317", "NSE", "financials"),
+    ("AXISBANK", "5900", "NSE", "financials"),
     # IT (4 stocks → max 2 open)
-    ("TCS",        "11536", "NSE", "it"),
-    ("INFY",       "1594",  "NSE", "it"),
-    ("HCLTECH",    "7229",  "NSE", "it"),
-    ("WIPRO",      "3787",  "NSE", "it"),
+    ("TCS", "11536", "NSE", "it"),
+    ("INFY", "1594", "NSE", "it"),
+    ("HCLTECH", "7229", "NSE", "it"),
+    ("WIPRO", "3787", "NSE", "it"),
     # Energy / Infra (2 stocks)
-    ("RELIANCE",   "2885",  "NSE", "energy"),
-    ("LT",         "11483", "NSE", "energy"),
+    ("RELIANCE", "2885", "NSE", "energy"),
+    ("LT", "11483", "NSE", "energy"),
     # Consumer / FMCG (4 stocks → max 2 open)
-    ("HINDUNILVR", "1394",  "NSE", "consumer"),
-    ("ITC",        "1660",  "NSE", "consumer"),
-    ("NESTLEIND",  "17963", "NSE", "consumer"),
-    ("ASIANPAINT", "236",   "NSE", "consumer"),
+    ("HINDUNILVR", "1394", "NSE", "consumer"),
+    ("ITC", "1660", "NSE", "consumer"),
+    ("NESTLEIND", "17963", "NSE", "consumer"),
+    ("ASIANPAINT", "236", "NSE", "consumer"),
     # Auto (2 stocks)
-    ("MARUTI",     "10999", "NSE", "auto"),
+    ("MARUTI", "10999", "NSE", "auto"),
     ("BAJAJ-AUTO", "16669", "NSE", "auto"),
     # Pharma (2 stocks)
-    ("SUNPHARMA",  "3351",  "NSE", "pharma"),
-    ("DRREDDY",    "881",   "NSE", "pharma"),
+    ("SUNPHARMA", "3351", "NSE", "pharma"),
+    ("DRREDDY", "881", "NSE", "pharma"),
 ]
 
 # Crypto: diversified 6-symbol universe with lower intra-bucket correlation
 # BTC dominance (BTC.D) fetched separately as a macro regime filter.
 CRYPTO_SYMBOLS = [
-    "BTC/USDT",    # anchor / store-of-value bucket
-    "ETH/USDT",    # smart-contract platform bucket
-    "SOL/USDT",    # alt L1 — BTC correlation ~0.70
-    "LINK/USDT",   # oracle / DeFi infra — BTC beta ~0.65
-    "DOT/USDT",    # cross-chain / parachain — lower DeFi correlation
-    "AVAX/USDT",   # alt L1 — partially uncorrelated with SOL
+    "BTC/USDT",  # anchor / store-of-value bucket
+    "ETH/USDT",  # smart-contract platform bucket
+    "SOL/USDT",  # alt L1 — BTC correlation ~0.70
+    "LINK/USDT",  # oracle / DeFi infra — BTC beta ~0.65
+    "DOT/USDT",  # cross-chain / parachain — lower DeFi correlation
+    "AVAX/USDT",  # alt L1 — partially uncorrelated with SOL
 ]
 
 # BTC dominance threshold: when BTC dominance > 58%, alts underperform — reduce alt exposure
-BTC_DOMINANCE_CUTOFF = 58.0   # % — above this, skip SOL/LINK/DOT/AVAX BUYs
+BTC_DOMINANCE_CUTOFF = 58.0  # % — above this, skip SOL/LINK/DOT/AVAX BUYs
 
-INITIAL_CAPITAL = {"india": 0.0, "crypto": 110.0}  # India halted (capital=0); Crypto budget=$110
+INITIAL_CAPITAL = {
+    "india": 0.0,
+    "crypto": 110.0,
+}  # India halted (capital=0); Crypto budget=$110
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -202,8 +205,12 @@ def _emit_cycle_summary(cycle: int) -> None:
         c3_reason = f"fg={fg}" if fg is not None else "sentiment"
     elif c3_picks:
         c3_reason = f"picks={len(c3_picks)}"
-    c3 = _fmt("C3", _read_count("data/altcoin_reversion_state.json"),
-              skipped=skip_c3, reason=c3_reason)
+    c3 = _fmt(
+        "C3",
+        _read_count("data/altcoin_reversion_state.json"),
+        skipped=skip_c3,
+        reason=c3_reason,
+    )
 
     c5b = _fmt("C5b", None, halted_src=True)
 
@@ -212,14 +219,18 @@ def _emit_cycle_summary(cycle: int) -> None:
         c6_reason = f"fg={fg}" if fg is not None else "sentiment"
     elif c6_picks:
         c6_reason = f"picks={len(c6_picks)}"
-    c6 = _fmt("C6", _read_count("data/bollinger_range_state.json"),
-              skipped=skip_c6, reason=c6_reason)
+    c6 = _fmt(
+        "C6",
+        _read_count("data/bollinger_range_state.json"),
+        skipped=skip_c6,
+        reason=c6_reason,
+    )
 
-    log.info("[runner] cycle %d complete: %s %s %s %s %s",
-             cycle, c1, c2, c3, c5b, c6)
+    log.info("[runner] cycle %d complete: %s %s %s %s %s", cycle, c1, c2, c3, c5b, c6)
 
 
 # ── .env parser ───────────────────────────────────────────────────────────────
+
 
 def _load_env() -> dict[str, str]:
     env: dict[str, str] = {}
@@ -239,10 +250,12 @@ _ENV = _load_env()
 
 def _e(key: str, default: str = "") -> str:
     import os
+
     return os.environ.get(key, _ENV.get(key, default))
 
 
 # ── State helpers ─────────────────────────────────────────────────────────────
+
 
 def _load_json(path: Path, default: dict) -> dict:
     if path.exists():
@@ -269,15 +282,15 @@ def save_positions(p: dict) -> None:
 def load_portfolio() -> dict:
     default = {
         m: {
-            "capital":           INITIAL_CAPITAL[m],
-            "realized_pnl":      0.0,
-            "total_trades":      0,
-            "wins":              0,
-            "losses":            0,
-            "total_win_pct":     0.0,
-            "total_loss_pct":    0.0,
+            "capital": INITIAL_CAPITAL[m],
+            "realized_pnl": 0.0,
+            "total_trades": 0,
+            "wins": 0,
+            "losses": 0,
+            "total_win_pct": 0.0,
+            "total_loss_pct": 0.0,
             # T+1 settlement queue: list of {"amount": float, "settles_on": "YYYY-MM-DD"}
-            "settlement_queue":  [],
+            "settlement_queue": [],
         }
         for m in ("india", "crypto")
     }
@@ -285,6 +298,7 @@ def load_portfolio() -> dict:
 
 
 # ── T+1 Settlement queue (India NSE) ─────────────────────────────────────────
+
 
 def _settle_pending_capital(portfolio: dict, market: str) -> None:
     """
@@ -309,7 +323,9 @@ def _settle_pending_capital(portfolio: dict, market: str) -> None:
         released = sum(settled)
         p["capital"] += released
         p["settlement_queue"] = pending
-        log.info(f"  ✅ T+1 settled: ₹{released:,.0f} now available ({len(settled)} trade(s))")
+        log.info(
+            f"  ✅ T+1 settled: ₹{released:,.0f} now available ({len(settled)} trade(s))"
+        )
 
 
 def _queue_settlement(portfolio: dict, market: str, amount: float) -> None:
@@ -317,14 +333,17 @@ def _queue_settlement(portfolio: dict, market: str, amount: float) -> None:
     if market != "india":
         return
     from datetime import timedelta
+
     # Find next trading day (skip weekends; holiday calendar in market_hours)
     settle_date = datetime.now(timezone.utc).date() + timedelta(days=1)
-    while settle_date.weekday() >= 5:   # skip Saturday/Sunday
+    while settle_date.weekday() >= 5:  # skip Saturday/Sunday
         settle_date += timedelta(days=1)
-    portfolio[market].setdefault("settlement_queue", []).append({
-        "amount":      amount,
-        "settles_on":  settle_date.strftime("%Y-%m-%d"),
-    })
+    portfolio[market].setdefault("settlement_queue", []).append(
+        {
+            "amount": amount,
+            "settles_on": settle_date.strftime("%Y-%m-%d"),
+        }
+    )
     log.info(f"  🕐 T+1: ₹{amount:,.0f} queued → settles {settle_date}")
 
 
@@ -334,14 +353,15 @@ def save_portfolio(p: dict) -> None:
 
 # ── Win-rate stats for Kelly calibration ──────────────────────────────────────
 
+
 def _kelly_params(portfolio: dict, market: str) -> tuple[float, float, float]:
     """Return (win_rate, avg_win_pct, avg_loss_pct) from trade history."""
-    p     = portfolio[market]
-    wins  = max(1, p.get("wins", 0))
+    p = portfolio[market]
+    wins = max(1, p.get("wins", 0))
     total = max(2, p.get("total_trades", 0))
-    win_rate  = wins / total
-    avg_win   = p.get("total_win_pct", 0.03) / max(wins, 1)
-    avg_loss  = p.get("total_loss_pct", 0.02) / max(total - wins, 1)
+    win_rate = wins / total
+    avg_win = p.get("total_win_pct", 0.03) / max(wins, 1)
+    avg_loss = p.get("total_loss_pct", 0.02) / max(total - wins, 1)
     return (
         max(0.35, min(0.70, win_rate)),
         max(0.01, avg_win),
@@ -351,8 +371,8 @@ def _kelly_params(portfolio: dict, market: str) -> tuple[float, float, float]:
 
 # ── Angel One session management ──────────────────────────────────────────────
 
-_angel_client       = None
-_angel_refresh_date = None   # date object — refresh once per calendar day
+_angel_client = None
+_angel_refresh_date = None  # date object — refresh once per calendar day
 
 
 def _get_angel_client(force: bool = False):
@@ -364,22 +384,22 @@ def _get_angel_client(force: bool = False):
     import pyotp
     from SmartApi import SmartConnect
 
-    api_key   = _e("INDIA__ANGEL_API_KEY")
+    api_key = _e("INDIA__ANGEL_API_KEY")
     client_id = _e("INDIA__ANGEL_CLIENT_ID")
-    pin       = _e("INDIA__ANGEL_PIN")
-    totp_sec  = _e("INDIA__ANGEL_TOTP_SECRET")
+    pin = _e("INDIA__ANGEL_PIN")
+    totp_sec = _e("INDIA__ANGEL_TOTP_SECRET")
 
     if not all([api_key, client_id, pin, totp_sec]):
         raise RuntimeError("Angel One credentials missing from .env")
 
     client = SmartConnect(api_key=api_key)
-    totp   = pyotp.TOTP(totp_sec).now()
-    resp   = client.generateSession(client_id, pin, totp)
+    totp = pyotp.TOTP(totp_sec).now()
+    resp = client.generateSession(client_id, pin, totp)
 
     if not resp or not resp.get("status"):
         raise RuntimeError(f"Angel One auth failed: {resp}")
 
-    _angel_client       = client
+    _angel_client = client
     _angel_refresh_date = today
     log.info(f"Angel One session refreshed for {today}")
     return client
@@ -395,27 +415,31 @@ def _get_binance():
     if _binance:
         return _binance
     import ccxt
-    _binance = ccxt.binance({
-        "apiKey":          _e("CRYPTO__BINANCE_API_KEY"),
-        "secret":          _e("CRYPTO__BINANCE_SECRET_KEY"),
-        "enableRateLimit": True,
-    })
+
+    _binance = ccxt.binance(
+        {
+            "apiKey": _e("CRYPTO__BINANCE_API_KEY"),
+            "secret": _e("CRYPTO__BINANCE_SECRET_KEY"),
+            "enableRateLimit": True,
+        }
+    )
     return _binance
 
 
 # ── Regime pipeline cache (fitted on hourly bars, refreshed every 4H) ────────
 
-_regime_pipes: dict[str, object] = {}        # symbol → fitted RegimePipeline
-_regime_fit_ts: dict[str, datetime] = {}     # symbol → last fit timestamp
-_REGIME_REFIT_HOURS = 4                      # refit HMM every 4 hours
+_regime_pipes: dict[str, object] = {}  # symbol → fitted RegimePipeline
+_regime_fit_ts: dict[str, datetime] = {}  # symbol → last fit timestamp
+_REGIME_REFIT_HOURS = 4  # refit HMM every 4 hours
 
 
 def _fit_regime(symbol: str, hourly_df: pd.DataFrame) -> None:
     """Fit HMM regime pipeline on hourly bars and cache it with timestamp."""
     try:
         from intelligence.regime.regime_pipeline import RegimePipeline
+
         pipe = RegimePipeline()
-        pipe.fit(hourly_df)                  # fits directly on hourly OHLCV
+        pipe.fit(hourly_df)  # fits directly on hourly OHLCV
         _regime_pipes[symbol] = pipe
         _regime_fit_ts[symbol] = datetime.now(timezone.utc)
         log.debug(f"  HMM fitted for {symbol} ({len(hourly_df)} hourly bars)")
@@ -445,46 +469,58 @@ def detect_regime(symbol: str, hourly_features: pd.DataFrame) -> tuple[str, floa
 
 
 def _rule_regime(f: pd.DataFrame) -> tuple[str, float]:
-    last    = f.iloc[-1]
-    adx     = float(last.get("adx_14",  0) or 0)
-    ema12   = float(last.get("ema_12",  last.get("close", 1)) or 1)
-    ema26   = float(last.get("ema_26",  last.get("close", 1)) or 1)
-    close   = float(last.get("close",   1) or 1)
-    atr14   = float(last.get("atr_14",  close * 0.01) or close * 0.01)
+    last = f.iloc[-1]
+    adx = float(last.get("adx_14", 0) or 0)
+    ema12 = float(last.get("ema_12", last.get("close", 1)) or 1)
+    ema26 = float(last.get("ema_26", last.get("close", 1)) or 1)
+    close = float(last.get("close", 1) or 1)
+    atr14 = float(last.get("atr_14", close * 0.01) or close * 0.01)
     atr_pct = atr14 / close if close else 0.01
 
     if atr_pct > 0.04:
         return "HIGH_VOLATILITY", 0.72
     if adx > 25:
-        return ("BULL_TREND", min(0.5 + adx / 100, 0.95)) if ema12 > ema26 \
-               else ("BEAR_TREND", min(0.5 + adx / 100, 0.95))
+        return (
+            ("BULL_TREND", min(0.5 + adx / 100, 0.95))
+            if ema12 > ema26
+            else ("BEAR_TREND", min(0.5 + adx / 100, 0.95))
+        )
     return "RANGE_BOUND", 0.60
 
 
 # ── Data fetching ─────────────────────────────────────────────────────────────
 
-def _angel_candles(token: str, exchange: str,
-                   interval: str, days_back: int) -> pd.DataFrame:
-    client  = _get_angel_client()
-    to_dt   = datetime.now()
+
+def _angel_candles(
+    token: str, exchange: str, interval: str, days_back: int
+) -> pd.DataFrame:
+    client = _get_angel_client()
+    to_dt = datetime.now()
     from_dt = to_dt - timedelta(days=days_back)
-    params  = {
-        "exchange":    exchange,
+    params = {
+        "exchange": exchange,
         "symboltoken": token,
-        "interval":    interval,
-        "fromdate":    from_dt.strftime("%Y-%m-%d %H:%M"),
-        "todate":      to_dt.strftime("%Y-%m-%d %H:%M"),
+        "interval": interval,
+        "fromdate": from_dt.strftime("%Y-%m-%d %H:%M"),
+        "todate": to_dt.strftime("%Y-%m-%d %H:%M"),
     }
     resp = client.getCandleData(params)
     if not resp or not resp.get("status") or not resp.get("data"):
         return pd.DataFrame()
     rows = resp["data"]
-    df   = pd.DataFrame([
-        {"open": float(r[1]), "high": float(r[2]),
-         "low":  float(r[3]), "close": float(r[4]),
-         "volume": float(r[5])}
-        for r in rows
-    ], index=pd.to_datetime([r[0] for r in rows], utc=True))
+    df = pd.DataFrame(
+        [
+            {
+                "open": float(r[1]),
+                "high": float(r[2]),
+                "low": float(r[3]),
+                "close": float(r[4]),
+                "volume": float(r[5]),
+            }
+            for r in rows
+        ],
+        index=pd.to_datetime([r[0] for r in rows], utc=True),
+    )
     return df.sort_index()
 
 
@@ -517,12 +553,14 @@ def fetch_crypto_daily(symbol: str) -> pd.DataFrame | None:
     """500 daily bars from Binance for HMM training."""
     try:
         exchange = _get_binance()
-        ohlcv    = exchange.fetch_ohlcv(symbol, "1d", limit=N_BARS_DAILY)
+        ohlcv = exchange.fetch_ohlcv(symbol, "1d", limit=N_BARS_DAILY)
         if not ohlcv or len(ohlcv) < 100:
             return None
-        df = pd.DataFrame(ohlcv, columns=["ts","open","high","low","close","volume"])
+        df = pd.DataFrame(
+            ohlcv, columns=["ts", "open", "high", "low", "close", "volume"]
+        )
         df.index = pd.to_datetime(df["ts"], unit="ms", utc=True)
-        return df[["open","high","low","close","volume"]]
+        return df[["open", "high", "low", "close", "volume"]]
     except Exception as e:
         log.debug(f"  {symbol} daily fetch: {e}")
         return None
@@ -539,13 +577,21 @@ def fetch_btc_dominance() -> float:
     """
     try:
         ex = _get_binance()
-        tickers = ex.fetch_tickers([
-            "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
-            "DOGE/USDT", "ADA/USDT", "AVAX/USDT", "LINK/USDT", "DOT/USDT",
-        ])
-        total_vol = sum(
-            (t.get("quoteVolume") or 0.0) for t in tickers.values()
+        tickers = ex.fetch_tickers(
+            [
+                "BTC/USDT",
+                "ETH/USDT",
+                "BNB/USDT",
+                "SOL/USDT",
+                "XRP/USDT",
+                "DOGE/USDT",
+                "ADA/USDT",
+                "AVAX/USDT",
+                "LINK/USDT",
+                "DOT/USDT",
+            ]
         )
+        total_vol = sum((t.get("quoteVolume") or 0.0) for t in tickers.values())
         btc_vol = (tickers.get("BTC/USDT") or {}).get("quoteVolume") or 0.0
         if total_vol > 0:
             dom = (btc_vol / total_vol) * 100.0
@@ -560,13 +606,15 @@ def fetch_crypto_hourly(symbol: str) -> pd.DataFrame | None:
     """120 hourly bars from Binance for signal generation."""
     try:
         exchange = _get_binance()
-        ohlcv    = exchange.fetch_ohlcv(symbol, "1h", limit=N_BARS_HOURLY)
+        ohlcv = exchange.fetch_ohlcv(symbol, "1h", limit=N_BARS_HOURLY)
         if not ohlcv or len(ohlcv) < 30:
             log.warning(f"  {symbol}: insufficient bars")
             return None
-        df = pd.DataFrame(ohlcv, columns=["ts","open","high","low","close","volume"])
+        df = pd.DataFrame(
+            ohlcv, columns=["ts", "open", "high", "low", "close", "volume"]
+        )
         df.index = pd.to_datetime(df["ts"], unit="ms", utc=True)
-        return df[["open","high","low","close","volume"]]
+        return df[["open", "high", "low", "close", "volume"]]
     except Exception as e:
         log.error(f"  {symbol} hourly fetch: {e}")
         return None
@@ -574,9 +622,12 @@ def fetch_crypto_hourly(symbol: str) -> pd.DataFrame | None:
 
 # ── Strategy votes ────────────────────────────────────────────────────────────
 
+
 def _vote(sid: str, market: str, signal: str, conf: float) -> StrategyVote:
     return StrategyVote(
-        strategy_id=sid, market=market, signal=signal,
+        strategy_id=sid,
+        market=market,
+        signal=signal,
         confidence=max(0.0, min(1.0, conf)),
         health_score=80.0,
         timestamp=datetime.now(timezone.utc).timestamp(),
@@ -586,17 +637,17 @@ def _vote(sid: str, market: str, signal: str, conf: float) -> StrategyVote:
 def vote_ema(f: pd.DataFrame, market: str, regime: str) -> StrategyVote:
     """EMA 12/26 crossover — trend following."""
     last, prev = f.iloc[-1], f.iloc[-2] if len(f) > 1 else f.iloc[-1]
-    e12  = float(last.get("ema_12", 0) or 0)
-    e26  = float(last.get("ema_26", 0) or 0)
-    p12  = float(prev.get("ema_12", 0) or 0)
-    p26  = float(prev.get("ema_26", 0) or 0)
-    rsi  = float(last.get("rsi_14", 50) or 50)
+    e12 = float(last.get("ema_12", 0) or 0)
+    e26 = float(last.get("ema_26", 0) or 0)
+    p12 = float(prev.get("ema_12", 0) or 0)
+    p26 = float(prev.get("ema_26", 0) or 0)
+    rsi = float(last.get("rsi_14", 50) or 50)
 
     cross_up = (e12 > e26) and (p12 <= p26)
     cross_dn = (e12 < e26) and (p12 >= p26)
 
     if cross_up or (e12 > e26 and regime == "BULL_TREND" and rsi < 68):
-        return _vote("ema_crossover", market, "BUY",  0.78 if cross_up else 0.55)
+        return _vote("ema_crossover", market, "BUY", 0.78 if cross_up else 0.55)
     if cross_dn or (e12 < e26 and regime == "BEAR_TREND" and rsi > 32):
         return _vote("ema_crossover", market, "SELL", 0.78 if cross_dn else 0.55)
     return _vote("ema_crossover", market, "HOLD", 0.55)
@@ -605,9 +656,9 @@ def vote_ema(f: pd.DataFrame, market: str, regime: str) -> StrategyVote:
 def vote_rsi(f: pd.DataFrame, market: str, regime: str) -> StrategyVote:
     """RSI mean-reversion — best in RANGE_BOUND."""
     rsi = float(f.iloc[-1].get("rsi_14", 50) or 50)
-    w   = 0.80 if regime == "RANGE_BOUND" else 0.40
+    w = 0.80 if regime == "RANGE_BOUND" else 0.40
     if rsi < 30:
-        return _vote("rsi_reversion", market, "BUY",  w * 0.90)
+        return _vote("rsi_reversion", market, "BUY", w * 0.90)
     if rsi > 70:
         return _vote("rsi_reversion", market, "SELL", w * 0.90)
     return _vote("rsi_reversion", market, "HOLD", 0.50)
@@ -617,11 +668,11 @@ def vote_momentum(f: pd.DataFrame, market: str, regime: str) -> StrategyVote:
     """Return-5 + MACD momentum — confirms trend direction."""
     last = f.iloc[-1]
     ret5 = float(last.get("return_5", 0) or 0)
-    macd = float(last.get("macd",     0) or 0)
+    macd = float(last.get("macd", 0) or 0)
     sigL = float(last.get("macd_signal", 0) or 0)
-    w    = 0.72 if regime in ("BULL_TREND", "BEAR_TREND") else 0.38
+    w = 0.72 if regime in ("BULL_TREND", "BEAR_TREND") else 0.38
     if ret5 > 0.005 and macd > sigL:
-        return _vote("momentum", market, "BUY",  w * 0.82)
+        return _vote("momentum", market, "BUY", w * 0.82)
     if ret5 < -0.005 and macd < sigL:
         return _vote("momentum", market, "SELL", w * 0.82)
     return _vote("momentum", market, "HOLD", 0.48)
@@ -637,13 +688,13 @@ def vote_vwap(f: pd.DataFrame, market: str, regime: str) -> StrategyVote:
     Confirmation needed from regime:
       Only emit strong signal when regime agrees.
     """
-    last  = f.iloc[-1]
+    last = f.iloc[-1]
     close = float(last.get("close", 0) or 0)
-    vwap  = float(last.get("vwap",  last.get("close", close)) or close)
+    vwap = float(last.get("vwap", last.get("close", close)) or close)
     if vwap <= 0 or close <= 0:
         return _vote("vwap", market, "HOLD", 0.45)
 
-    dev = (close - vwap) / vwap   # positive = price above VWAP
+    dev = (close - vwap) / vwap  # positive = price above VWAP
 
     # Strong VWAP signal: price ≥0.15% above VWAP in bull trend → BUY
     if dev > 0.0015 and regime in ("BULL_TREND", "RANGE_BOUND"):
@@ -664,11 +715,11 @@ def vote_bollinger(f: pd.DataFrame, market: str, regime: str) -> StrategyVote:
       < 0.10  → near/below lower band → BUY (oversold)
       > 0.90  → near/above upper band → SELL (overbought)
     """
-    last   = f.iloc[-1]
+    last = f.iloc[-1]
     bb_pct = float(last.get("bb_pct", 0.5) or 0.5)
-    w      = 0.78 if regime == "RANGE_BOUND" else 0.42
+    w = 0.78 if regime == "RANGE_BOUND" else 0.42
     if bb_pct < 0.10:
-        return _vote("bollinger", market, "BUY",  w * (1.0 - bb_pct * 5))
+        return _vote("bollinger", market, "BUY", w * (1.0 - bb_pct * 5))
     if bb_pct > 0.90:
         return _vote("bollinger", market, "SELL", w * ((bb_pct - 0.5) * 1.5))
     return _vote("bollinger", market, "HOLD", 0.48)
@@ -684,11 +735,11 @@ def vote_macd_hist(f: pd.DataFrame, market: str, regime: str) -> StrategyVote:
     if len(f) < 2:
         return _vote("macd_hist", market, "HOLD", 0.45)
     last, prev = f.iloc[-1], f.iloc[-2]
-    h_now  = float(last.get("macd_hist", 0) or 0)
+    h_now = float(last.get("macd_hist", 0) or 0)
     h_prev = float(prev.get("macd_hist", 0) or 0)
-    rsi    = float(last.get("rsi_14", 50) or 50)
+    rsi = float(last.get("rsi_14", 50) or 50)
 
-    rising  = h_now > h_prev
+    rising = h_now > h_prev
     falling = h_now < h_prev
 
     # Bullish: histogram positive AND rising → BUY confirmation
@@ -701,7 +752,7 @@ def vote_macd_hist(f: pd.DataFrame, market: str, regime: str) -> StrategyVote:
         return _vote("macd_hist", market, "SELL", w)
     # Zero-line cross detection — early signal
     if h_prev <= 0 < h_now:
-        return _vote("macd_hist", market, "BUY",  0.68)
+        return _vote("macd_hist", market, "BUY", 0.68)
     if h_prev >= 0 > h_now:
         return _vote("macd_hist", market, "SELL", 0.68)
     return _vote("macd_hist", market, "HOLD", 0.48)
@@ -716,18 +767,21 @@ _voter = ConsensusVoting(
 )
 
 
-def generate_signal(symbol: str, features: pd.DataFrame,
-                    market: str) -> tuple[str, str, float]:
+def generate_signal(
+    symbol: str, features: pd.DataFrame, market: str
+) -> tuple[str, str, float]:
     """Returns (signal, regime, confidence)."""
     regime, r_conf = detect_regime(symbol, features)
 
-    votes  = [
-        vote_ema(features,        market, regime),
-        vote_rsi(features,        market, regime),
-        vote_momentum(features,   market, regime),
-        vote_vwap(features,       market, regime),
-        vote_bollinger(features,  market, regime),   # mean-reversion (strong in RANGE_BOUND)
-        vote_macd_hist(features,  market, regime),   # momentum-of-momentum (early turns)
+    votes = [
+        vote_ema(features, market, regime),
+        vote_rsi(features, market, regime),
+        vote_momentum(features, market, regime),
+        vote_vwap(features, market, regime),
+        vote_bollinger(
+            features, market, regime
+        ),  # mean-reversion (strong in RANGE_BOUND)
+        vote_macd_hist(features, market, regime),  # momentum-of-momentum (early turns)
     ]
     result = _voter.vote(votes)
     signal = result.final_signal
@@ -852,7 +906,11 @@ def _compute_market_equity(
         shares = float(pos.get("shares", 0.0) or 0.0)
         if shares == 0.0:
             continue
-        mark = float(last_price) if sym == symbol else float(pos.get("entry_price", 0.0) or 0.0)
+        mark = (
+            float(last_price)
+            if sym == symbol
+            else float(pos.get("entry_price", 0.0) or 0.0)
+        )
         open_value += shares * mark
     # ASSUMPTION: standalone-strategy positions are crypto-only as of 2026-05-18.
     # If N-series (NSE) strategies ever go standalone, this branch silently
@@ -867,7 +925,7 @@ def _get_sizer(market: str, capital: float) -> PositionSizer:
     if market not in _sizers:
         _sizers[market] = PositionSizer(
             capital=capital,
-            max_position_pct=0.08,     # max 8% per position (Kelly will usually be less)
+            max_position_pct=0.08,  # max 8% per position (Kelly will usually be less)
             max_portfolio_heat=MAX_PORTFOLIO_HEAT,
             kelly_fraction=0.5,
         )
@@ -879,12 +937,12 @@ def _get_sizer(market: str, capital: float) -> PositionSizer:
 def _sector_count(positions: dict, sector: str) -> int:
     """Count open NSE positions in a given sector."""
     return sum(
-        1 for sym, pos in positions["india"].items()
-        if pos.get("sector") == sector
+        1 for sym, pos in positions["india"].items() if pos.get("sector") == sector
     )
 
 
 # ── Circuit-breaker guard (India NSE) ────────────────────────────────────────
+
 
 def _nse_circuit_tripped(features: pd.DataFrame, last_price: float) -> bool:
     """
@@ -910,8 +968,10 @@ def _nse_circuit_tripped(features: pd.DataFrame, last_price: float) -> bool:
 
 # ── Slippage-adjusted fill price (with dynamic scaling for crypto) ─────────────
 
-def _fill_price(price: float, action: str, market: str,
-                features: pd.DataFrame | None = None) -> float:
+
+def _fill_price(
+    price: float, action: str, market: str, features: pd.DataFrame | None = None
+) -> float:
     """
     India: fixed 0.05% (NSE market impact + brokerage).
     Crypto: dynamic — base 0.10% scaled by 24h volatility.
@@ -925,15 +985,15 @@ def _fill_price(price: float, action: str, market: str,
     if market == "crypto" and features is not None and len(features) >= 24:
         try:
             returns = features["close"].pct_change().dropna().tail(24)
-            vol = float(returns.std())          # 24-bar rolling stddev of 1h returns
+            vol = float(returns.std())  # 24-bar rolling stddev of 1h returns
             if vol > 0.05:
-                dyn_slip = 0.004                # 0.40% cap
+                dyn_slip = 0.004  # 0.40% cap
             elif vol > 0.03:
                 dyn_slip = 0.0025
             elif vol > 0.01:
                 dyn_slip = 0.0015
             else:
-                dyn_slip = base_slip            # 0.10% base
+                dyn_slip = base_slip  # 0.10% base
             if dyn_slip != base_slip:
                 log.debug(f"    Dynamic slippage: {dyn_slip:.2%} (vol={vol:.3%})")
             base_slip = dyn_slip
@@ -944,6 +1004,7 @@ def _fill_price(price: float, action: str, market: str,
 
 
 # ── Risk kill-switch gate (shared by execute() and standalone strategies) ────
+
 
 def _mark_to_market_and_decide(
     market: str,
@@ -967,9 +1028,13 @@ def _mark_to_market_and_decide(
     engine after this returns without double-initialising it.
     """
     engine = _get_risk_engine(portfolio)
-    total_equity = _compute_current_equity(positions, portfolio, market, symbol, last_price)
+    total_equity = _compute_current_equity(
+        positions, portfolio, market, symbol, last_price
+    )
     portfolio_decision = engine.update_portfolio(total_equity)
-    market_equity = _compute_market_equity(positions, portfolio, market, symbol, last_price)
+    market_equity = _compute_market_equity(
+        positions, portfolio, market, symbol, last_price
+    )
     market_decision = engine.update_market(market, market_equity)
     # Escalate to the more severe decision.
     if portfolio_decision.action == "HALT_ALL":
@@ -1007,9 +1072,12 @@ def apply_kill_switch_gate(
     #    operator-halt cycle — but the operator-halt cycle is one where
     #    no entries fire anyway, so MTM is still meaningful. Run MTM first
     #    to keep peak/drawdown tracking accurate.
-    decision = _mark_to_market_and_decide(market, symbol, last_price, positions, portfolio)
+    decision = _mark_to_market_and_decide(
+        market, symbol, last_price, positions, portfolio
+    )
     try:
         from foundation.kill_switch import is_halted as _is_halted
+
         if _is_halted(market):
             reason = f"operator halt active for {market}"
             log.warning(f"  🛑 OPERATOR HALT [{market}]: blocks entry {symbol}")
@@ -1044,7 +1112,9 @@ def apply_kill_switch_exit_gate(
     already alerted when the portfolio crossed -20%, and re-alerting on
     every blocked exit would be spam.
     """
-    decision = _mark_to_market_and_decide(market, symbol, last_price, positions, portfolio)
+    decision = _mark_to_market_and_decide(
+        market, symbol, last_price, positions, portfolio
+    )
     if decision.action == "HALT_ALL":
         log.warning(
             f"  🛑 RISK HALT_ALL blocks exit [{market} {symbol}]: {decision.reason}"
@@ -1054,6 +1124,7 @@ def apply_kill_switch_exit_gate(
 
 
 # ── Paper trade execution ─────────────────────────────────────────────────────
+
 
 def execute(
     market: str,
@@ -1066,12 +1137,12 @@ def execute(
     positions: dict,
     portfolio: dict,
     sector: str = "",
-    ml_size_scale: float = 1.0,   # XGBoost confidence multiplier (0.5 or 1.0)
-    strategy: str = "",           # AAATS strategy ID for observability
+    ml_size_scale: float = 1.0,  # XGBoost confidence multiplier (0.5 or 1.0)
+    strategy: str = "",  # AAATS strategy ID for observability
 ) -> None:
-    mkt_pos  = positions[market]
+    mkt_pos = positions[market]
     mkt_port = portfolio[market]
-    capital  = mkt_port["capital"]
+    capital = mkt_port["capital"]
 
     # Portfolio/market HALT gate — extracted to apply_kill_switch_gate() so
     # the C3/C6 standalone path can honor the same kill switch without
@@ -1087,13 +1158,21 @@ def execute(
     # halt.
     if signal == "BUY":
         allowed, _halt_reason = apply_kill_switch_gate(
-            market, symbol, last_price, positions, portfolio,
+            market,
+            symbol,
+            last_price,
+            positions,
+            portfolio,
         )
         if not allowed:
             return
     elif signal == "SELL":
         allowed, _halt_reason = apply_kill_switch_exit_gate(
-            market, symbol, last_price, positions, portfolio,
+            market,
+            symbol,
+            last_price,
+            positions,
+            portfolio,
         )
         if not allowed:
             return
@@ -1104,13 +1183,16 @@ def execute(
         _mark_to_market_and_decide(market, symbol, last_price, positions, portfolio)
 
     engine = _get_risk_engine(portfolio)
-    sizer  = _get_sizer(market, capital)
+    sizer = _get_sizer(market, capital)
 
     # ── BUY logic ──────────────────────────────────────────────────────────
     if signal == "BUY" and symbol not in mkt_pos:
-
         # Sector cap (NSE only)
-        if market == "india" and sector and _sector_count(positions, sector) >= MAX_SECTOR_OPEN:
+        if (
+            market == "india"
+            and sector
+            and _sector_count(positions, sector) >= MAX_SECTOR_OPEN
+        ):
             log.info(f"    ⛔ Sector cap reached for '{sector}' — skip BUY {symbol}")
             return
 
@@ -1119,10 +1201,14 @@ def execute(
             return
 
         # ATR-based position sizing
-        atr      = float(features.iloc[-1].get("atr_14", last_price * 0.015) or last_price * 0.015)
+        atr = float(
+            features.iloc[-1].get("atr_14", last_price * 0.015) or last_price * 0.015
+        )
         win_rate, avg_win, avg_loss = _kelly_params(portfolio, market)
-        size_res = sizer.calculate_position_size(last_price, atr, win_rate, avg_win, avg_loss)
-        shares   = size_res.shares
+        size_res = sizer.calculate_position_size(
+            last_price, atr, win_rate, avg_win, avg_loss
+        )
+        shares = size_res.shares
 
         if shares <= 0:
             log.info(f"    ⚠️  Sizer returned 0 shares for {symbol} — skip")
@@ -1141,31 +1227,42 @@ def execute(
             shares *= ml_size_scale
             log.info(f"    🤖 ML scale={ml_size_scale:.1f} → {shares:.6f} sh")
 
-        fill    = _fill_price(last_price, "BUY", market, features)
-        value   = shares * fill
+        fill = _fill_price(last_price, "BUY", market, features)
+        value = shares * fill
 
         _entry_ts = datetime.now(timezone.utc).isoformat()
         record_trade(
-            db_path=DB_PATH, market=market, symbol=symbol,
-            action="BUY", shares=shares, price=fill,
-            signal=signal, regime=regime, risk_action="ALLOW",
+            db_path=DB_PATH,
+            market=market,
+            symbol=symbol,
+            action="BUY",
+            shares=shares,
+            price=fill,
+            signal=signal,
+            regime=regime,
+            risk_action="ALLOW",
             note=f"atr={atr:.4f} kelly_w={win_rate:.2f} ml_scale={ml_size_scale:.1f}",
             strategy=strategy or f"{market}_directional",
-            entry_time=_entry_ts, size_usd=round(value, 4),
-            notes={"confidence": round(confidence, 4), "ml_scale": ml_size_scale,
-                   "atr_entry": round(atr, 6), "risk_pct": round(size_res.risk_pct, 4)},
+            entry_time=_entry_ts,
+            size_usd=round(value, 4),
+            notes={
+                "confidence": round(confidence, 4),
+                "ml_scale": ml_size_scale,
+                "atr_entry": round(atr, 6),
+                "risk_pct": round(size_res.risk_pct, 4),
+            },
         )
         mkt_pos[symbol] = {
-            "shares":      shares,
+            "shares": shares,
             "entry_price": fill,
-            "entry_time":  datetime.now(timezone.utc).isoformat(),
-            "regime":      regime,
-            "sector":      sector,
-            "atr_entry":   atr,
-            "risk_pct":    size_res.risk_pct,
+            "entry_time": datetime.now(timezone.utc).isoformat(),
+            "regime": regime,
+            "sector": sector,
+            "atr_entry": atr,
+            "risk_pct": size_res.risk_pct,
         }
         sizer.add_position_heat(size_res.risk_pct)
-        mkt_port["capital"]      -= value
+        mkt_port["capital"] -= value
         mkt_port["total_trades"] += 1
 
         log.info(
@@ -1181,24 +1278,38 @@ def execute(
 
     # ── SELL logic ─────────────────────────────────────────────────────────
     elif signal == "SELL" and symbol in mkt_pos:
-        pos    = mkt_pos.pop(symbol)
-        sh     = pos["shares"]
-        fill   = _fill_price(last_price, "SELL", market, features)
-        pnl    = (fill - pos["entry_price"]) * sh
-        value  = fill * sh
+        pos = mkt_pos.pop(symbol)
+        sh = pos["shares"]
+        fill = _fill_price(last_price, "SELL", market, features)
+        pnl = (fill - pos["entry_price"]) * sh
+        value = fill * sh
 
-        _exit_ts  = datetime.now(timezone.utc).isoformat()
-        _pnl_pct  = round(pnl / max(pos["entry_price"] * sh, 1e-9) * 100, 4)
+        _exit_ts = datetime.now(timezone.utc).isoformat()
+        _pnl_pct = round(pnl / max(pos["entry_price"] * sh, 1e-9) * 100, 4)
         record_trade(
-            db_path=DB_PATH, market=market, symbol=symbol,
-            action="SELL", shares=sh, price=fill,
-            signal=signal, regime=regime, risk_action="ALLOW",
-            pnl=pnl, note=f"Entry {pos['entry_price']:.4f}",
+            db_path=DB_PATH,
+            market=market,
+            symbol=symbol,
+            action="SELL",
+            shares=sh,
+            price=fill,
+            signal=signal,
+            regime=regime,
+            risk_action="ALLOW",
+            pnl=pnl,
+            note=f"Entry {pos['entry_price']:.4f}",
             strategy=strategy or f"{market}_directional",
-            entry_time=pos.get("entry_time"), exit_time=_exit_ts,
-            pnl_pct=_pnl_pct, size_usd=round(sh * pos["entry_price"], 4),
-            notes={"confidence": round(confidence, 4), "exit_reason": "signal",
-                   "r_multiple": round(_pnl_pct / max(pos.get("risk_pct", 0.01)*100, 0.01), 2)},
+            entry_time=pos.get("entry_time"),
+            exit_time=_exit_ts,
+            pnl_pct=_pnl_pct,
+            size_usd=round(sh * pos["entry_price"], 4),
+            notes={
+                "confidence": round(confidence, 4),
+                "exit_reason": "signal",
+                "r_multiple": round(
+                    _pnl_pct / max(pos.get("risk_pct", 0.01) * 100, 0.01), 2
+                ),
+            },
         )
         sizer.remove_position_heat(pos.get("risk_pct", 0.01))
 
@@ -1209,15 +1320,15 @@ def execute(
         else:
             mkt_port["capital"] += value
 
-        mkt_port["realized_pnl"]  += pnl
-        mkt_port["total_trades"]  += 1
+        mkt_port["realized_pnl"] += pnl
+        mkt_port["total_trades"] += 1
 
         entry_pct = abs(pnl) / max(pos["entry_price"] * sh, 1e-9)
         if pnl > 0:
-            mkt_port["wins"]          += 1
+            mkt_port["wins"] += 1
             mkt_port["total_win_pct"] += entry_pct
         else:
-            mkt_port["losses"]         += 1
+            mkt_port["losses"] += 1
             mkt_port["total_loss_pct"] += entry_pct
 
         icon = "🟢" if pnl >= 0 else "🔴"
@@ -1226,22 +1337,31 @@ def execute(
             f"| PnL={pnl:+.4f} ({pnl/(pos['entry_price']*sh)*100:+.2f}%)"
         )
         send_alert(
-            f"{icon} SELL {symbol} @ {fill:.4f} "
-            f"| PnL={pnl:+.4f} | regime={regime}",
+            f"{icon} SELL {symbol} @ {fill:.4f} " f"| PnL={pnl:+.4f} | regime={regime}",
             market=market,
         )
 
     # ── Stop-loss check for existing positions ─────────────────────────────
     elif symbol in mkt_pos:
-        pos       = mkt_pos[symbol]
-        pnl_pct   = (last_price - pos["entry_price"]) / pos["entry_price"]
-        atr_stop  = pos.get("atr_entry", last_price * 0.02) * 2.0
-        stop_pct  = atr_stop / pos["entry_price"]
+        pos = mkt_pos[symbol]
+        pnl_pct = (last_price - pos["entry_price"]) / pos["entry_price"]
+        atr_stop = pos.get("atr_entry", last_price * 0.02) * 2.0
+        stop_pct = atr_stop / pos["entry_price"]
         if pnl_pct < -stop_pct:
             log.info(f"  🛑 STOP-LOSS {symbol}: {pnl_pct:.2%} < -{stop_pct:.2%}")
             # Force SELL via recursive call with overridden signal
-            execute(market, symbol, "SELL", regime, confidence, last_price,
-                    features, positions, portfolio, sector)
+            execute(
+                market,
+                symbol,
+                "SELL",
+                regime,
+                confidence,
+                last_price,
+                features,
+                positions,
+                portfolio,
+                sector,
+            )
         else:
             log.info(f"  ⏸  HOLD {symbol} @ {last_price:.4f} (open PnL={pnl_pct:+.2%})")
     else:
@@ -1249,6 +1369,7 @@ def execute(
 
 
 # ── Market startup: HMM training ──────────────────────────────────────────────
+
 
 def warmup_india() -> None:
     """Fetch daily bars and fit HMM for each NSE symbol at startup."""
@@ -1279,7 +1400,7 @@ def _binance_healthy() -> bool:
     """
     try:
         ex = _get_binance()
-        ex.fetch_time()          # lightweight ping — returns server timestamp
+        ex.fetch_time()  # lightweight ping — returns server timestamp
         return True
     except Exception as e:
         msg = f"⚠️ Binance unreachable — skipping crypto cycle: {e}"
@@ -1305,10 +1426,12 @@ def _init_ml_ensemble() -> dict | None:
     # ── 1. Try loading saved real-bar models ──────────────────────────────────
     try:
         from ml.train_from_history import load_saved_models
+
         saved = load_saved_models(max_age_days=7)
         if saved:
             import json as _json
             from pathlib import Path as _Path
+
             meta_path = _Path(DB_PATH).parent / "ml" / "training_meta.json"
             try:
                 meta = _json.loads(meta_path.read_text())
@@ -1326,6 +1449,7 @@ def _init_ml_ensemble() -> dict | None:
     # ── 2. Train fresh from real history (writes saved models for next time) ──
     try:
         from ml.train_from_history import train_all_markets, load_saved_models
+
         log.info("Training new XGBoost models from history (real bars)...")
         meta = train_all_markets(min_samples=500)
         # Reload from disk so we get the persisted version
@@ -1342,6 +1466,7 @@ def _init_ml_ensemble() -> dict | None:
     # ── 3. Synthetic fallback (last resort) ───────────────────────────────────
     try:
         from ml.xgboost_ensemble import build_ensemble, train_all
+
         ensemble = build_ensemble()
         train_all(ensemble)
         log.info("⚠️  XGBoost ensemble ready (SYNTHETIC fallback — not predictive)")
@@ -1363,11 +1488,12 @@ def _score_ml(features: pd.DataFrame, market: str) -> float:
 
     try:
         from ml.xgboost_ensemble import score_signal
+
         last = features.iloc[-1]
 
         # Build feature row — map compute_features() names to model feature names
         row: dict[str, float] = {}
-        col = lambda k, d=0.0: float(last.get(k, d) or d)
+        col = lambda k, d=0.0: float(last.get(k, d) or d)  # noqa: E731
 
         # Returns (compute_features uses "returns", model expects "return_Nd")
         close_arr = features["close"].values
@@ -1384,22 +1510,24 @@ def _score_ml(features: pd.DataFrame, market: str) -> float:
                 (close_arr[-1] - close_arr[-21]) / max(close_arr[-21], 1e-9)
             )
 
-        row["rsi_14"]        = col("rsi_14", 50.0)
-        row["macd"]          = col("macd", 0.0)
-        row["adx_14"]        = col("adx_14", 25.0)
-        row["atr_14"]        = col("atr_14", 0.01)
-        row["atr_pct"]       = col("atr_14", 0.01) / max(float(last.get("close", 1)), 1e-9)
-        row["india_vix"]     = col("india_vix", 15.0)
-        row["vol_ratio"]     = row["vol_ratio_20"] = col("vol_ratio_20", 1.0)
+        row["rsi_14"] = col("rsi_14", 50.0)
+        row["macd"] = col("macd", 0.0)
+        row["adx_14"] = col("adx_14", 25.0)
+        row["atr_14"] = col("atr_14", 0.01)
+        row["atr_pct"] = col("atr_14", 0.01) / max(float(last.get("close", 1)), 1e-9)
+        row["india_vix"] = col("india_vix", 15.0)
+        row["vol_ratio"] = row["vol_ratio_20"] = col("vol_ratio_20", 1.0)
 
         # EMA spread %  = (close - ema50) / ema50
         ema50 = col("ema_50", float(last.get("close", 1)))
         price = col("close", 1.0)
         row["ema_spread_pct"] = (price - ema50) / max(ema50, 1e-9)
 
-        row["hist_vol_20"] = float(
-            features["close"].pct_change().dropna().tail(20).std()
-        ) if len(features) >= 20 else 0.02
+        row["hist_vol_20"] = (
+            float(features["close"].pct_change().dropna().tail(20).std())
+            if len(features) >= 20
+            else 0.02
+        )
 
         confidence = score_signal(market, row, _ml_ensemble)
         log.debug(f"    🤖 ML confidence={confidence:.3f} (market={market})")
@@ -1414,6 +1542,7 @@ def _ml_position_scale(confidence: float) -> float:
     """Map ML confidence to position size multiplier (1.0 / 0.5 / 0.0)."""
     try:
         from ml.xgboost_ensemble import position_scale_from_confidence
+
         return position_scale_from_confidence(confidence)
     except Exception:
         return 1.0  # pass-through if model unavailable
@@ -1421,7 +1550,7 @@ def _ml_position_scale(confidence: float) -> float:
 
 # ── Sentiment: Fear & Greed index (crypto only) ───────────────────────────────
 
-_fear_greed_cache: dict = {}   # {"score": int, "ts": float}
+_fear_greed_cache: dict = {}  # {"score": int, "ts": float}
 
 
 def fetch_fear_greed() -> int | None:
@@ -1431,12 +1560,15 @@ def fetch_fear_greed() -> int | None:
     Cached for 30 minutes to avoid hammering the API.
     """
     import time as _time
+
     now = _time.time()
     if _fear_greed_cache and now - _fear_greed_cache.get("ts", 0) < 1800:
         return _fear_greed_cache["score"]
 
     try:
-        import urllib.request, json as _json
+        import urllib.request
+        import json as _json
+
         with urllib.request.urlopen(
             "https://api.alternative.me/fng/?limit=1", timeout=5
         ) as resp:
@@ -1464,7 +1596,7 @@ def _crypto_sentiment_gate(signal: str) -> str:
     """
     score = fetch_fear_greed()
     if score is None:
-        return signal   # no data → pass through
+        return signal  # no data → pass through
 
     if signal == "BUY":
         if score > 80:
@@ -1475,13 +1607,16 @@ def _crypto_sentiment_gate(signal: str) -> str:
             return "HOLD"
 
     if signal == "SELL" and score < 20:
-        log.info(f"    🟡 Fear&Greed={score} (Extreme Fear) → SELL → HOLD (buy-the-fear)")
+        log.info(
+            f"    🟡 Fear&Greed={score} (Extreme Fear) → SELL → HOLD (buy-the-fear)"
+        )
         return "HOLD"
 
     return signal
 
 
 # ── ATR trailing stop (all markets) ──────────────────────────────────────────
+
 
 def _check_trailing_stops(
     market: str,
@@ -1495,9 +1630,9 @@ def _check_trailing_stops(
     Runs before the main signal loop each cycle.
     Prevents holding through regime changes or blow-up moves.
     """
-    mkt_pos  = positions[market]
+    mkt_pos = positions[market]
     mkt_port = portfolio[market]
-    sizer    = _get_sizer(market, mkt_port["capital"])
+    sizer = _get_sizer(market, mkt_port["capital"])
 
     to_stop: list[str] = []
     for sym, pos in mkt_pos.items():
@@ -1505,9 +1640,9 @@ def _check_trailing_stops(
         if price is None:
             continue
         atr_entry = pos.get("atr_entry", price * 0.015)
-        entry     = pos["entry_price"]
+        entry = pos["entry_price"]
         stop_dist = 2.5 * atr_entry
-        loss      = entry - price   # positive if price fell below entry
+        loss = entry - price  # positive if price fell below entry
 
         if loss >= stop_dist:
             to_stop.append(sym)
@@ -1519,27 +1654,40 @@ def _check_trailing_stops(
     for sym in to_stop:
         if sym not in mkt_pos:
             continue
-        pos   = mkt_pos.pop(sym)
-        sh    = pos["shares"]
+        pos = mkt_pos.pop(sym)
+        sh = pos["shares"]
         price = last_prices[sym]
-        feat  = features_map.get(sym)
-        fill  = _fill_price(price, "SELL", market, feat)
-        pnl   = (fill - pos["entry_price"]) * sh
+        feat = features_map.get(sym)
+        fill = _fill_price(price, "SELL", market, feat)
+        pnl = (fill - pos["entry_price"]) * sh
         value = fill * sh
 
         _atr_exit_ts = datetime.now(timezone.utc).isoformat()
         _atr_pnl_pct = round(pnl / max(pos["entry_price"] * sh, 1e-9) * 100, 4)
         record_trade(
-            db_path=DB_PATH, market=market, symbol=sym,
-            action="SELL", shares=sh, price=fill,
-            signal="SELL", regime=pos.get("regime", "UNKNOWN"),
+            db_path=DB_PATH,
+            market=market,
+            symbol=sym,
+            action="SELL",
+            shares=sh,
+            price=fill,
+            signal="SELL",
+            regime=pos.get("regime", "UNKNOWN"),
             risk_action="ATR_STOP",
-            pnl=pnl, note=f"ATR trailing stop | entry={pos['entry_price']:.4f}",
+            pnl=pnl,
+            note=f"ATR trailing stop | entry={pos['entry_price']:.4f}",
             strategy=f"{market}_directional",
-            entry_time=pos.get("entry_time"), exit_time=_atr_exit_ts,
-            pnl_pct=_atr_pnl_pct, size_usd=round(sh * pos["entry_price"], 4),
-            notes={"exit_reason": "atr_trailing_stop", "confidence": 0.0,
-                   "r_multiple": round(_atr_pnl_pct / max(pos.get("risk_pct", 0.01)*100, 0.01), 2)},
+            entry_time=pos.get("entry_time"),
+            exit_time=_atr_exit_ts,
+            pnl_pct=_atr_pnl_pct,
+            size_usd=round(sh * pos["entry_price"], 4),
+            notes={
+                "exit_reason": "atr_trailing_stop",
+                "confidence": 0.0,
+                "r_multiple": round(
+                    _atr_pnl_pct / max(pos.get("risk_pct", 0.01) * 100, 0.01), 2
+                ),
+            },
         )
         sizer.remove_position_heat(pos.get("risk_pct", 0.01))
 
@@ -1564,8 +1712,8 @@ def _check_trailing_stops(
 # ── India NSE market runner ───────────────────────────────────────────────────
 
 
-
 # -- India NSE market runner --------------------------------------------------
+
 
 def run_india(positions: dict, portfolio: dict) -> None:
     """Run one India NSE paper-trading cycle across the full watchlist."""
@@ -1577,6 +1725,7 @@ def run_india(positions: dict, portfolio: dict) -> None:
     # HALT_ALL. See docs/known_issues/2026-05-23_kill_trigger_investigation.md.
     try:
         from foundation.kill_switch import is_halted as _is_halted
+
         if _is_halted("india"):
             log.warning(
                 "India market under OPERATOR HALT — new entries blocked; "
@@ -1586,6 +1735,7 @@ def run_india(positions: dict, portfolio: dict) -> None:
     except ImportError:
         pass
     from execution.market_hours import require_market_open
+
     if not require_market_open("india"):
         return
 
@@ -1615,16 +1765,23 @@ def run_india(positions: dict, portfolio: dict) -> None:
             # Write price cache for Grafana volatility radar
             try:
                 import json as _json
+
                 cache_key = sym.replace("/", "_")
                 cache_path = _ROOT / "data" / f"{cache_key}_price_cache.json"
                 cache_path.parent.mkdir(parents=True, exist_ok=True)
                 _bars = hourly.tail(200)
-                cache_path.write_text(_json.dumps({
-                    "closes": [float(x) for x in _bars["close"].tolist()],
-                    "highs":  [float(x) for x in _bars["high"].tolist()],
-                    "lows":   [float(x) for x in _bars["low"].tolist()],
-                    "symbol": sym,
-                }, separators=(",", ":")), encoding="utf-8")
+                cache_path.write_text(
+                    _json.dumps(
+                        {
+                            "closes": [float(x) for x in _bars["close"].tolist()],
+                            "highs": [float(x) for x in _bars["high"].tolist()],
+                            "lows": [float(x) for x in _bars["low"].tolist()],
+                            "symbol": sym,
+                        },
+                        separators=(",", ":"),
+                    ),
+                    encoding="utf-8",
+                )
             except Exception as _ce:
                 log.debug("  Price cache write %s: %s", sym, _ce)
         except Exception as exc:
@@ -1654,20 +1811,29 @@ def run_india(positions: dict, portfolio: dict) -> None:
                 continue
 
             execute(
-                market="india", symbol=sym, signal=signal,
-                regime=regime, confidence=conf,
-                last_price=price, features=feat,
-                positions=positions, portfolio=portfolio,
-                sector=sector, ml_size_scale=ml_scale,
+                market="india",
+                symbol=sym,
+                signal=signal,
+                regime=regime,
+                confidence=conf,
+                last_price=price,
+                features=feat,
+                positions=positions,
+                portfolio=portfolio,
+                sector=sector,
+                ml_size_scale=ml_scale,
             )
         except Exception as exc:
             log.error("  NSE %s error: %s", sym, exc, exc_info=True)
 
     # Statistical arbitrage: HDFCBANK / ICICIBANK pair
     from trading.stat_arb import run_stat_arb_india
+
     run_strategy_with_isolation(
-        "N1_stat_arb_india", run_stat_arb_india,
-        portfolio, fetch_nse_hourly,
+        "N1_stat_arb_india",
+        run_stat_arb_india,
+        portfolio,
+        fetch_nse_hourly,
     )
 
     save_positions(positions)
@@ -1676,6 +1842,7 @@ def run_india(positions: dict, portfolio: dict) -> None:
 
 
 # -- Crypto market runner -----------------------------------------------------
+
 
 def run_crypto(positions: dict, portfolio: dict) -> None:
     """Run one crypto paper-trading cycle across CRYPTO_SYMBOLS."""
@@ -1690,11 +1857,66 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
     # HALT_ALL. See docs/known_issues/2026-05-23_kill_trigger_investigation.md.
     try:
         from foundation.kill_switch import is_halted as _is_halted
+
         if _is_halted("crypto"):
             log.warning(
                 "Crypto market under OPERATOR HALT — new entries blocked; "
                 "open positions continue to MTM and may exit on ATR / "
                 "per-trade stop / SELL signal."
+            )
+    except ImportError:
+        pass
+
+    # Layer L5 (content-correctness 2026-05-24): per-strategy ledger divergence
+    # gate. Runs BEFORE any new orders. If state-file open notional and
+    # trade-DB-derived open notional disagree by > $1 for any strategy, that
+    # strategy is halted via risk.strategy_halt and an alert JSON is written
+    # for the metrics exporter / Prometheus chain to surface. The raise is
+    # caught here so divergence in one strategy does not block its siblings —
+    # the halt + alert side-effects persist regardless of the catch.
+    try:
+        from execution.paper_trader import (
+            assert_ledger_consistency_or_halt as _l5_assert,
+            LedgerDivergenceError as _L5Err,
+        )
+
+        try:
+            _l5_assert()
+        except _L5Err as exc:
+            log.error(
+                "[L5] Ledger divergence halted strategy %s by $%.2f — "
+                "sibling strategies continue this cycle.",
+                exc.strategy,
+                exc.delta_usd,
+            )
+        except Exception as exc:
+            # Any unexpected failure inside the detector must NOT take out
+            # the cycle. Log loudly and continue — this is a monitoring
+            # layer, not a hot-path gate.
+            log.error("[L5] divergence detector internal error: %s", exc, exc_info=True)
+    except ImportError:
+        pass
+
+    # Layer L9 (content-correctness 2026-05-24): persistent auto-halt at
+    # doctrine drawdown threshold. Engine's in-memory _halted_markets does
+    # not survive container restart — this layer writes the operator halt
+    # channel (data/halt_state.json) when crypto market DD ≤ -20%. ONE-WAY
+    # trigger: operator must reset manually via kill.py on return. Idempotent
+    # — markets already operator-halted are skipped (no duplicate alert).
+    try:
+        from risk.auto_halt import check_and_persist_doctrine_halt as _l9_check
+
+        try:
+            halted = _l9_check()
+            if halted:
+                log.error(
+                    "[L9] doctrine auto-halt fired for markets=%s — "
+                    "operator manual reset required",
+                    halted,
+                )
+        except Exception as exc:
+            log.error(
+                "[L9] doctrine auto-halt check internal error: %s", exc, exc_info=True
             )
     except ImportError:
         pass
@@ -1709,8 +1931,11 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
     btc_dom = fetch_btc_dominance()
     alt_buy_allowed = btc_dom < BTC_DOMINANCE_CUTOFF
     if not alt_buy_allowed:
-        log.info("  BTC dominance=%.1f%% > %.1f%% -> suppress alt BUYs",
-                 btc_dom, BTC_DOMINANCE_CUTOFF)
+        log.info(
+            "  BTC dominance=%.1f%% > %.1f%% -> suppress alt BUYs",
+            btc_dom,
+            BTC_DOMINANCE_CUTOFF,
+        )
 
     # Prefetch prices + features for ATR trailing stop
     last_prices: dict = {}
@@ -1731,8 +1956,9 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
             log.debug("  Prefetch %s: %s", sym, exc)
 
     # Refit stale HMMs using already-fetched hourly data (free — data is in hand)
-    for sym, hourly in {s: fetch_crypto_hourly(s) for s in CRYPTO_SYMBOLS
-                        if _regime_is_stale(s)}.items():
+    for sym, hourly in {
+        s: fetch_crypto_hourly(s) for s in CRYPTO_SYMBOLS if _regime_is_stale(s)
+    }.items():
         if hourly is not None:
             _fit_regime(sym, hourly)
 
@@ -1769,10 +1995,15 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
                 continue
 
             execute(
-                market="crypto", symbol=sym, signal=signal,
-                regime=regime, confidence=conf,
-                last_price=price, features=feat,
-                positions=positions, portfolio=portfolio,
+                market="crypto",
+                symbol=sym,
+                signal=signal,
+                regime=regime,
+                confidence=conf,
+                last_price=price,
+                features=feat,
+                positions=positions,
+                portfolio=portfolio,
                 ml_size_scale=ml_scale,
             )
         except Exception as exc:
@@ -1780,9 +2011,12 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
 
     # Statistical arbitrage: BTC/ETH spread
     from trading.stat_arb import run_stat_arb_crypto
+
     run_strategy_with_isolation(
-        "C1_stat_arb", run_stat_arb_crypto,
-        portfolio, fetch_crypto_hourly,
+        "C1_stat_arb",
+        run_stat_arb_crypto,
+        portfolio,
+        fetch_crypto_hourly,
         full_positions=positions,
         full_portfolio=portfolio,
     )
@@ -1800,9 +2034,12 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
 
     # 4H Momentum Breakout: BTC/ETH only (C2)
     from trading.momentum_breakout import run_momentum_breakout_crypto
+
     run_strategy_with_isolation(
-        "C2_momentum_breakout", run_momentum_breakout_crypto,
-        portfolio["crypto"], fetch_crypto_hourly,
+        "C2_momentum_breakout",
+        run_momentum_breakout_crypto,
+        portfolio["crypto"],
+        fetch_crypto_hourly,
     )
 
     # ──────────────────────────────────────────────────────────────────
@@ -1822,13 +2059,14 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
         from markets.crypto.allocator import allocate
         from markets.crypto.correlation_guard import filter_plan_by_clusters
         from markets.crypto.sentiment import (
-            get_fear_greed, should_skip_c3_on_sentiment, should_skip_c6_on_sentiment,
+            get_fear_greed,
+            should_skip_c3_on_sentiment,
+            should_skip_c6_on_sentiment,
         )
 
         # 1. Liquid universe
         universe = get_liquid_universe(top_n=50)
-        log.info("[scanner] universe size=%d  top5=%s",
-                 len(universe), universe[:5])
+        log.info("[scanner] universe size=%d  top5=%s", len(universe), universe[:5])
 
         # 2. Score each candidate per strategy
         ranked = score_universe(
@@ -1845,8 +2083,11 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
         )
 
         # 4. Correlation guard — block over-concentration in correlated clusters
-        open_syms = [s for s, p in positions.get("crypto", {}).items()
-                     if abs(float((p or {}).get("shares", 0.0) or 0.0)) > 1e-9]
+        open_syms = [
+            s
+            for s, p in positions.get("crypto", {}).items()
+            if abs(float((p or {}).get("shares", 0.0) or 0.0)) > 1e-9
+        ]
         plan = filter_plan_by_clusters(plan, open_symbols=open_syms)
 
         # 5. Sentiment gates per strategy
@@ -1856,27 +2097,41 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
 
         c3_picks = plan.get("c3") or None
         c6_picks = plan.get("c6") or None
-        log.info("[scanner] final plan: c3=%s  c6=%s  fg=%s  skip_c3=%s  skip_c6=%s",
-                 c3_picks, c6_picks, fg, _skip_c3, _skip_c6)
-        _LAST_CYCLE_CONTEXT.update({
-            "fg": fg,
-            "skip_c3": _skip_c3,
-            "skip_c6": _skip_c6,
-            "c3_picks": list(c3_picks or []),
-            "c6_picks": list(c6_picks or []),
-        })
+        log.info(
+            "[scanner] final plan: c3=%s  c6=%s  fg=%s  skip_c3=%s  skip_c6=%s",
+            c3_picks,
+            c6_picks,
+            fg,
+            _skip_c3,
+            _skip_c6,
+        )
+        _LAST_CYCLE_CONTEXT.update(
+            {
+                "fg": fg,
+                "skip_c3": _skip_c3,
+                "skip_c6": _skip_c6,
+                "c3_picks": list(c3_picks or []),
+                "c6_picks": list(c6_picks or []),
+            }
+        )
     except Exception as exc:
-        log.error("  Scanner pipeline error (falling back to hardcoded SYMBOLS): %s",
-                  exc, exc_info=True)
+        log.error(
+            "  Scanner pipeline error (falling back to hardcoded SYMBOLS): %s",
+            exc,
+            exc_info=True,
+        )
 
     # Altcoin Beta Mean Reversion: scanner picks or hardcoded SYMBOLS (C3)
     if _skip_c3:
         log.info("  C3 SKIPPED this cycle (sentiment gate: extreme greed)")
     else:
         from trading.altcoin_reversion import run_altcoin_reversion_crypto
+
         run_strategy_with_isolation(
-            "C3_altcoin_reversion", run_altcoin_reversion_crypto,
-            portfolio["crypto"], fetch_crypto_hourly,
+            "C3_altcoin_reversion",
+            run_altcoin_reversion_crypto,
+            portfolio["crypto"],
+            fetch_crypto_hourly,
             symbols=c3_picks,
             full_positions=positions,
             full_portfolio=portfolio,
@@ -1890,8 +2145,10 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
         log.info("  C6 SKIPPED this cycle (sentiment gate: extreme greed)")
     else:
         from trading.bollinger_range import run_bollinger_range_crypto
+
         run_strategy_with_isolation(
-            "C6_bollinger_range", run_bollinger_range_crypto,
+            "C6_bollinger_range",
+            run_bollinger_range_crypto,
             portfolio["crypto"],
             fetch_crypto_hourly,
             open_positions=positions.get("crypto", {}),
@@ -1902,12 +2159,14 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
 
     save_positions(positions)
     save_portfolio(portfolio)
-    log.info("== Crypto cycle done | capital=USD %.2f ==", portfolio["crypto"]["capital"])
+    log.info(
+        "== Crypto cycle done | capital=USD %.2f ==", portfolio["crypto"]["capital"]
+    )
 
 
 # -- Main scheduler -----------------------------------------------------------
 
-CYCLE_INTERVAL_SEC = 900   # 15-minute cycles
+CYCLE_INTERVAL_SEC = 900  # 15-minute cycles
 
 
 def main(market: str = "crypto") -> None:
@@ -1923,7 +2182,9 @@ def main(market: str = "crypto") -> None:
     log.info("AAATS Live Paper Trader v2.1 starting  [market=%s]", market)
     log.info("  Cycle    : %d seconds (15 min)", CYCLE_INTERVAL_SEC)
     log.info("  ML       : XGBoost confidence gating")
-    log.info("  Strategies: C1 stat-arb, C2 momentum, C3 alt-reversion, C5b funding-arb")
+    log.info(
+        "  Strategies: C1 stat-arb, C2 momentum, C3 alt-reversion, C5b funding-arb"
+    )
 
     # D.3 — Schema-drift smoke at startup. Refuse-to-start on INVALID; tolerate
     # MISSING / MISSING_OPTIONAL because the runner is the writer for several
@@ -1933,6 +2194,7 @@ def main(market: str = "crypto") -> None:
     # a single fail-fast at boot is preferable to days of silent staleness.
     try:
         from state.schemas import validate_all_state_files
+
         smoke = validate_all_state_files(_ROOT / "data")
         for key, status in smoke.items():
             if status.startswith("INVALID"):
@@ -1952,9 +2214,12 @@ def main(market: str = "crypto") -> None:
 
     # Load persistent state
     positions = load_positions()
-    portfolio  = load_portfolio()
-    log.info("  Portfolio: crypto=USD%.2f  india=INR%.2f",
-             portfolio["crypto"]["capital"], portfolio["india"]["capital"])
+    portfolio = load_portfolio()
+    log.info(
+        "  Portfolio: crypto=USD%.2f  india=INR%.2f",
+        portfolio["crypto"]["capital"],
+        portfolio["india"]["capital"],
+    )
 
     # Warm up HMM regime models
     if market in ("crypto", "both"):
@@ -2000,6 +2265,7 @@ def main(market: str = "crypto") -> None:
         # fires foundation.kill_switch.halt() and exits main loop.
         try:
             from scripts.reconcile_intracycle import reconcile_now
+
             _markets_to_check = []
             if market in ("crypto", "both"):
                 _markets_to_check.append("crypto")
@@ -2019,28 +2285,35 @@ def main(market: str = "crypto") -> None:
                     )
                     break
         except Exception as _rec_exc:
-            log.error("Reconciliation worker error (non-fatal): %s",
-                      _rec_exc)
+            log.error("Reconciliation worker error (non-fatal): %s", _rec_exc)
 
         elapsed = time.time() - cycle_start
         sleep_sec = max(0, CYCLE_INTERVAL_SEC - elapsed)
         # heartbeat write — so monitoring/metrics_exporter emits a fresh heartbeat_age_seconds
         try:
-            import json as _json, datetime as _dt, pathlib as _pl
+            import json as _json
+            import datetime as _dt
+            import pathlib as _pl
+
             _hb = _pl.Path("data/heartbeat.json")
             _hb.parent.mkdir(parents=True, exist_ok=True)
-            _hb.write_text(_json.dumps({
-                "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
-                "cycle": int(cycle),
-                "market": market,
-                "cycle_duration_seconds": float(elapsed),
-            }))
+            _hb.write_text(
+                _json.dumps(
+                    {
+                        "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                        "cycle": int(cycle),
+                        "market": market,
+                        "cycle_duration_seconds": float(elapsed),
+                    }
+                )
+            )
         except Exception as _hb_exc:
             log.debug("heartbeat write failed: %s", _hb_exc)
         # D.4 cycle_log: idempotent CREATE + INSERT per cycle. Feeds the
         # daily digest's "Cycles run (last 24h)" line.
         try:
             import sqlite3 as _sql3
+
             _db = _pl.Path("data/paper_trades.db")
             if _db.exists():
                 _conn = _sql3.connect(str(_db))
@@ -2052,8 +2325,11 @@ def main(market: str = "crypto") -> None:
                     )
                     _conn.execute(
                         "INSERT INTO cycle_log (timestamp, cycle, market) VALUES (?, ?, ?)",
-                        (_dt.datetime.now(_dt.timezone.utc).isoformat(),
-                         int(cycle), market),
+                        (
+                            _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                            int(cycle),
+                            market,
+                        ),
                     )
                     _conn.commit()
                 finally:
@@ -2070,9 +2346,13 @@ def main(market: str = "crypto") -> None:
 
 if __name__ == "__main__":
     import argparse
+
     ap = argparse.ArgumentParser(description="AAATS paper trading runner")
-    ap.add_argument("--market", default="crypto",
-                    choices=["crypto", "india", "both"],
-                    help="Market(s) to run (default: crypto)")
+    ap.add_argument(
+        "--market",
+        default="crypto",
+        choices=["crypto", "india", "both"],
+        help="Market(s) to run (default: crypto)",
+    )
     args = ap.parse_args()
     main(market=args.market)

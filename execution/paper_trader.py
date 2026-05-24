@@ -18,6 +18,7 @@ A trades VIEW aliases paper_trades for the metrics exporter.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -26,7 +27,6 @@ from typing import Any, Literal
 
 from foundation.logger import get_logger
 from execution.idempotency import (
-    _ensure_dedupe_index,
     dedupe_check,
     make_client_order_id,
     make_correlation_id,
@@ -162,7 +162,11 @@ def _check_sell_buy_share_equality(
             _log.warning(
                 "SELL/BUY share mismatch | strategy={} symbol={} "
                 "buy_shares={} sell_shares={} delta={:.10f}",
-                strategy, symbol, buy_shares, sell_shares, delta,
+                strategy,
+                symbol,
+                buy_shares,
+                sell_shares,
+                delta,
             )
             _bump_share_mismatch_counter(strategy, symbol)
     except sqlite3.OperationalError:
@@ -179,7 +183,12 @@ def _bump_share_mismatch_counter(strategy: str, symbol: str) -> None:
     """
     try:
         import json as _json
-        counter_path = Path(__file__).resolve().parent.parent / "data" / "share_equality_mismatches.json"
+
+        counter_path = (
+            Path(__file__).resolve().parent.parent
+            / "data"
+            / "share_equality_mismatches.json"
+        )
         state: dict[str, int] = {}
         if counter_path.exists():
             try:
@@ -248,7 +257,12 @@ def record_trade(
         _log.warning(
             "PAPER duplicate suppressed | cli_id={} | prior_trade={} | "
             "{} {} @ {:.4f} x{:.6f} strat={}",
-            client_order_id[:12], prior_id, action, symbol, price, shares,
+            client_order_id[:12],
+            prior_id,
+            action,
+            symbol,
+            price,
+            shares,
             strategy or signal,
         )
         return prior_id  # caller treats this as success — same intent already recorded
@@ -273,10 +287,29 @@ def record_trade(
             "risk_action,pnl,note,strategy,entry_time,exit_time,pnl_pct,notes,size_usd,"
             "client_order_id,correlation_id) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (trade_id, ts, market, symbol, action, shares, price, value,
-             signal, regime, risk_action, pnl, note,
-             strategy, entry_time, exit_time, pnl_pct, notes_json, size_usd,
-             client_order_id, correlation_id),
+            (
+                trade_id,
+                ts,
+                market,
+                symbol,
+                action,
+                shares,
+                price,
+                value,
+                signal,
+                regime,
+                risk_action,
+                pnl,
+                note,
+                strategy,
+                entry_time,
+                exit_time,
+                pnl_pct,
+                notes_json,
+                size_usd,
+                client_order_id,
+                correlation_id,
+            ),
         )
         c.commit()
     except sqlite3.IntegrityError as exc:
@@ -299,13 +332,15 @@ def record_trade(
                 "PAPER record_trade IntegrityError without a winning row "
                 "(client_order_id={}); re-raising — likely schema mismatch "
                 "or constraint violation, NOT a duplicate race: {}",
-                client_order_id[:12], exc,
+                client_order_id[:12],
+                exc,
             )
             raise
         winner = row[0]
         _log.warning(
             "PAPER duplicate race resolved by UNIQUE INDEX | cli_id={} | winner={}",
-            client_order_id[:12], winner,
+            client_order_id[:12],
+            winner,
         )
         return winner
     if action == "SELL":
@@ -313,7 +348,276 @@ def record_trade(
     c.close()
     _log.info(
         "PAPER {} {} @ {:.4f} x{:.6f} | strat={} | regime={} | cli={} | corr={}",
-        action, symbol, price, shares, strategy or signal, regime,
-        client_order_id[:12], correlation_id[:8],
+        action,
+        symbol,
+        price,
+        shares,
+        strategy or signal,
+        regime,
+        client_order_id[:12],
+        correlation_id[:8],
     )
     return trade_id
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Layer L5 — Ledger divergence detector (content-correctness 2026-05-24)
+# ──────────────────────────────────────────────────────────────────────────
+# Why this lives in paper_trader.py: the dual-ledger bug class L5 catches is
+# divergence between the paper-execution layer's two outputs (paper_trades.db
+# rows vs data/*_state.json strategy position files). Both are written by
+# code that routes through this module's record_trade and the per-strategy
+# emitters. risk/engine.py is about live risk gates (drawdown halts); ledger
+# reconciliation is not its responsibility. A new top-level module was
+# considered but rejected — adding cross-module imports for a concern that
+# lives squarely inside paper-execution responsibilities is worse than
+# expanding this file.
+#
+# How it differs from scripts/reconcile_intracycle.py: the existing reconciler
+# runs POST-cycle, compares at the SYMBOL granularity, and HALTs the WHOLE
+# runner via foundation/kill_switch on critical drift. L5 runs PRE-cycle,
+# compares at the STRATEGY granularity, and halts only the offending strategy
+# via risk/strategy_halt so siblings keep trading.
+
+# Strategies whose state-file schema uses entry_alloc (pair-keyed) rather
+# than size_usd (symbol-keyed). For these, the trade DB's per-symbol
+# net-shares view is structurally wrong (legs are long+short, not entries),
+# so we compare state's entry_alloc against the most-recent BUY-leg notional.
+_PAIR_STRATEGIES: frozenset[str] = frozenset(("C1_stat_arb", "C5b_funding_arb"))
+
+# Per-state-file → (strategy_id, notional_key) dispatch. Files that don't
+# exist on a given image are silently skipped.
+_STATE_FILES: dict[str, tuple[str, str]] = {
+    "altcoin_reversion_state.json": ("C3_altcoin_reversion", "size_usd"),
+    "bollinger_range_state.json": ("C6_bollinger_range", "size_usd"),
+    "momentum_state.json": ("C2_momentum", "size_usd"),
+    "stat_arb_state.json": ("C1_stat_arb", "entry_alloc"),
+    "funding_arb_state.json": ("C5b_funding_arb", "size_usd"),
+}
+
+# Known strategy set for baseline-zero emission (Grafana sees "all clear"
+# instead of "No-Data" when a strategy hasn't traded yet).
+LEDGER_KNOWN_STRATEGIES: tuple[str, ...] = tuple(
+    sid for (sid, _key) in _STATE_FILES.values()
+)
+
+# Rounding tolerance: below this, deltas are floating-point noise.
+_LEDGER_ROUNDING_TOLERANCE_USD = 0.50
+
+# Halt threshold: above this, the strategy is genuinely diverged.
+_LEDGER_HALT_THRESHOLD_USD = 1.00
+
+LEDGER_ALERT_FILENAME = "ledger_divergence_alerts.json"
+
+
+class LedgerDivergenceError(RuntimeError):
+    """Raised by assert_ledger_consistency_or_halt for the first strategy
+    that exceeds the halt threshold. The caller is expected to catch this
+    per-strategy so one bad strategy does not block its siblings — the
+    halt + alert side-effects fire BEFORE the raise, so even with the
+    raise being caught upstream the state mutations persist."""
+
+    def __init__(self, strategy: str, delta_usd: float):
+        super().__init__(f"{strategy}: ledger divergence ${delta_usd:.2f}")
+        self.strategy = strategy
+        self.delta_usd = delta_usd
+
+
+def _ledger_data_dir() -> Path:
+    return Path(os.environ.get("AAATS_DATA", "/app/data"))
+
+
+def _read_state_notional(state_dir: Path | None = None) -> dict[str, float]:
+    """Source A: per-strategy expected open notional from data/*_state.json."""
+    if state_dir is None:
+        state_dir = _ledger_data_dir()
+    out: dict[str, float] = {}
+    for fname, (strategy_id, key) in _STATE_FILES.items():
+        f = state_dir / fname
+        if not f.exists():
+            continue
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            # Some state files have been observed as [] when empty.
+            out[strategy_id] = 0.0
+            continue
+        total = 0.0
+        for pos in data.values():
+            if not isinstance(pos, dict):
+                continue
+            try:
+                total += float(pos.get(key, 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+        out[strategy_id] = total
+    return out
+
+
+def _read_db_notional(
+    db_path: str,
+    pair_strategy_passthrough: dict[str, float] | None = None,
+) -> dict[str, float]:
+    """Source B: per-strategy open notional derived from paper_trades.db.
+
+    Non-pair strategies: sum(net_shares × most-recent-BUY-price) over symbols.
+    A position with net_shares ≤ 0 is treated as closed (skipped).
+
+    Pair strategies (C1_stat_arb, C5b_funding_arb): trade-DB inference is
+    structurally unsafe — both legs are recorded as plain BUY/SELL rows so
+    the most-recent-BUY heuristic conflates LONG_A entries with LONG_B
+    closing legs. Matches the reconciler's Path A posture from
+    docs/known_issues/2026-05-23_btc_eth_ledger_drift.md: pair strategies
+    are excluded from db-side computation; their state-file notional is
+    passed through unchanged (so divergence == 0 by construction). Full
+    pair-strategy divergence detection is post-soak unified-ledger work.
+
+    pair_strategy_passthrough: caller-supplied state notionals for pair
+    strategies; if provided, those values are copied through so the
+    state-vs-db delta is zero. Omitting it leaves pair strategies absent
+    from the result (also yielding divergence == 0 against state).
+    """
+    out: dict[str, float] = {}
+    if not Path(db_path).exists():
+        return out
+    try:
+        c = sqlite3.connect(db_path)
+    except sqlite3.OperationalError:
+        return out
+    try:
+        net_rows = c.execute(
+            "SELECT strategy, symbol, "
+            "SUM(CASE WHEN action='BUY' THEN shares ELSE -shares END) AS net_shares "
+            "FROM paper_trades WHERE strategy IS NOT NULL AND strategy != '' "
+            "AND strategy NOT IN ('C1_stat_arb', 'C5b_funding_arb') "
+            "GROUP BY strategy, symbol"
+        ).fetchall()
+        last_buy_price: dict[tuple[str, str], float] = {}
+        for strategy, symbol, price in c.execute(
+            "SELECT strategy, symbol, price FROM paper_trades "
+            "WHERE action='BUY' "
+            "AND strategy NOT IN ('C1_stat_arb', 'C5b_funding_arb') "
+            "ORDER BY timestamp DESC"
+        ).fetchall():
+            last_buy_price.setdefault((strategy, symbol), float(price))
+
+        for strategy, symbol, net_shares in net_rows:
+            if net_shares is None or float(net_shares) <= 1e-12:
+                continue
+            price = last_buy_price.get((strategy, symbol))
+            if price is None:
+                continue
+            out[strategy] = out.get(strategy, 0.0) + float(net_shares) * price
+    finally:
+        c.close()
+
+    # Pair strategies: pass state-side notional through unchanged.
+    if pair_strategy_passthrough:
+        for strategy in _PAIR_STRATEGIES:
+            if strategy in pair_strategy_passthrough:
+                out[strategy] = float(pair_strategy_passthrough[strategy])
+    return out
+
+
+def compute_ledger_divergence(
+    db_path: str | None = None,
+    state_dir: Path | None = None,
+) -> dict[str, float]:
+    """Returns {strategy: delta_usd} for any strategy where state-file notional
+    differs from trade-DB-derived notional by more than $0.50 (rounding tol).
+
+    Sign convention: positive delta means state > db (state file claims more
+    open notional than the trade log supports — the more common "lost-write"
+    bug); negative means db > state (orphan trade row with no state entry).
+    A strategy that is flat & consistent in both views is omitted.
+
+    Pair strategies (C1_stat_arb, C5b_funding_arb) compare state's entry_alloc
+    against the most-recent BUY-leg notional — see _read_db_notional.
+    """
+    if db_path is None:
+        db_path = os.environ.get("DB_PATH", "/app/data/paper_trades.db")
+    state = _read_state_notional(state_dir=state_dir)
+    db = _read_db_notional(
+        db_path,
+        pair_strategy_passthrough={s: state.get(s, 0.0) for s in _PAIR_STRATEGIES},
+    )
+    out: dict[str, float] = {}
+    for s in set(state) | set(db):
+        delta = state.get(s, 0.0) - db.get(s, 0.0)
+        if abs(delta) > _LEDGER_ROUNDING_TOLERANCE_USD:
+            out[s] = round(delta, 4)
+    return out
+
+
+def _write_divergence_alert(payload: dict[str, Any]) -> None:
+    """Atomic temp+mv into data/ledger_divergence_alerts.json so the metrics
+    exporter + Prometheus alert chain can pick it up. Cross-container handoff
+    matches the data/share_equality_mismatches.json pattern."""
+    try:
+        f = _ledger_data_dir() / LEDGER_ALERT_FILENAME
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.replace(f)
+    except Exception as exc:
+        _log.warning("ledger_divergence_alerts.json write failed: {}", exc)
+
+
+def assert_ledger_consistency_or_halt(
+    db_path: str | None = None,
+    state_dir: Path | None = None,
+) -> None:
+    """Called once per cycle near the top, BEFORE any new orders.
+
+    For each strategy whose absolute divergence exceeds $1:
+      1. risk.strategy_halt.halt_strategy(...) marks it un-dispatchable.
+      2. Atomically write data/ledger_divergence_alerts.json.
+      3. Raise LedgerDivergenceError on the first offender (halt + alert
+         side-effects persist even if the raise is caught upstream).
+    For strategies in the rounding-tolerance < delta ≤ halt-threshold band,
+    write a "watch_strategies" entry so the gauge surfaces the warning but
+    do not halt.
+    """
+    from risk.strategy_halt import halt_strategy
+
+    diverged = compute_ledger_divergence(db_path=db_path, state_dir=state_dir)
+    if not diverged:
+        # Clear any stale alert file so the exporter goes back to baseline-zero.
+        f = _ledger_data_dir() / LEDGER_ALERT_FILENAME
+        if f.exists():
+            payload = {
+                "last_check_utc": datetime.now(timezone.utc).isoformat(),
+                "halted_strategies": {},
+                "watch_strategies": {},
+            }
+            _write_divergence_alert(payload)
+        return
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    payload: dict[str, Any] = {
+        "last_check_utc": now_iso,
+        "halted_strategies": {},
+        "watch_strategies": {},
+    }
+    first_offender: tuple[str, float] | None = None
+    for strategy, delta in diverged.items():
+        abs_delta = abs(delta)
+        if abs_delta > _LEDGER_HALT_THRESHOLD_USD:
+            reason = f"ledger divergence ${abs_delta:.2f} (state vs DB)"
+            halt_strategy(strategy, reason, consecutive_exceptions=0)
+            payload["halted_strategies"][strategy] = {
+                "delta_usd": delta,
+                "halted_at": now_iso,
+                "reason": reason,
+            }
+            if first_offender is None:
+                first_offender = (strategy, abs_delta)
+        else:
+            payload["watch_strategies"][strategy] = {"delta_usd": delta}
+
+    _write_divergence_alert(payload)
+    if first_offender is not None:
+        s, d = first_offender
+        raise LedgerDivergenceError(s, d)
