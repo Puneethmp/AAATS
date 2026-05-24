@@ -1,0 +1,132 @@
+name: AAATS activity floor monitor
+
+# Layer L7 (content-correctness 2026-05-24): catches "ML gate stuck, no
+# entries firing for days" — the "bot looks alive but isn't trading" failure
+# mode that L1-L4 cron-resilience cannot see (cron pushes keep happening
+# while no trades fire). Runs on github.com infrastructure so it survives
+# total box outage and complements the in-box monitors.
+#
+# Scope during D.5 paper soak (2026-05-25 onward): only the crypto book is
+# expected to trade. India + US are intentionally halted per
+# data/halt_state.json (operator-confirmed 2026-05-24). When those books
+# come back online, add them to ACTIVE_MARKETS in the script below.
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force_alert:
+        description: 'Force the alert to fire (simulates 9999h silence)'
+        required: false
+        default: 'false'
+      threshold_hours:
+        description: 'Override the silence threshold (default 48)'
+        required: false
+        default: '48'
+
+permissions:
+  contents: read
+
+jobs:
+  check-activity-floor:
+    runs-on: ubuntu-latest
+    if: vars.LIVENESS_ENABLED == 'true'
+    steps:
+      - name: Checkout (shallow, runtime DB only)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            runtime/paper_trades.db
+            runtime/STATUS.md
+            runtime/auto_cron_heartbeat.json
+          sparse-checkout-cone-mode: false
+
+      - name: Compute last-trade age per active market
+        id: probe
+        env:
+          THRESHOLD_H: ${{ github.event.inputs.threshold_hours || '48' }}
+          FORCE: ${{ github.event.inputs.force_alert || 'false' }}
+        run: |
+          set -uo pipefail
+          DB=runtime/paper_trades.db
+
+          if [ ! -f "$DB" ]; then
+            echo "result=db_missing" >> "$GITHUB_OUTPUT"
+            echo "stale_markets=" >> "$GITHUB_OUTPUT"
+            echo "details=runtime/paper_trades.db missing — autopush drift" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Activity floor check $(date -u +%FT%TZ)"
+              echo "- DB missing: auto-cron may have stopped committing runtime/paper_trades.db"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # ACTIVE_MARKETS: markets we expect to be trading. india + us are
+          # intentionally halted during D.5 soak (per memory project-aaats-
+          # d5-soak-window). Update when more markets come online.
+          ACTIVE_MARKETS="crypto"
+          RESULT="green"
+          DETAILS=""
+          STALE_MARKETS=""
+          NOW_EPOCH=$(date -u +%s)
+
+          for MKT in $ACTIVE_MARKETS; do
+            if [ "$FORCE" = "true" ]; then
+              AGE_H=9999.00
+              LAST="(forced-test)"
+            else
+              LAST=$(sqlite3 "$DB" "SELECT COALESCE(MAX(timestamp), '') FROM paper_trades WHERE market = '$MKT'")
+              if [ -z "$LAST" ]; then
+                AGE_H=99999.00
+                LAST="(never)"
+              else
+                # Normalise to UTC seconds via python (date(1) cannot parse fractional + tz reliably)
+                LAST_EPOCH=$(python3 -c "import datetime,sys; t=sys.argv[1].replace('Z','+00:00'); d=datetime.datetime.fromisoformat(t); d=d if d.tzinfo else d.replace(tzinfo=datetime.timezone.utc); print(int(d.timestamp()))" "$LAST")
+                AGE_H=$(python3 -c "print(f'{($NOW_EPOCH - $LAST_EPOCH) / 3600.0:.2f}')")
+              fi
+            fi
+            LINE="- ${MKT}: last trade ${LAST}, age ${AGE_H}h (threshold ${THRESHOLD_H}h)"
+            DETAILS="${DETAILS}${LINE} | "
+            IS_STALE=$(python3 -c "print('1' if float('$AGE_H') > float('$THRESHOLD_H') else '0')")
+            if [ "$IS_STALE" = "1" ]; then
+              RESULT="stale"
+              STALE_MARKETS="${STALE_MARKETS}${MKT}(${AGE_H}h) "
+            fi
+          done
+
+          {
+            echo "## Activity floor check $(date -u +%FT%TZ)"
+            echo "- markets checked: $ACTIVE_MARKETS"
+            echo "- details: $DETAILS"
+            if [ "$RESULT" = "stale" ]; then
+              echo "- status: STALE — alert will fire for: $STALE_MARKETS"
+            else
+              echo "- status: green"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "result=$RESULT" >> "$GITHUB_OUTPUT"
+          echo "stale_markets=$STALE_MARKETS" >> "$GITHUB_OUTPUT"
+          echo "details=$DETAILS" >> "$GITHUB_OUTPUT"
+
+      - name: Alert Telegram on activity-floor breach
+        if: steps.probe.outputs.result == 'stale'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          STALE: ${{ steps.probe.outputs.stale_markets }}
+          DETAILS: ${{ steps.probe.outputs.details }}
+        run: |
+          set -uo pipefail
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+            echo "::error::TELEGRAM secrets not set; activity-floor alert cannot fire."
+            exit 1
+          fi
+          MSG="AAATS ACTIVITY FLOOR: silent markets: ${STALE}. Check ML gate / regime detector. Details: ${DETAILS}"
+          curl -sS --max-time 15 -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            -d "text=${MSG}" >/dev/null
+          echo "activity-floor alert sent to Telegram" >> "$GITHUB_STEP_SUMMARY"
