@@ -1,0 +1,104 @@
+ROLLBACK BASELINE — 2026-05-24 content-correctness sprint (L5-L10)
+
+Sprint scope: pre-departure D.5 paper soak hardening — adds 6 content-
+correctness monitoring layers (L5 ledger divergence, L6 reconciler posture
+verification, L7 activity floor, L8 drawdown alerts, L9 persistent auto-
+halt, L10 disk/repo/commit-rate watchdog) on top of the L1-L4 cron-
+resilience layers shipped 2026-05-24 earlier in the day.
+
+Built/deployed: 2026-05-24 between 10:19Z (Phase 1 verification) and 13:10Z
+(L10 synthetic tests). Operator-confirmed dirty-tree handling: stashed
+6 source files (paper_trader/runner/exporter/engine/strategy_halt/reconciler)
+of pre-existing autoformatter + scaffolding WIP via:
+
+  git stash push -m "pre-L5-content-sprint WIP 2026-05-24 ..."
+
+WIP is recoverable via `git stash list` + `git stash pop`. The other ~380
+dirty files in the workstation tree are pre-existing CRLF/whitespace churn
+and were intentionally untouched per the sprint's acceptance-criteria
+clause "dirty tree only pre-existing CRLF churn".
+
+================================================================
+POST-DEPLOY SHAs (verified 2026-05-24 13:10Z on box)
+================================================================
+
+  /home/aaats/aaats/execution/paper_trader.py
+      ef605d2dcdde8e40191c01247d37afc6b9ff2924733c0ffc54b79e816ea836d6
+  /home/aaats/aaats/trading/live_paper_runner.py
+      b9c359b77cb4d488038ea8fe0b94b389e24cfb74e058acd8bc4abe7112561743
+  /home/aaats/aaats/monitoring/metrics_exporter.py
+      65d4f479445f56f86fe74a1289249858aab6e424b34b57f6034e9b0e0a036293
+  /home/aaats/aaats/risk/auto_halt.py
+      a5322f3ab39db6a905e6582131356e0bc782f2fe81ffa64f7350818741bc93fc
+  /home/aaats/aaats/deployment/docker-compose.yml
+      878bed7488c54fbd36b2d2ee9c4bbb2cb9a9077af5fe4e02743b586601ffdc6b
+  /home/aaats/bin/aaats-autopush.sh
+      2b3090f1b3447ad383e4a0a63f5b75916cb347ba52e0ee787df8eef3f8888b09
+  /home/aaats/bin/aaats-heartbeat-checker.sh
+      8382adc38cad6b14db06e2cd0e7ec95739967e4c7768ce567dd060efeac1f4a9
+  /srv/aaats/compose/grafana/provisioning/alerting/drawdown_thresholds.yaml
+      853516baf0bca19ca5b238af57554d54830d13e20d06f7f46ea2c558900592d3
+
+================================================================
+PRE-DEPLOY BASELINES (in this directory)
+================================================================
+
+  paper_trader.py.pre              — pre-L5
+  live_paper_runner.py.pre         — pre-L5/L9 cycle-top hooks
+  metrics_exporter.py.pre          — pre-L5/L8 collectors
+  engine.py.pre                    — captured (no edits made; reserved for future)
+  strategy_halt.py.pre             — captured (no edits made; reserved for future)
+  reconcile_intracycle.py.pre      — captured (no edits made; L6 verified Path A in place)
+  aaats-autopush-v3.sh.pre         — pre-L7-fix (aaats-engine → aaats-paper-crypto)
+  aaats-heartbeat-checker.sh.pre   — pre-L10 disk/repo/commit-rate extension
+  docker-compose.yml.pre           — pre-L8 state-crypto-paper:ro mount on aaats-metrics
+
+================================================================
+ROLLBACK PROCEDURE (per file)
+================================================================
+
+For Python sources (paper_trader / runner / exporter / auto_halt):
+
+  python -c "import paramiko; ssh = paramiko.SSHClient();
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy());
+    ssh.connect('100.95.126.39', username='aaats');
+    sftp = ssh.open_sftp();
+    sftp.put('.rollback/2026-05-24_content_correctness/<file>.pre',
+             '/home/aaats/aaats/<path>')"
+  ssh aaats@100.95.126.39 'cd /home/aaats/aaats && \
+    docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-paper-crypto aaats-metrics'
+
+To remove L9 specifically (auto_halt.py), also remove the runner block
+(grep "Layer L9" in trading/live_paper_runner.py and delete the try/except).
+
+For risk/auto_halt.py (new file, no pre-baseline):
+  ssh aaats@100.95.126.39 'rm /home/aaats/aaats/risk/auto_halt.py'
+  (then redeploy runner from rollback baseline)
+
+For box-cron scripts:
+  python -c "...(SCP)..." then atomic mv to /home/aaats/bin/<script>
+  (no rebuild needed)
+
+For Grafana drawdown_thresholds.yaml:
+  rm /srv/aaats/compose/grafana/provisioning/alerting/drawdown_thresholds.yaml
+  docker restart aaats-grafana   # ~10s downtime
+
+For aaats-metrics state-paper mount (compose change):
+  Apply docker-compose.yml.pre to /home/aaats/aaats/deployment/docker-compose.yml
+  docker compose -f /home/aaats/aaats/deployment/docker-compose.yml up -d --no-deps aaats-metrics
+
+================================================================
+VERIFICATION RECIPE (after rollback)
+================================================================
+
+  # L5 should be absent:
+  docker exec aaats-paper-crypto python -c "from execution.paper_trader import compute_ledger_divergence" 2>&1
+  # → ImportError after rollback
+
+  # L8 gauge should be absent:
+  curl -s http://aaats-metrics:9091/metrics | grep aaats_market_dd_pct
+  # → no output after rollback
+
+  # L9 should be absent:
+  docker exec aaats-paper-crypto python -c "from risk.auto_halt import check_and_persist_doctrine_halt" 2>&1
+  # → ImportError after rollback
