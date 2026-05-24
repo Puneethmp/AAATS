@@ -67,4 +67,75 @@ fi
 # fresh — clear any prior cooldown so next stale event alerts immediately
 rm -f "$STATE_FILE" 2>/dev/null || true
 echo "[$(date -u +%FT%TZ)] heartbeat fresh (age=${AGE}s, last=$(python3 -c "import json; print(json.load(open('$HEARTBEAT_FILE')).get('last_tick',''))"))"
+
+# ─────────────────────────────────────────────────────────────────────
+# Layer L10 (content-correctness 2026-05-24) — disk + repo-bloat +
+# commit-rate watchdogs. Each fires via the same aaats-cron-alert
+# helper with a distinct prefix. Each has its own cooldown state file
+# so a disk-full event doesn't suppress a commit-rate alert.
+# ─────────────────────────────────────────────────────────────────────
+
+# Helper: fire an alert with a layer-specific cooldown (independent of
+# the heartbeat cooldown above).
+fire_layered_alert() {
+  local layer="$1"
+  local msg="$2"
+  local state="/tmp/aaats-l10-${layer}-last-alert"
+  local last=0
+  [ -f "$state" ] && last=$(cat "$state" 2>/dev/null || echo 0)
+  local since=$((NOW - last))
+  if [ "$since" -lt "$COOLDOWN_SEC" ]; then
+    echo "[$(date -u +%FT%TZ)] L10/${layer} suppressed (cooldown ${since}s): $msg"
+    return 0
+  fi
+  "$ALERT" "L10/${layer}: $msg" || true
+  echo "$NOW" > "$state"
+  echo "[$(date -u +%FT%TZ)] L10/${layer} alert: $msg"
+}
+
+# ── L10/DISK ── /home disk usage > 85% ────────────────────────────────
+DISK_PCT=$(df --output=pcent /home 2>/dev/null | tail -1 | tr -d '% ' || echo 0)
+if [ -n "$DISK_PCT" ] && [ "$DISK_PCT" -gt 85 ]; then
+  fire_layered_alert DISK "/home at ${DISK_PCT}% (>85% threshold)"
+fi
+
+# ── L10/REPO ── runtime_repo .git grew by >500MB in 24h ──────────────
+REPO_DIR="${REPO_DIR:-/srv/aaats/runtime_repo}"
+REPO_STATE="${REPO_STATE:-/tmp/aaats-l10-repo-prev-size}"
+GIT_BYTES=$(du -sb "$REPO_DIR/.git" 2>/dev/null | awk '{print $1}' || echo 0)
+if [ -n "$GIT_BYTES" ] && [ "$GIT_BYTES" -gt 0 ]; then
+  if [ -f "$REPO_STATE" ]; then
+    PREV_BYTES=$(awk '{print $1}' "$REPO_STATE" 2>/dev/null || echo 0)
+    PREV_EPOCH=$(awk '{print $2}' "$REPO_STATE" 2>/dev/null || echo 0)
+    AGE_HRS=$(( (NOW - PREV_EPOCH) / 3600 ))
+    if [ "$AGE_HRS" -ge 24 ] && [ "$PREV_BYTES" -gt 0 ]; then
+      GROWTH_BYTES=$((GIT_BYTES - PREV_BYTES))
+      # 500MB = 524288000 bytes
+      if [ "$GROWTH_BYTES" -gt 524288000 ]; then
+        GROWTH_MB=$((GROWTH_BYTES / 1048576))
+        fire_layered_alert REPO ".git grew ${GROWTH_MB}MB in ${AGE_HRS}h (>500MB threshold) — likely large blob committed by auto-cron; gc may be needed"
+      fi
+      # Refresh baseline after a comparison window completes (whether or
+      # not it tripped) so the next 24h window starts fresh.
+      echo "${GIT_BYTES} ${NOW}" > "$REPO_STATE"
+    fi
+  else
+    # First run — capture baseline, no alert until next 24h window.
+    echo "${GIT_BYTES} ${NOW}" > "$REPO_STATE"
+  fi
+fi
+
+# ── L10/COMMIT_RATE ── auto-cron commits in 24h < 80 ─────────────────
+# Expected ~96 = 24h * 4/h (cron tick every 15 min). Empty no-op ticks
+# don't show up in git log because the autopush only commits on changes,
+# so this is sensitive to "autopush ran but had nothing to commit" if
+# that's the only failure pattern — but it's still a useful coarse
+# liveness check that's independent of the heartbeat file.
+if [ -d "$REPO_DIR/.git" ]; then
+  COMMITS_24H=$(git -C "$REPO_DIR" log origin/main --since="24 hours ago" --grep="^auto:" --oneline 2>/dev/null | wc -l | tr -d ' ')
+  if [ -n "$COMMITS_24H" ] && [ "$COMMITS_24H" -lt 80 ]; then
+    fire_layered_alert COMMIT_RATE "auto-cron commits in last 24h = ${COMMITS_24H} (<80 expected); cron may be ticking but producing empty commits"
+  fi
+fi
+
 exit 0
