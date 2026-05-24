@@ -1,0 +1,74 @@
+name: AAATS liveness monitor
+
+on:
+  schedule:
+    - cron: '*/20 * * * *'
+  workflow_dispatch:
+    inputs:
+      force_alert:
+        description: 'Force a test alert by simulating 0 commits'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+
+jobs:
+  check-cron-liveness:
+    runs-on: ubuntu-latest
+    # Gated until operator confirms TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID
+    # secrets are set. To enable, set repository variable LIVENESS_ENABLED=true.
+    # See docs/runbooks/auto_cron_recovery.md for setup.
+    if: vars.LIVENESS_ENABLED == 'true'
+    steps:
+      - name: Checkout (shallow)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Count auto-cron commits in last 30 minutes
+        id: count
+        run: |
+          set -uo pipefail
+          if [ "${{ github.event.inputs.force_alert }}" = "true" ]; then
+            COUNT=0
+            LAST_SHA="(forced-test)"
+            LAST_WHEN="(forced-test)"
+          else
+            COUNT=$(git log origin/main --since="30 minutes ago" --grep="^auto:" --oneline | wc -l | tr -d ' ')
+            LAST_SHA=$(git log origin/main -1 --format='%h')
+            LAST_WHEN=$(git log origin/main -1 --format='%aI')
+          fi
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "last_sha=$LAST_SHA" >> "$GITHUB_OUTPUT"
+          echo "last_when=$LAST_WHEN" >> "$GITHUB_OUTPUT"
+          echo "## Liveness check $(date -u +%FT%TZ)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- auto-cron commits in last 30 min: **$COUNT**" >> "$GITHUB_STEP_SUMMARY"
+          echo "- last commit: \`$LAST_SHA\` at $LAST_WHEN" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$COUNT" = "0" ]; then
+            echo "- status: **STALE — alert will fire**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- status: green" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Alert Telegram on stale push stream
+        if: steps.count.outputs.count == '0'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          LAST_SHA: ${{ steps.count.outputs.last_sha }}
+          LAST_WHEN: ${{ steps.count.outputs.last_when }}
+        run: |
+          set -uo pipefail
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+            echo "::error::TELEGRAM secrets are not set; alert cannot fire."
+            echo "Set them in repo Settings -> Secrets and variables -> Actions." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          MSG="AAATS LIVENESS ALERT: no auto-cron push for >30min. Last commit: ${LAST_SHA} at ${LAST_WHEN}. Check box: aaats@100.95.126.39"
+          curl -sS --max-time 15 -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            -d "text=${MSG}" >/dev/null
+          echo "alert sent to Telegram" >> "$GITHUB_STEP_SUMMARY"
