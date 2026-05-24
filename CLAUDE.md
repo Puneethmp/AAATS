@@ -21,6 +21,21 @@ Deploy scripts refuse uncommitted manifest files; use `--allow-dirty` in genuine
 
 Compose layout: `aaats-paper-crypto` belongs to project `deployment` (config under `/home/aaats/aaats/deployment/`); Grafana/Prometheus belong to project `aaats-base` (config under `/srv/aaats/compose/`). A `compose down` from one path does not touch the other.
 
+### Cron liveness — 4-layer monitoring (canonical 2026-05-24)
+
+The auto-cron push stream is monitored by four independent layers. Full design: [docs/decisions/2026-05-24_auto_cron_resilience.md](docs/decisions/2026-05-24_auto_cron_resilience.md). Runbook: [docs/runbooks/auto_cron_recovery.md](docs/runbooks/auto_cron_recovery.md).
+
+| Layer | Where it lives | What it catches | How to verify |
+|---|---|---|---|
+| L1 GitHub Actions liveness | `.github/workflows/liveness-monitor.yml` (runs on github.com infra) | origin/main has no auto-cron commit for >30 min — including full box outage | Actions tab → AAATS liveness monitor; gated by repo variable `LIVENESS_ENABLED=true` |
+| L2 in-cron hardening | `/home/aaats/bin/aaats-autopush.sh` (v3 since 2026-05-24) + `/home/aaats/bin/aaats-cron-alert.sh` | Cron ticked but push failed; alert fires after 3x backoff retries | `cat /srv/aaats/runtime_repo/runtime/auto_cron_heartbeat.json` — `status=ok` means last tick pushed |
+| L3 heartbeat watchdog | `/home/aaats/bin/aaats-heartbeat-checker.sh` (crontab `*/5 * * * *`) | Heartbeat file >20 min stale — cron daemon dead or autopush hung | `tail /home/aaats/aaats-heartbeat-checker.log` |
+| L4 diagnose.sh | `/home/aaats/bin/aaats-diagnose.sh [--quick]` | n/a — on-demand triage tool | `ssh aaats@100.95.126.39 'bash /home/aaats/bin/aaats-diagnose.sh --quick'` |
+
+Source-of-truth for box scripts is `scripts/box/` in this repo. The heartbeat file (`/srv/aaats/runtime_repo/runtime/auto_cron_heartbeat.json`) is canonical for "did cron tick" — read it before assuming origin/main reflects current box state.
+
+**Investigating a suspected outage:** ALWAYS `git fetch origin main` before reading `git log origin/main`. The local reflog is just a cache; a stale one made a 0-minute outage look like 15h on 2026-05-24 ([docs/known_issues/2026-05-24_cron_blackout_false_positive.md](docs/known_issues/2026-05-24_cron_blackout_false_positive.md)).
+
 ## Container has no `sqlite3` CLI
 
 Use `docker exec aaats-paper-crypto python -c "import sqlite3; ..."` for ad-hoc queries.

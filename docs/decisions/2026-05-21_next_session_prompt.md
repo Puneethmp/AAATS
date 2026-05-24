@@ -50,8 +50,60 @@ Session 11 + 12 shipped (REFERENCE — do not redo):
 
   Operator-bye sent (cid 32ecfd0f-679d-4add-9b82-25e935c4911f).
 
+  Session 13a (2026-05-24, pre-departure addendum — cron resilience):
+    Built 4-layer auto-cron resilience after a false-positive 15h "blackout"
+    investigation exposed real monitoring gaps. SHIPPED:
+      L1: .github/workflows/liveness-monitor.yml (gated; needs operator
+          to set TELEGRAM_* secrets + repo var LIVENESS_ENABLED=true)
+      L2: /home/aaats/bin/aaats-autopush.sh v3 (heartbeat-first, 3x retry,
+          Telegram alert) + /home/aaats/bin/aaats-cron-alert.sh
+      L3: /home/aaats/bin/aaats-heartbeat-checker.sh (crontab */5; cooldown 1h)
+      L4: /home/aaats/bin/aaats-diagnose.sh [--quick]
+    Heartbeat canonical at /srv/aaats/runtime_repo/runtime/auto_cron_heartbeat.json.
+    Adversarial tests passed via /tmp staging (no prod disruption).
+    Docs: docs/decisions/2026-05-24_auto_cron_resilience.md,
+          docs/runbooks/auto_cron_recovery.md,
+          docs/known_issues/2026-05-24_cron_blackout_false_positive.md.
+    Rollback baseline: .rollback/2026-05-24_auto_cron_resilience/.
+    Old v2 autopush retained at /home/aaats/bin/aaats-autopush.sh.v2.bak.20260524T095413Z.
+
 ================================================================
-PHASE A — Pager + digest queue review (DO FIRST, ~30-60 min)
+PHASE 0 — Cron resilience + away-period liveness check (NEW 2026-05-24)
+================================================================
+
+  [0.1] FIRST COMMAND OF SESSION:
+          git fetch origin main && git log origin/main --oneline -5
+        The local `origin/main` ref is just a cache; reading `git log`
+        without fetching is meaningless. The "15h blackout" false positive
+        on 2026-05-24 originated from this exact mistake.
+
+  [0.2] Read auto-cron heartbeat:
+          ssh aaats@100.95.126.39 'bash /home/aaats/bin/aaats-diagnose.sh --quick'
+        Expect status=ok, last_tick within ~15min, last_push within ~15min.
+        If status=push_failed/fetch_failed or last_tick stale → L2/L3
+        would have alerted to Telegram — confirm in [0.3] below.
+
+  [0.3] Scan Telegram chat 1946109268 for any of these since 2026-05-25:
+          - "AAATS LIVENESS ALERT" → L1 fired (box hard-down or push stream stale)
+          - "AAATS CRON: auto-push failed 3x" → L2 retry exhausted
+          - "AAATS CRON: fetch from origin failed" → L2 network/auth fail
+          - "AAATS CRON: watchdog: ..." → L3 stale heartbeat
+        Each maps to a triage flow in docs/runbooks/auto_cron_recovery.md.
+
+  [0.4] Verify L1 (GitHub Actions liveness-monitor) is enabled:
+          gh workflow list | grep "AAATS liveness"
+          gh variable list | grep LIVENESS_ENABLED
+        If `LIVENESS_ENABLED` is unset/false, the workflow is skipped
+        (this is the pre-departure default — operator was expected to
+        enable secrets and flip the variable). If enabled, view recent
+        runs: `gh run list -w "AAATS liveness monitor" -L 10`.
+
+  [0.5] If any alert fired during the away period, triage per runbook
+        BEFORE proceeding to PHASE A. Liveness gaps are higher priority
+        than pager queue review.
+
+================================================================
+PHASE A — Pager + digest queue review (DO AFTER PHASE 0, ~30-60 min)
 ================================================================
 
   [A.1] Read every Telegram pager queued since 2026-05-23T15:30Z.
@@ -170,6 +222,23 @@ Reporting at session end
 ---
 
 ## Status log
+
+- **2026-05-24 (session 13a — pre-departure cron resilience, autonomous):**
+  Track D 4-layer build. False-positive 15h "blackout" investigation
+  (workstation stale-fetch cache) catalyzed building the gaps it exposed.
+  Shipped L1 GitHub Actions liveness monitor (gated on operator-set
+  secrets), L2 aaats-autopush v3 (heartbeat-first + 3x retry + Telegram
+  alert) + cron_alert.sh helper, L3 heartbeat-checker (crontab */5,
+  1h cooldown), L4 diagnose.sh [--quick]. All 5 adversarial tests
+  passed via /tmp staging — no prod disruption. Heartbeat canonical at
+  /srv/aaats/runtime_repo/runtime/auto_cron_heartbeat.json. Docs:
+  decisions/2026-05-24_auto_cron_resilience.md, runbooks/auto_cron_recovery.md,
+  known_issues/2026-05-24_cron_blackout_false_positive.md. Rollback baseline:
+  .rollback/2026-05-24_auto_cron_resilience/MANIFEST.txt.
+  Operator action required pre-soak-resumption: set repo secrets
+  TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID + repo var LIVENESS_ENABLED=true
+  (instructions in runbook). Until then, L1 is a no-op (the YAML file is
+  shipped but the job is skipped).
 
 - **2026-05-23 (session 12 — pre-departure verification, autonomous):**
   All three Cowork-surfaced items closed: [0] D.5 anomaly-window
