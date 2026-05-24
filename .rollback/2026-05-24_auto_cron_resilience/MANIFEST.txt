@@ -1,0 +1,113 @@
+Rollback baseline — 2026-05-24 auto-cron resilience build (Track D)
+=========================================================================
+
+Scope: 4-layer monitoring for the box → origin/main auto-cron push stream.
+Triggered by: false-positive 15h "blackout" investigation that exposed
+real resilience gaps (no external monitor, no heartbeat, no retry, no
+cron-daemon-watchdog).
+
+Box: aaats@100.95.126.39 (vmi3275738, Europe/Berlin)
+Deploy date (UTC): 2026-05-24T09:53Z (v3 swap) through 2026-05-24T~10:00Z
+Author: Claude Code session (Opus 4.7), per autonomy contract 2026-05-21.
+
+
+FILES MODIFIED OR CREATED ON BOX
+---------------------------------------------------------------------------
+
+  /home/aaats/bin/aaats-autopush.sh
+    PRE  (v2): aaats-autopush.sh.pre (this dir)         sha256: see below
+    PRE  (v2, also kept on box): /home/aaats/bin/aaats-autopush.sh.v2.bak.20260524T095413Z
+    POST (v3): same path                                 sha256: 5b9571a182ef9a46f73b61e32490ef0b6dfd6b310ae20c1453a42adca7c2e4fe
+    SOURCE:    scripts/box/aaats-autopush-v3.sh (repo)
+
+  /home/aaats/bin/aaats-cron-alert.sh                    (new)
+    POST: sha256: 7226a0be820860fb2084dc63e1b85f16d227723356b5e4e6a580054bc5960bcf
+    SOURCE: scripts/box/aaats-cron-alert.sh (repo)
+
+  /home/aaats/bin/aaats-heartbeat-checker.sh             (new)
+    POST: sha256: d816075007a57d0f84a8763bd82e319e962a413ec3a73e31d44fd1da81369668
+    SOURCE: scripts/box/aaats-heartbeat-checker.sh (repo)
+
+  /home/aaats/bin/aaats-diagnose.sh                      (new)
+    POST: sha256: ed4d8aafa5ddfacb67ae6d14ceaf6757204271d3fac285830fbacb631db0c57e
+    SOURCE: scripts/box/aaats-diagnose.sh (repo)
+
+  /var/spool/cron/crontabs/aaats                         (crontab modified)
+    ADDED: */5 * * * * /home/aaats/bin/aaats-heartbeat-checker.sh >> /home/aaats/aaats-heartbeat-checker.log 2>&1
+    PRE crontab is reconstructable: existing entries unchanged, only the heartbeat checker line was appended.
+
+  /srv/aaats/runtime_repo/runtime/auto_cron_heartbeat.json  (new, created by first v3 tick)
+    Initial value: {"last_tick":"2026-05-24T09:54:00Z","host":"vmi3275738","status":"ok","last_push":"2026-05-24T09:54:00Z"}
+
+
+FILES ADDED TO REPO
+---------------------------------------------------------------------------
+
+  .github/workflows/liveness-monitor.yml                 (L1)
+  scripts/box/aaats-autopush-v3.sh                       (L2 source-of-truth)
+  scripts/box/aaats-cron-alert.sh                        (L2 source-of-truth)
+  scripts/box/aaats-heartbeat-checker.sh                 (L3 source-of-truth)
+  scripts/box/aaats-heartbeat-checker.service            (L3 optional systemd upgrade)
+  scripts/box/aaats-heartbeat-checker.timer              (L3 optional systemd upgrade)
+  scripts/box/aaats-diagnose.sh                          (L4 source-of-truth)
+  docs/decisions/2026-05-24_auto_cron_resilience.md      (design rationale)
+  docs/runbooks/auto_cron_recovery.md                    (triage runbook)
+  docs/known_issues/2026-05-24_cron_blackout_false_positive.md
+  .rollback/2026-05-24_auto_cron_resilience/MANIFEST.txt (this file)
+  .rollback/2026-05-24_auto_cron_resilience/aaats-autopush.sh.pre  (pre-v3 baseline)
+
+
+ROLLBACK COMMANDS (per layer)
+---------------------------------------------------------------------------
+
+  # L1 GitHub Actions — disable without deleting:
+  # In repo Settings → Secrets and variables → Actions → Variables,
+  # set LIVENESS_ENABLED=false (or delete the variable). Workflow file
+  # stays in repo; job is skipped.
+
+  # L2 — restore v2 autopush:
+  ssh aaats@100.95.126.39 'cp /home/aaats/bin/aaats-autopush.sh.v2.bak.20260524T095413Z /home/aaats/bin/aaats-autopush.sh && chmod +x /home/aaats/bin/aaats-autopush.sh'
+
+  # L3 — remove heartbeat checker from crontab:
+  ssh aaats@100.95.126.39 'crontab -l | grep -v aaats-heartbeat-checker | crontab -'
+
+  # L4 diagnose.sh — purely additive; no rollback needed. To remove:
+  ssh aaats@100.95.126.39 'rm /home/aaats/bin/aaats-diagnose.sh'
+
+  # Full revert in one shot:
+  ssh aaats@100.95.126.39 'cp /home/aaats/bin/aaats-autopush.sh.v2.bak.20260524T095413Z /home/aaats/bin/aaats-autopush.sh && chmod +x /home/aaats/bin/aaats-autopush.sh && crontab -l | grep -v aaats-heartbeat-checker | crontab - && rm /home/aaats/bin/aaats-cron-alert.sh /home/aaats/bin/aaats-heartbeat-checker.sh /home/aaats/bin/aaats-diagnose.sh /home/aaats/bin/aaats-autopush-v3.sh'
+
+
+VERIFICATION COMMANDS
+---------------------------------------------------------------------------
+
+  # Heartbeat fresh, status=ok:
+  ssh aaats@100.95.126.39 'cat /srv/aaats/runtime_repo/runtime/auto_cron_heartbeat.json'
+
+  # Quick diagnose:
+  ssh aaats@100.95.126.39 'bash /home/aaats/bin/aaats-diagnose.sh --quick'
+
+  # Crontab includes both entries:
+  ssh aaats@100.95.126.39 'crontab -l | grep -E "(aaats-autopush|aaats-heartbeat-checker)"'
+
+  # SHAs match this manifest:
+  ssh aaats@100.95.126.39 'sha256sum /home/aaats/bin/aaats-autopush.sh /home/aaats/bin/aaats-cron-alert.sh /home/aaats/bin/aaats-heartbeat-checker.sh /home/aaats/bin/aaats-diagnose.sh'
+
+
+ADVERSARIAL TESTS RUN (low-risk via /tmp staging)
+---------------------------------------------------------------------------
+
+  L2-A:  direct cron_alert.sh fire        → Telegram HTTP 200 ✓
+  L2-B:  staged /tmp script + fake remote → rc=2, status=fetch_failed,
+                                            Telegram alert sent ✓
+  L3-C:  synthetic stale heartbeat        → rc=3, alert fired ✓
+  L3-D:  cooldown-active second call      → suppressed (rc=3, no alert) ✓
+  L3-E:  missing heartbeat file           → rc=1, alert fired ✓
+  L4-F:  diagnose.sh full                  → all sections render ✓
+  L4-G:  diagnose.sh --quick               → 85ms ✓
+
+All test alerts were clearly labeled "[TEST_ADV_2026-05-24]" or
+clarified immediately afterward to operator.
+
+
+KNOWN LIMITS — see docs/decisions/2026-05-24_auto_cron_resilience.md
