@@ -87,11 +87,19 @@ fi
 git reset --hard origin/main --quiet 2>>"$LOG" || true
 mkdir -p "$RUNTIME_DIR"
 
-# 3. Snapshot runtime state from engine container (read-only docker cp).
-timeout 15 docker cp aaats-engine:/app/data/paper_trades.db      "$RUNTIME_DIR/paper_trades.db"      2>>"$LOG" || log "cp paper_trades.db failed"
-timeout 15 docker cp aaats-engine:/app/data/paper_positions.json "$RUNTIME_DIR/paper_positions.json" 2>>"$LOG" || true
-timeout 15 docker cp aaats-engine:/app/data/paper_portfolio.json "$RUNTIME_DIR/paper_portfolio.json" 2>>"$LOG" || true
-timeout 15 docker cp aaats-engine:/app/data/stat_arb_state.json  "$RUNTIME_DIR/stat_arb_state.json"  2>>"$LOG" || true
+# 3. Snapshot runtime state from the paper-trader container (read-only docker cp).
+#    2026-05-24 fix (L7 prep): switched from aaats-engine (v6 dummy) to
+#    aaats-paper-crypto (real paper trader). Pre-Phase-κ this was wired to
+#    aaats-engine; the swap never updated the autopush, so runtime/
+#    paper_trades.db was stale since 2026-05-06. Caught while building L7
+#    activity-floor monitor which needs a fresh DB to read.
+timeout 15 docker cp aaats-paper-crypto:/app/data/paper_trades.db      "$RUNTIME_DIR/paper_trades.db"      2>>"$LOG" || log "cp paper_trades.db failed"
+timeout 15 docker cp aaats-paper-crypto:/app/data/paper_positions.json "$RUNTIME_DIR/paper_positions.json" 2>>"$LOG" || true
+timeout 15 docker cp aaats-paper-crypto:/app/data/paper_portfolio.json "$RUNTIME_DIR/paper_portfolio.json" 2>>"$LOG" || true
+timeout 15 docker cp aaats-paper-crypto:/app/data/stat_arb_state.json  "$RUNTIME_DIR/stat_arb_state.json"  2>>"$LOG" || true
+# engine.log stays from aaats-engine — that's the v6 strategy engine and its
+# logs are useful for diagnosing engine-side regressions independent of the
+# paper-trader.
 timeout 10 docker logs --tail 500 aaats-engine 2>&1 | tail -500 > "$RUNTIME_DIR/engine.log" || true
 
 if [ -f "$RUNTIME_DIR/paper_trades.db" ]; then
