@@ -1,0 +1,12 @@
+[Unit]
+Description=AAATS auto-cron heartbeat freshness checker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/aaats/bin/aaats-heartbeat-checker.sh
+User=aaats
+Group=aaats
+StandardOutput=append:/home/aaats/aaats-heartbeat-checker.log
+StandardError=append:/home/aaats/aaats-heartbeat-checker.log
