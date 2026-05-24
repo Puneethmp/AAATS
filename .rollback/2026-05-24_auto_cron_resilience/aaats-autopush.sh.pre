@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# AAATS auto-push: dump engine runtime state to GitHub every cycle.
+# v2 — no docker exec, all engine-touching commands wrapped in `timeout`.
+set -euo pipefail
+
+REPO=/srv/aaats/runtime_repo
+LOG=/home/aaats/aaats-autopush.log
+RUNTIME_DIR="$REPO/runtime"
+LOCKFILE=/tmp/aaats-autopush.lock
+
+log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" >> "$LOG"; }
+
+# Single-instance lock — prevent overlapping cron runs
+exec 9>"$LOCKFILE"
+flock -n 9 || { log "skip — previous run still in progress"; exit 0; }
+
+# Skip if repo not initialized (deploy key not yet on GitHub)
+if [ ! -d "$REPO/.git" ]; then
+  cd /srv/aaats/runtime_repo 2>/dev/null || mkdir -p /srv/aaats/runtime_repo
+  cd /srv/aaats/runtime_repo
+  if timeout 30 git clone git@github.com:Puneethmp/AAATS.git . 2>>"$LOG"; then
+    git config user.email "aaats-deploy@contabo"
+    git config user.name "AAATS Auto-Deploy"
+    log "first clone OK"
+  else
+    log "SKIP — deploy key not yet on GitHub"
+    exit 0
+  fi
+fi
+
+cd "$REPO"
+timeout 30 git fetch origin main --quiet 2>>"$LOG" || { log "fetch failed"; exit 0; }
+git reset --hard origin/main --quiet 2>>"$LOG" || true
+mkdir -p "$RUNTIME_DIR"
+
+# All docker calls bounded by timeout; failures don't crash the script.
+# `docker cp` is read-only on the engine's filesystem layer — does NOT pause
+# the container in modern Docker. No `docker exec` here (was the suspected
+# trigger for the 14:00 SIGKILL race).
+timeout 15 docker cp aaats-engine:/app/data/paper_trades.db      "$RUNTIME_DIR/paper_trades.db"      2>>"$LOG" || log "cp paper_trades.db failed"
+timeout 15 docker cp aaats-engine:/app/data/paper_positions.json "$RUNTIME_DIR/paper_positions.json" 2>>"$LOG" || true
+timeout 15 docker cp aaats-engine:/app/data/paper_portfolio.json "$RUNTIME_DIR/paper_portfolio.json" 2>>"$LOG" || true
+timeout 15 docker cp aaats-engine:/app/data/stat_arb_state.json  "$RUNTIME_DIR/stat_arb_state.json"  2>>"$LOG" || true
+timeout 10 docker logs --tail 500 aaats-engine 2>&1 | tail -500 > "$RUNTIME_DIR/engine.log" || true
+
+# CSV dump of trades — runs on HOST against the local copy, NOT inside the engine container
+if [ -f "$RUNTIME_DIR/paper_trades.db" ]; then
+  python3 - "$RUNTIME_DIR/paper_trades.db" > "$RUNTIME_DIR/paper_trades.csv" 2>>"$LOG" << 'PY' || true
+import sqlite3, csv, sys
+conn = sqlite3.connect(sys.argv[1])
+cur = conn.execute("SELECT * FROM paper_trades ORDER BY timestamp")
+cols = [d[0] for d in cur.description]
+w = csv.writer(sys.stdout); w.writerow(cols)
+for row in cur.fetchall(): w.writerow(row)
+PY
+fi
+
+{
+  echo "# AAATS runtime snapshot"
+  echo
+  echo "Last update: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo
+  echo "## Container heartbeats"
+  timeout 10 docker ps --format '- {{.Names}}: {{.Status}}' | grep aaats- | sort
+} > "$RUNTIME_DIR/STATUS.md"
+
+cd "$REPO"
+git add runtime/
+if git diff --cached --quiet; then
+  log "no changes to push"
+  exit 0
+fi
+MSG="auto: $(date -u +%Y-%m-%dT%H:%M:%SZ) trades + logs"
+git commit -m "$MSG" --quiet
+if timeout 30 git push origin main --quiet 2>>"$LOG"; then
+  log "pushed: $MSG"
+else
+  log "push FAILED"
+  exit 1
+fi
