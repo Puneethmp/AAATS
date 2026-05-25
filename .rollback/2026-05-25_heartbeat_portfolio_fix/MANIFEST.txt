@@ -1,0 +1,48 @@
+ROLLBACK BASELINE -- 2026-05-25 heartbeat write-order + portfolio reconciler
+================================================================================
+
+DEPLOYED_AT_UTC          = 2026-05-25T11:46:00Z
+PRE_PAPER_CRYPTO_IMAGE   = sha256:db6f303d39cdde690318a5de71bd89562ce8c56771bea4ad746fec3c72e75c5b
+POST_PAPER_CRYPTO_IMAGE  = sha256:2bc8203b987f200f1c8e63b997e48bcf971295272ff7dc2f1cb338e2406ca059
+POST_PAPER_CRYPTO_STATUS = running (healthy)
+PRE_HEARTBEAT            = (heartbeat file unreadable at snapshot; v2 last tick was 2026-05-25T11:30:11Z status=ok)
+POST_HEARTBEAT           = last_tick=2026-05-25T11:45:08Z status=ok (first v3 tick observed at workstation poll 03/17)
+SMOKE_A_BASH_PARSE       = True
+SMOKE_B_IMPORT           = True
+SMOKE_C_SYMBOL           = True
+SMOKE_D_HEARTBEAT_TICKED = True
+GATE_PAPER_RUNNING       = True
+
+Files (pre -> post SHAs):
+  /home/aaats/bin/aaats-autopush.sh                       : 2b3090f1b3447ad383e4a0a63f5b75916cb347ba52e0ee787df8eef3f8888b09 -> 20e243587bd4dd95f104dd07374d0327101d4078dbfa4c9c9c33012ed487714d
+  /home/aaats/aaats/trading/live_paper_runner.py          : b9c359b77cb4d488038ea8fe0b94b389e24cfb74e058acd8bc4abe7112561743 -> b93c2a928be094271d2a68c9a15ced04fd7b4b78461d8e59b6cde7e6975bfd7d
+
+Companion files (deployed via `git push`, not SCP):
+  .github/workflows/liveness-monitor.yml
+  tests/test_portfolio_reconcile_drift_fix.py
+  scripts/deploy_2026_05_25_heartbeat_portfolio_fix.py
+  scripts/halt_us_market.py
+  data/halt_state.json
+
+Notes on this deploy (manual completion):
+  - scripts/deploy_2026_05_25_heartbeat_portfolio_fix.py crashed at step [9/10]
+    on a Windows cp1252 encoding bug while emitting the heartbeat-poll banner
+    (Unicode U+2264 / U+2014 in print() strings). All deploy work up to and
+    including step [8/10] (smoke A/B/C) had already executed cleanly. Smoke
+    gate D was therefore verified manually via paramiko polling -- same logic
+    as the in-script loop (60s cadence, status ok|cycle_active, last_tick
+    differs from v2 baseline 2026-05-25T11:30:11Z). Observed v3 tick at
+    poll 03/17 (2026-05-25T11:45:08Z status=ok). The script was patched in
+    the same workstation session to replace the offending Unicode chars with
+    ASCII -- the file in this commit is Windows-safe for any future re-run.
+  - scripts/halt_us_market.py was also patched in this session: the original
+    invoked `python kill.py` on the box host where Python lacks sqlalchemy
+    (deps are container-only). Fixed to invoke `docker exec aaats-paper-crypto
+    python /app/kill.py ...` -- matches the verify line in the same script.
+  - PRE state showed us:true on the box (set 2026-05-23T17:06Z by an earlier
+    session). The kill.py invocation in this deploy refreshes the audit-trail
+    entry + Telegram alert with the proper reason.
+
+Rollback (each file individually):
+  ssh aaats@100.95.126.39 'cp /home/aaats/bin/aaats-autopush.sh.v2.bak.20260524T095413Z /home/aaats/bin/aaats-autopush.sh'  # rolls back the heartbeat write-order fix
+  (no per-file backup for live_paper_runner; revert via git on workstation then redeploy via SCP)

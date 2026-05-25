@@ -122,6 +122,19 @@ fi
   timeout 10 docker ps --format '- {{.Names}}: {{.Status}}' | grep aaats- | sort
 } > "$RUNTIME_DIR/STATUS.md"
 
+# 3a. Refresh heartbeat AFTER git reset/snapshot so it lands in this cycle's
+# commit. BUGFIX 2026-05-25 (Cowork session):
+# The earlier write_heartbeat "started" call at the top of this script runs
+# BEFORE `git reset --hard origin/main` above, which wipes the local heartbeat
+# back to origin's state. The post-push write_heartbeat "ok" only updates the
+# local file; the very next cycle's reset wipes that too. Net effect: origin's
+# heartbeat froze at the FIRST v3 tick (2026-05-24T09:53:53Z status=started)
+# even though pushes were landing every 15 min. L1 (GitHub Actions liveness),
+# L3 (heartbeat-checker — local-only, unaffected), and any external observer
+# reading origin couldn't see fresh state.
+# This write is the one that gets staged by `git add runtime/` below.
+write_heartbeat "cycle_active"
+
 # 4. Stage + commit if dirty.
 git add runtime/
 if git diff --cached --quiet; then

@@ -351,6 +351,89 @@ def save_portfolio(p: dict) -> None:
     _save_json(PORTFOLIO_FILE, p)
 
 
+def _reconcile_portfolio_stats_from_db(portfolio: dict, market: str) -> None:
+    """
+    Recompute total_trades / realized_pnl / wins / losses / *_win_pct / *_loss_pct
+    from paper_trades.db. Authoritative since 2026-05-25.
+
+    Why: C3 (altcoin_reversion) and C6 (bollinger_range) call record_trade()
+    and mutate portfolio["capital"], but DO NOT increment total_trades /
+    realized_pnl / wins / losses on the portfolio dict — only execute()
+    (lines 1266, 1324, 1700) and stat_arb (lines 308, 543) do. As a result
+    paper_portfolio.json understated trade count and realized PnL for as
+    long as C3/C6 have been live. Concrete observation 2026-05-25:
+    paper_portfolio.crypto.total_trades = 8 (only C1's 4 pair-trades × 2);
+    DB had 20 trades (4B/4S C1 + 3B/0S C3 + 5B/4S C6). Kelly sizing in
+    _kelly_params() is calibrated from these fields and therefore was
+    using C1-only stats to size C3/C6.
+
+    This function is the permanent fix: derive the stats from the DB
+    (single source of truth) at the end of every cycle. Strategies that
+    add bookkeeping later are still correct (their +=1 is overwritten by
+    the same DB count which already includes their trade). Strategies
+    that forget bookkeeping are also correct.
+
+    `capital` is intentionally NOT touched — strategies own it for
+    in-cycle sizing decisions, and India NSE T+1 settlement queueing
+    can't be derived from the DB alone.
+
+    Safe to call multiple times per cycle; idempotent.
+    """
+    import sqlite3
+
+    if not Path(DB_PATH).exists():
+        return
+    mkt_port = portfolio.get(market)
+    if mkt_port is None:
+        return
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            row = conn.execute(
+                "SELECT "
+                "  COUNT(*),"
+                "  COALESCE(SUM(pnl), 0.0),"
+                "  COALESCE(SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END), 0),"
+                "  COALESCE(SUM(CASE WHEN pnl IS NOT NULL AND pnl < 0 THEN 1 ELSE 0 END), 0),"
+                "  COALESCE(SUM(CASE WHEN pnl > 0 THEN ABS(pnl_pct) ELSE 0 END), 0.0),"
+                "  COALESCE(SUM(CASE WHEN pnl IS NOT NULL AND pnl < 0 THEN ABS(pnl_pct) ELSE 0 END), 0.0) "
+                "FROM paper_trades WHERE market = ?",
+                (market,),
+            ).fetchone()
+    except Exception as exc:
+        log.warning("portfolio stats reconcile failed (non-fatal): %s", exc)
+        return
+
+    if not row:
+        return
+    total, pnl_sum, wins, losses, win_pct_pct_sum, loss_pct_pct_sum = row
+    # Detect + log drift so it shows up in Grafana/digests once.
+    prev_total = int(mkt_port.get("total_trades", 0) or 0)
+    prev_pnl = float(mkt_port.get("realized_pnl", 0.0) or 0.0)
+    new_total = int(total or 0)
+    new_pnl = float(pnl_sum or 0.0)
+    if prev_total != new_total or abs(prev_pnl - new_pnl) > 1e-6:
+        log.info(
+            "  [reconcile] %s portfolio stats refreshed from DB: "
+            "trades %d→%d, realized_pnl %+.4f→%+.4f",
+            market,
+            prev_total,
+            new_total,
+            prev_pnl,
+            new_pnl,
+        )
+    mkt_port["total_trades"] = new_total
+    mkt_port["realized_pnl"] = new_pnl
+    mkt_port["wins"] = int(wins or 0)
+    mkt_port["losses"] = int(losses or 0)
+    # pnl_pct in DB is percent (e.g. 3.0 = 3%); the in-runner *_win_pct
+    # / *_loss_pct accumulators are fractions (e.g. 0.03 = 3%) — see the
+    # SELL block at line ~1329 where entry_pct = abs(pnl) / notional.
+    # Divide by 100 to match the historical units the Kelly calibrator
+    # expects.
+    mkt_port["total_win_pct"] = float(win_pct_pct_sum or 0.0) / 100.0
+    mkt_port["total_loss_pct"] = float(loss_pct_pct_sum or 0.0) / 100.0
+
+
 # ── Win-rate stats for Kelly calibration ──────────────────────────────────────
 
 
@@ -1837,6 +1920,8 @@ def run_india(positions: dict, portfolio: dict) -> None:
     )
 
     save_positions(positions)
+    # Self-correcting bookkeeping (2026-05-25 fix); same rationale as crypto.
+    _reconcile_portfolio_stats_from_db(portfolio, "india")
     save_portfolio(portfolio)
     log.info("== NSE cycle done | capital=INR %.2f ==", portfolio["india"]["capital"])
 
@@ -2158,6 +2243,11 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
         )
 
     save_positions(positions)
+    # Self-correcting bookkeeping (2026-05-25 fix): derive trade-count /
+    # realized PnL / win-loss counts from the DB so C3+C6 (and any future
+    # strategy that skips portfolio bookkeeping) can't silently desync
+    # paper_portfolio.json from the trade ledger.
+    _reconcile_portfolio_stats_from_db(portfolio, "crypto")
     save_portfolio(portfolio)
     log.info(
         "== Crypto cycle done | capital=USD %.2f ==", portfolio["crypto"]["capital"]

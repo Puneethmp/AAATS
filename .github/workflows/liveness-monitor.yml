@@ -72,3 +72,67 @@ jobs:
             -d "chat_id=${TELEGRAM_CHAT_ID}" \
             -d "text=${MSG}" >/dev/null
           echo "alert sent to Telegram" >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Heartbeat-content freshness check (added 2026-05-25) ──────────────
+      # The commit-count check above catches "pushes stopped". But the
+      # 2026-05-25 incident showed a different failure mode: pushes keep
+      # landing every 15 min, yet runtime/auto_cron_heartbeat.json's
+      # `last_tick` field is frozen because the autopush script's git-reset
+      # step wipes the heartbeat write before staging. From the box's local
+      # perspective the heartbeat is fresh (L3 silent — correct from its
+      # vantage), but origin is stale. This step closes that gap by reading
+      # the heartbeat content from origin/main and asserting age <30 min.
+      - name: Check heartbeat-content freshness in origin
+        id: heartbeat
+        run: |
+          set -uo pipefail
+          if [ "${{ github.event.inputs.force_alert }}" = "true" ]; then
+            HEARTBEAT_AGE_MIN=999
+            HEARTBEAT_TICK="(forced-test)"
+          elif [ -f runtime/auto_cron_heartbeat.json ]; then
+            HEARTBEAT_TICK=$(python3 -c "import json; print(json.load(open('runtime/auto_cron_heartbeat.json')).get('last_tick',''))" 2>/dev/null || echo "")
+            if [ -z "$HEARTBEAT_TICK" ]; then
+              HEARTBEAT_AGE_MIN=999
+              HEARTBEAT_TICK="(unparseable)"
+            else
+              NOW=$(date -u +%s)
+              TICK_EPOCH=$(python3 -c "import time, calendar; print(int(calendar.timegm(time.strptime('$HEARTBEAT_TICK', '%Y-%m-%dT%H:%M:%SZ'))))" 2>/dev/null || echo 0)
+              if [ "$TICK_EPOCH" = "0" ]; then
+                HEARTBEAT_AGE_MIN=999
+              else
+                HEARTBEAT_AGE_MIN=$(( (NOW - TICK_EPOCH) / 60 ))
+              fi
+            fi
+          else
+            HEARTBEAT_AGE_MIN=999
+            HEARTBEAT_TICK="(file-missing)"
+          fi
+          echo "age_min=$HEARTBEAT_AGE_MIN" >> "$GITHUB_OUTPUT"
+          echo "tick=$HEARTBEAT_TICK" >> "$GITHUB_OUTPUT"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- heartbeat last_tick: \`$HEARTBEAT_TICK\` (age ${HEARTBEAT_AGE_MIN}min)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$HEARTBEAT_AGE_MIN" -gt 30 ]; then
+            echo "- heartbeat content: **STALE — alert will fire**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- heartbeat content: fresh" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Alert Telegram on stale heartbeat content in origin
+        if: steps.heartbeat.outputs.age_min > 30
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          HEARTBEAT_TICK: ${{ steps.heartbeat.outputs.tick }}
+          HEARTBEAT_AGE_MIN: ${{ steps.heartbeat.outputs.age_min }}
+        run: |
+          set -uo pipefail
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+            echo "::error::TELEGRAM secrets not set; alert cannot fire."
+            exit 1
+          fi
+          MSG="AAATS LIVENESS: auto_cron_heartbeat.json stale ${HEARTBEAT_AGE_MIN}min in origin/main (last_tick=${HEARTBEAT_TICK}). Commits may still be landing but the autopush is not committing the heartbeat — check scripts/box/aaats-autopush-v3.sh on box at /home/aaats/bin/aaats-autopush.sh."
+          curl -sS --max-time 15 -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            -d "text=${MSG}" >/dev/null
+          echo "heartbeat-stale alert sent to Telegram" >> "$GITHUB_STEP_SUMMARY"
