@@ -2,6 +2,26 @@
 
 Deploy discipline rules: see docs/conventions/deploy_discipline.md (canonical).
 
+## Deploy machinery gotchas (canonical 2026-05-26)
+
+Every deploy script must import `tools/operator/deploy_lib.py` and call its helpers instead of reinventing. The 9 recurring failure modes catalogued from the 2026-05-26 structural-fix deploy each have a one-line fix in that library:
+
+1. **CRLF in `.sh`/`.py`/`.yml`/`.json`/`.md` on box** — paramiko SFTP and tarfile both preserve Windows CRLF. Box bash chokes on `\r`. Use `atomic_upload_normalized(sftp, local, remote)` instead of `sftp.put()`. For tarball-based deploys, normalize via `normalize_bytes_for_text_file()` before `tar.addfile()`. Bit twice in the 2026-05-26 session.
+2. **Windows cp1252 console crashes on Unicode `→`** — call `enforce_utf8_console()` at the top of every deploy script.
+3. **Box auto-cron 15-min race during push** — always use `auto_rebase_or_stash("main")` before any `git push` from the workstation. Documented since 2026-05-22 but kept biting because every script wrote its own ad-hoc version.
+4. **Cowork-left stale `.git/index.lock`** — Cowork sandbox cannot `unlink` on the mounted filesystem. Every Windows-side deploy must `clear_stale_git_locks(repo_root)` first.
+5. **Pre-commit ruff auto-reformat racing commit** — run `preflight_ruff_format(changed_files)` BEFORE `git add`. The pre-commit hook then sees clean files and the commit lands on first try.
+6. **Grafana dashboard mount path drift** — running Grafana is in the `aaats-base` compose project (config under `/srv/aaats/compose/`), NOT the `deployment/` project. Repo dashboards live at `deployment/grafana/dashboards/` but the LIVE mount is `/srv/aaats/compose/grafana/dashboards/` (constant `GRAFANA_HOST_MOUNT`). Use `push_grafana_dashboard(sftp, client, local)` to land both copies. Bit during 2026-05-26 deploy — manually copied to recover.
+7. **Box-side `.github/workflows/` dir absent** — box isn't a git repo; GitHub Actions reads from origin/main, not from the box. Remove `.github/*` from any deploy file list. Earlier scripts blindly uploaded these, requiring `mkdir -p` triage.
+8. **Soft-fail `docker cp` noise** — `aaats-autopush-v3.sh` cp_state function now existence-guards via `docker exec ... test -f` BEFORE cp. Missing optional state files (`funding_arb_state.json` while C5b disabled, `share_equality_mismatches.json` before any WARN) skip silently. Set `EPHEMERAL_STATE_FILES` in `deploy_lib.py` lists which ones are guard-OK.
+9. **paramiko binary mode preserves CRLF** — covered by #1 above; mentioned separately because the failure mode appears in tarball-based deploys too, not just per-file SFTP.
+
+Two follow-up gotchas not yet automated (manual operator action required, watching for recurrence):
+- **Grafana admin API auth rejected** — `/srv/aaats/secrets/grafana_admin_password` is out of sync with the running Grafana's password. Pre-existing as of 2026-05-26; rotate when convenient.
+- **`tools/operator/deploy_to_contabo.py` still uses raw tarball** — the older general-purpose deploy script hasn't been retrofit to use `deploy_lib`. Sprint follow-up.
+
+Source: `docs/decisions/2026-05-26_deploy_hygiene_fix.md`.
+
 ## Deploy mechanism (paramiko SCP — NOT `git pull`)
 
 The Contabo box (`aaats@100.95.126.39`, dir `/home/aaats/aaats`) is **not a git

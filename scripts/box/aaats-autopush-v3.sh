@@ -109,6 +109,20 @@ cp_state() {
   local container_path="$1"
   local repo_path="$2"
   local required="${3:-soft}"   # "hard" = count as failure; "soft" = log only
+  # 2026-05-26 deploy-hygiene fix: existence-guard the cp so missing optional
+  # state files (e.g. funding_arb_state.json while C5b is disabled, or
+  # share_equality_mismatches.json before any WARN fires) don't pollute the
+  # autopush log every 15 min. test -f inside the container is cheap; cp is
+  # the noisy part. Only HARD-required files count as failures if missing.
+  if ! timeout 5 docker exec aaats-paper-crypto test -f "$container_path" 2>/dev/null; then
+    if [ "$required" = "hard" ]; then
+      log "MISSING (hard-required): $container_path"
+      SNAPSHOT_FAILURES=$((SNAPSHOT_FAILURES + 1))
+      return 1
+    fi
+    # Soft + missing = silent skip. Log nothing.
+    return 0
+  fi
   if timeout 15 docker cp "aaats-paper-crypto:$container_path" "$repo_path" 2>>"$LOG"; then
     return 0
   else
@@ -254,8 +268,7 @@ for attempt in 1 2 3; do
     break
   fi
   SLEEP_FOR=$((attempt * 30))
-  log "push FAILED attempt $attempt — sleeping ${SLEEP_FOR}s before retry"
-  # On non-final attempt, ensure we refetch in case the failure was a non-ff
+  log "push FAILED attempt $attempt - sleeping ${SLEEP_FOR}s before retry"
   if [ "$attempt" -lt 3 ]; then
     sleep "$SLEEP_FOR"
     timeout 30 git pull --rebase origin main --quiet 2>>"$LOG" || true
@@ -267,8 +280,8 @@ if [ "$PUSH_OK" = "1" ]; then
   exit 0
 fi
 
-# 6. All retries failed — local alert + mark heartbeat broken.
-log "push FAILED after 3 attempts — firing alert"
+# 6. All retries failed - local alert + mark heartbeat broken.
+log "push FAILED after 3 attempts - firing alert"
 write_heartbeat "push_failed" "3 retries exhausted"
 "$ALERT" "auto-push failed 3x after retries" 2>>"$LOG" || true
 exit 3
