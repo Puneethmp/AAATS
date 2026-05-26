@@ -2141,6 +2141,130 @@ def collect_ledger_divergence() -> list[str]:
     return out
 
 
+def collect_capital_invariant() -> list[str]:
+    """Layer L11 — Capital invariant metrics (sprint 2026-05-26).
+
+    Reads data/capital_invariant_alerts.json (written by
+    execution.paper_trader.assert_capital_invariant at end of every cycle)
+    and exposes the per-market verdict + delta + breakdown so the operator
+    dashboard can show 'is the bot's capital reconciling cleanly?' without
+    requiring an SSH trip into the container.
+
+    Metrics shape:
+      aaats_capital_invariant_delta_usd{market}     -- actual minus expected
+      aaats_capital_invariant_verdict{market}       -- 0=ok 1=watch 2=warn 3=critical
+      aaats_capital_invariant_actual_usd{market}    -- portfolio.capital (cash)
+      aaats_capital_invariant_expected_usd{market}  -- starting + realized_pnl - open_notional
+      aaats_capital_invariant_open_notional_usd{market}  -- across strategy state + directional
+      aaats_capital_invariant_check_age_seconds     -- freshness probe
+
+    Baseline-zero emission for "crypto" so Grafana shows "all clear" green
+    rather than "No-Data" gray when the alert file is missing.
+    """
+    out: list[str] = []
+    VERDICT_RANK = {"ok": 0, "watch": 1, "warn": 2, "critical": 3}
+    try:
+        f = ROOT / "data" / "capital_invariant_alerts.json"
+        # Baseline emission so Grafana panels never go No-Data even at boot.
+        for mkt in ("crypto",):
+            out.append(
+                _g(
+                    "aaats_capital_invariant_verdict",
+                    0.0,
+                    {"market": mkt},
+                    "Layer L11 capital invariant verdict (0=ok 1=watch 2=warn 3=critical)",
+                )
+            )
+            out.append(
+                _g(
+                    "aaats_capital_invariant_delta_usd",
+                    0.0,
+                    {"market": mkt},
+                    "Layer L11 capital delta = actual - expected (USD)",
+                )
+            )
+        if not f.exists():
+            return out
+
+        state = _read_json(f)
+        if not isinstance(state, dict):
+            return out
+
+        market = str(state.get("market", "crypto"))
+        verdict_str = str(state.get("verdict", "ok"))
+        verdict_num = float(VERDICT_RANK.get(verdict_str, 0))
+        out.append(
+            _g(
+                "aaats_capital_invariant_verdict",
+                verdict_num,
+                {"market": market},
+                "Layer L11 capital invariant verdict (0=ok 1=watch 2=warn 3=critical)",
+            )
+        )
+        for fld, mname, help_text in (
+            (
+                "delta_usd",
+                "aaats_capital_invariant_delta_usd",
+                "Layer L11 capital delta = actual - expected (USD)",
+            ),
+            (
+                "actual_capital",
+                "aaats_capital_invariant_actual_usd",
+                "Cash component of portfolio (USD)",
+            ),
+            (
+                "expected_capital",
+                "aaats_capital_invariant_expected_usd",
+                "Expected cash = starting + DB realized PnL - open notional",
+            ),
+            (
+                "open_notional",
+                "aaats_capital_invariant_open_notional_usd",
+                "Open position notional",
+            ),
+            (
+                "strategy_open_notional",
+                "aaats_capital_invariant_strategy_open_usd",
+                "Strategy open notional",
+            ),
+            (
+                "directional_open_notional",
+                "aaats_capital_invariant_directional_open_usd",
+                "Directional open notional",
+            ),
+            (
+                "realized_pnl_db",
+                "aaats_capital_invariant_realized_pnl_usd",
+                "Realized PnL from DB",
+            ),
+        ):
+            v = state.get(fld)
+            if v is None:
+                continue
+            try:
+                out.append(_g(mname, float(v), {"market": market}, help_text))
+            except (TypeError, ValueError):
+                continue
+
+        last_check = state.get("last_check_utc")
+        if last_check:
+            try:
+                ts = datetime.fromisoformat(str(last_check).replace("Z", "+00:00"))
+                age = (datetime.now(timezone.utc) - ts).total_seconds()
+                out.append(
+                    _g(
+                        "aaats_capital_invariant_check_age_seconds",
+                        float(age),
+                        help_text="Seconds since last L11 check",
+                    )
+                )
+            except (TypeError, ValueError):
+                pass
+    except Exception as e:
+        log.debug(f"collect_capital_invariant: {e}")
+    return out
+
+
 def _scrape_all():
     parts = []
     for fn in [
@@ -2157,7 +2281,6 @@ def _scrape_all():
         collect_volatility_radar,
         collect_correlation_map,
         collect_trade_lifecycle,
-        # ── Sprint 2026-05-11 — Integrity & Execution ──
         collect_decision_ledger,
         collect_oms,
         collect_reconciliation,
@@ -2167,9 +2290,9 @@ def _scrape_all():
         collect_share_equality,
         collect_strategy_exceptions,
         collect_self_up,
-        # ── Sprint 2026-05-24 — Content-correctness L5/L8 ──
         collect_ledger_divergence,
         collect_drawdown,
+        collect_capital_invariant,
     ]:
         try:
             parts.extend(fn())
@@ -2214,7 +2337,6 @@ class MetricsHandler(BaseHTTPRequestHandler):
 
 def main():
     global _cached_metrics
-    # Bootstrap DB schema (creates paper_trades table + trades VIEW) before first scrape
     db = ROOT / "data" / "paper_trades.db"
     try:
         from execution.paper_trader import _conn as _bootstrap_db
@@ -2224,7 +2346,6 @@ def main():
     except Exception as _be:
         log.warning(f"DB bootstrap skipped: {_be}")
     _cached_metrics = _scrape_all()
-    # Kick the price cache once before first scrape so vol metrics have data immediately
     try:
         _update_price_caches()
     except Exception as _pc_exc:

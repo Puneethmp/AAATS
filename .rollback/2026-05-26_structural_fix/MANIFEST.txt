@@ -1,0 +1,124 @@
+# AAATS structural observability fix — rollback baseline
+# Generated: 2026-05-26
+# Sprint: "stop the bug fires" (Cowork session)
+
+## Scope
+
+Three structural fixes addressing the dominant bug class observed across the
+2026-05-15 → 2026-05-26 window: silent failure / no alert on degraded state
+(60% of incidents) plus dual source of truth (33%).
+
+  A. Autopush snapshots ALL state files + DB freshness alert
+       scripts/box/aaats-autopush-v3.sh
+  B. Capital invariant guard (Layer L11)
+       execution/paper_trader.py       (+ ~210 lines, new functions)
+       trading/live_paper_runner.py    (+ ~25 lines, wired end-of-cycle)
+  C. Daily Telegram digest
+       .github/workflows/daily-digest.yml   (new file)
+
+## Files changed
+
+  scripts/box/aaats-autopush-v3.sh
+    BEFORE: 175 lines, snapshots 4 state files, no freshness check
+    AFTER:  ~260 lines, snapshots 11 state files + DB freshness check
+            with 3-tick streak detection and 1h alert cooldown.
+
+  execution/paper_trader.py
+    BEFORE: 623 lines, L5 ledger divergence only (lines 364-623)
+    AFTER:  ~830 lines, adds L11 capital invariant block at EOF.
+            New public functions: compute_capital_invariant,
+            assert_capital_invariant. Idempotent + non-halting (operator
+            judges).
+
+  trading/live_paper_runner.py
+    BEFORE: 2347 lines, run_crypto ends after _reconcile_portfolio_stats
+    AFTER:  ~2370 lines, calls assert_capital_invariant after the
+            reconciler. Wrapped in try/except so cycle continues if L11
+            itself faults.
+
+  .github/workflows/daily-digest.yml
+    NEW.  Runs 06:05 UTC daily. Reads origin/main's runtime/ snapshot,
+    composes a one-message digest, sends via Telegram. Gated on
+    LIVENESS_ENABLED + TELEGRAM_BOT_TOKEN/CHAT_ID secrets.
+
+## How to roll back
+
+If L11 misbehaves (e.g. false-positive critical alerts) and you need to
+revert just the invariant:
+
+  ssh aaats@100.95.126.39
+  cd /home/aaats/aaats
+  cp execution/paper_trader.py.bak-<ts> execution/paper_trader.py
+  cp trading/live_paper_runner.py.bak-<ts> trading/live_paper_runner.py
+  docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-paper-crypto
+
+If the autopush expansion is causing problems:
+
+  ssh aaats@100.95.126.39
+  sudo cp /home/aaats/bin/aaats-autopush.sh.bak-<ts> /home/aaats/bin/aaats-autopush.sh
+  sudo chmod +x /home/aaats/bin/aaats-autopush.sh
+
+To disable the daily digest workflow without redeploying:
+
+  GitHub → Settings → Secrets and variables → Actions → Variables
+  Set LIVENESS_ENABLED = false   (this also disables L1 + L7 monitors)
+  OR
+  GitHub → Actions → AAATS daily digest → ... → Disable workflow
+
+## Pre-deploy snapshot of key state
+
+(Captured 2026-05-26 ~06:00 UTC, the start of this session)
+
+  runtime/paper_portfolio.json
+    crypto.capital          = 127.4729
+    crypto.starting_equity  = 200.00
+    crypto.realized_pnl     = +1.3448
+    crypto.total_trades     = 79
+    crypto.wins             = 19  losses = 16
+
+  runtime/paper_trades.db
+    rows                    = 20   (STALE — last write 2026-05-24T14:25)
+    timestamp_range         = 2026-05-23T15:07 → 2026-05-24T14:25
+
+  runtime/auto_cron_heartbeat.json
+    last_tick               = 2026-05-26T06:00:08Z
+    status                  = cycle_active
+
+Auto-cron commits in last 24h: 97 (every 15min, no gaps)
+
+## Verification queries (post-deploy)
+
+Inside the container, after rebuild:
+
+  docker exec aaats-paper-crypto python -c '
+  from execution.paper_trader import compute_capital_invariant
+  import json
+  p = json.load(open("/app/data/paper_portfolio.json"))
+  print(compute_capital_invariant(p, "crypto"))
+  '
+
+Expected output (sketch):
+  {'actual_capital': X, 'starting_equity': 200.0, 'realized_pnl_db': Y,
+   'strategy_open_notional': Z, 'directional_open_notional': W,
+   'open_notional': Z+W, 'expected_capital': 200 + Y - (Z+W),
+   'delta_usd': X - (200 + Y - (Z+W)), 'verdict': '...'}
+
+If verdict is 'ok' or 'watch' (|delta| ≤ $2): books reconcile cleanly,
+the morning "$73.87 deficit" was indeed invisible open positions.
+
+If verdict is 'warn' or 'critical' (|delta| > $2): there IS a real
+unexplained gap; next-session task is to trace it via the new
+data/capital_invariant_alerts.json + paper_trades.db cross-check.
+
+After next autopush tick (~15 min after deploy):
+
+  cat runtime/STATUS.md          # should be from new tick
+  ls runtime/                    # should now show 11 state files
+                                 # incl altcoin_reversion_state.json,
+                                 # bollinger_range_state.json,
+                                 # capital_invariant_alerts.json
+
+After 24h:
+
+  06:05 UTC the next morning, Telegram should receive one digest message.
+  If it doesn't, check GitHub Actions tab → AAATS daily digest workflow.

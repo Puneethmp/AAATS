@@ -2249,6 +2249,35 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
     # paper_portfolio.json from the trade ledger.
     _reconcile_portfolio_stats_from_db(portfolio, "crypto")
     save_portfolio(portfolio)
+
+    # Layer L11 — Capital invariant guard (structural fix 2026-05-26).
+    # Closes the "capital looks wrong but I can't tell if it's a leak or
+    # invisible open positions" class of operator confusion. Computes
+    # expected = starting_equity + DB.realized_pnl - all_open_notional
+    # (strategy state files + execute() directional) and writes
+    # data/capital_invariant_alerts.json if |actual - expected| > $0.50.
+    # Does NOT auto-halt — operator judges first. Cross-container handoff
+    # to Grafana + Telegram via the same pattern as L5.
+    try:
+        from execution.paper_trader import assert_capital_invariant as _l11_assert
+
+        try:
+            _l11_result = _l11_assert(portfolio, "crypto", positions=positions)
+            if _l11_result["verdict"] != "ok":
+                log.info(
+                    "  [L11] cap_invariant verdict=%s delta=$%.4f "
+                    "(actual=$%.2f exp=$%.2f open=$%.2f)",
+                    _l11_result["verdict"],
+                    _l11_result["delta_usd"],
+                    _l11_result["actual_capital"],
+                    _l11_result["expected_capital"],
+                    _l11_result["open_notional"],
+                )
+        except Exception as exc:
+            log.error("[L11] capital invariant check failed: %s", exc, exc_info=True)
+    except ImportError:
+        pass
+
     log.info(
         "== Crypto cycle done | capital=USD %.2f ==", portfolio["crypto"]["capital"]
     )

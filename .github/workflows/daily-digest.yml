@@ -1,0 +1,224 @@
+name: AAATS daily digest
+
+# Sends a single Telegram message each morning summarizing the bot's state
+# from origin/main's runtime/* snapshot. Closes the silent-failure class
+# from the operator side: instead of "no Telegram = everything is fine",
+# operator gets an explicit "Day N of soak, X trades, $Y capital, Z open
+# positions, all monitors green" every day. If THIS workflow stops running,
+# the missing morning message itself is the alert.
+#
+# Composition rules:
+#   - Read paper_portfolio.json (capital, realized_pnl, trade counts)
+#   - Read paper_trades.db (trades-in-last-24h cohort)
+#   - Read auto_cron_heartbeat.json (autopush liveness from origin's view)
+#   - Read halt_state.json + strategy_halt_state.json (active halts)
+#   - Read capital_invariant_alerts.json + ledger_divergence_alerts.json
+#   - Compose ONE message; truncate to Telegram's 4096-char limit
+#
+# Designed to be aggressively idempotent — if data is partial (e.g. a state
+# file is missing in origin), the digest reports "unknown" for that field
+# instead of failing the whole run.
+
+on:
+  schedule:
+    # 06:00 UTC daily = 11:30 IST for the operator. The autopush at 06:00:00
+    # lands a fresh snapshot ~5 sec earlier, so by :05 we have the freshest
+    # state of the day.
+    - cron: '5 6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'If true, compose the digest but do not send to Telegram'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+
+jobs:
+  send-digest:
+    runs-on: ubuntu-latest
+    # Gated on the same flag as the L1/L7 monitors so operator can pause all
+    # external Telegram traffic with a single repo-variable toggle.
+    if: vars.LIVENESS_ENABLED == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 100   # enough for last 24h of auto-cron commits
+
+      - name: Compose digest
+        id: digest
+        run: |
+          set -uo pipefail
+          python3 << 'PY' > /tmp/digest.txt
+          import json, os, sqlite3, datetime, pathlib
+          R = pathlib.Path('runtime')
+          NOW = datetime.datetime.now(datetime.timezone.utc)
+          NOW_STR = NOW.strftime('%Y-%m-%d %H:%M UTC')
+
+          def load_json(name, default):
+              p = R / name
+              if not p.exists():
+                  return default
+              try:
+                  return json.loads(p.read_text())
+              except Exception:
+                  return default
+
+          port = load_json('paper_portfolio.json', {})
+          heartbeat = load_json('auto_cron_heartbeat.json', {})
+          halt = load_json('halt_state.json', {})
+          shalt = load_json('strategy_halt_state.json', {})
+          cap_alert = load_json('capital_invariant_alerts.json', {})
+          ledger_alert = load_json('ledger_divergence_alerts.json', {})
+
+          # Crypto book
+          crypto = port.get('crypto', {})
+          cap = crypto.get('capital', 0.0)
+          start = crypto.get('starting_equity', 0.0)
+          rpnl = crypto.get('realized_pnl', 0.0)
+          ttot = crypto.get('total_trades', 0)
+          wins = crypto.get('wins', 0)
+          losses = crypto.get('losses', 0)
+
+          # Trades in last 24h from DB
+          trades_24h = 'unknown'
+          db_path = R / 'paper_trades.db'
+          if db_path.exists():
+              try:
+                  cn = sqlite3.connect(str(db_path))
+                  cutoff = (NOW - datetime.timedelta(hours=24)).isoformat()
+                  row = cn.execute(
+                      "SELECT COUNT(*), COALESCE(SUM(pnl), 0.0) "
+                      "FROM paper_trades WHERE timestamp >= ?",
+                      (cutoff,)
+                  ).fetchone()
+                  cn.close()
+                  trades_24h = int(row[0] or 0)
+                  pnl_24h = float(row[1] or 0.0)
+              except Exception as exc:
+                  trades_24h = f'err({exc})'
+                  pnl_24h = 0.0
+          else:
+              pnl_24h = 0.0
+
+          # Open positions across all strategy state files
+          open_positions = []
+          for fname in ('paper_positions.json', 'altcoin_reversion_state.json',
+                        'bollinger_range_state.json', 'funding_arb_state.json',
+                        'stat_arb_state.json', 'momentum_state.json'):
+              d = load_json(fname, {})
+              if isinstance(d, dict):
+                  if fname == 'paper_positions.json':
+                      for mkt, pos_dict in d.items():
+                          if isinstance(pos_dict, dict):
+                              for sym in pos_dict:
+                                  open_positions.append(f'{mkt}:{sym}')
+                  else:
+                      strat = fname.replace('_state.json','')
+                      for k in d:
+                          open_positions.append(f'{strat}:{k}')
+          n_open = len(open_positions)
+
+          # Auto-cron health from heartbeat
+          last_tick = heartbeat.get('last_tick', '(missing)')
+          tick_status = heartbeat.get('status', '(missing)')
+          tick_age_min = -1
+          try:
+              tick_dt = datetime.datetime.strptime(last_tick, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc)
+              tick_age_min = int((NOW - tick_dt).total_seconds() / 60)
+          except Exception:
+              pass
+
+          # Active halts
+          halted_markets = [m for m, v in (halt or {}).items() if v]
+          halted_strategies = []
+          if isinstance(shalt, dict):
+              for s, v in shalt.items():
+                  if isinstance(v, dict) and v.get('halted'):
+                      halted_strategies.append(s)
+                  elif v is True:
+                      halted_strategies.append(s)
+
+          # Invariant + divergence status
+          cap_verdict = cap_alert.get('verdict', 'unknown') if cap_alert else 'no_alert_file'
+          cap_delta = cap_alert.get('delta_usd', 0.0) if cap_alert else 0.0
+          ledger_halted = list((ledger_alert or {}).get('halted_strategies', {}).keys())
+          ledger_watch = list((ledger_alert or {}).get('watch_strategies', {}).keys())
+
+          # Day of soak (started 2026-05-23T12:46:32Z per memory)
+          soak_start = datetime.datetime(2026, 5, 23, 12, 46, 32, tzinfo=datetime.timezone.utc)
+          day_of_soak = (NOW - soak_start).days + 1
+
+          # Health flag
+          health_issues = []
+          if tick_age_min < 0 or tick_age_min > 30:
+              health_issues.append(f'autopush stale {tick_age_min}min')
+          if cap_verdict in ('warn', 'critical'):
+              health_issues.append(f'cap_invariant {cap_verdict} delta=${cap_delta:.2f}')
+          if ledger_halted:
+              health_issues.append(f'ledger HALT: {",".join(ledger_halted)}')
+          if halted_strategies:
+              health_issues.append(f'strat_halt: {",".join(halted_strategies)}')
+
+          health_line = 'all clear' if not health_issues else ' / '.join(health_issues)
+
+          # Format trades_24h pnl for display
+          pnl_24h_str = f'{pnl_24h:+.2f}'
+
+          lines = [
+              f'AAATS digest — {NOW_STR}',
+              f'Day {day_of_soak} of D.5 soak',
+              '',
+              f'Crypto book: ${cap:.2f} cap (start ${start:.0f}, realized ${rpnl:+.2f})',
+              f'Trades total: {ttot} ({wins}W / {losses}L)',
+              f'Trades 24h: {trades_24h} (PnL ${pnl_24h_str})',
+              f'Open positions: {n_open}',
+          ]
+          if open_positions:
+              # Show up to first 8 to stay under message limit
+              show = open_positions[:8]
+              more = f' (+{len(open_positions)-8} more)' if len(open_positions) > 8 else ''
+              lines.append(f'  → {", ".join(show)}{more}')
+          lines += [
+              '',
+              f'Halts: markets={halted_markets or "none"} strategies={halted_strategies or "none"}',
+              f'Autopush: {tick_status} ({tick_age_min}min ago)',
+              f'Capital invariant: {cap_verdict} (delta=${cap_delta:+.2f})',
+              f'Ledger divergence: halt={ledger_halted or "none"} watch={ledger_watch or "none"}',
+              '',
+              f'Health: {health_line}',
+          ]
+          print('\n'.join(lines))
+          PY
+          DIGEST=$(cat /tmp/digest.txt)
+          {
+            echo "digest<<EOF"
+            cat /tmp/digest.txt
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "## Daily digest" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/digest.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Send to Telegram
+        if: github.event.inputs.dry_run != 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: |
+          set -uo pipefail
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+            echo "::error::TELEGRAM secrets not set; digest cannot send."
+            echo "Set them in repo Settings -> Secrets and variables -> Actions." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          # Telegram caps text at 4096 chars; our digest is ~1KB so no truncation needed.
+          curl -sS --max-time 20 -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${DIGEST}" >/dev/null
+          echo "digest sent to Telegram" >> "$GITHUB_STEP_SUMMARY"

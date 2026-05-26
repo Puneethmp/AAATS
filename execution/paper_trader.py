@@ -621,3 +621,252 @@ def assert_ledger_consistency_or_halt(
     if first_offender is not None:
         s, d = first_offender
         raise LedgerDivergenceError(s, d)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Layer L11 — Capital invariant guard (structural fix 2026-05-26)
+# ──────────────────────────────────────────────────────────────────────────
+# Closes the "silent capital drift" class of bug. Every strategy mutates
+# portfolio["capital"] symmetrically (debit at entry, credit at exit + pnl).
+# But there is no end-of-cycle check that asserts the books balance.
+# Historical incidents (2026-05-23 phantom-ENA, 2026-05-26 morning report):
+# operator sees `capital + open_positions ≠ starting_equity + realized_pnl`
+# and cannot tell whether it's a real leak or a visibility gap.
+#
+# Definition of the invariant — at end of every cycle:
+#
+#   expected_capital
+#     = starting_equity
+#     + sum(realized_pnl from paper_trades.db, market=this market)
+#     - sum(open_position_notional across ALL strategy state files)
+#
+# If |actual - expected| > tolerance, write an alert. If > halt threshold,
+# emit a critical log line (does NOT auto-halt — operator judges first).
+# Idempotent. Safe to call multiple times per cycle.
+CAPITAL_INVARIANT_TOLERANCE_USD = 0.50  # rounding noise floor
+CAPITAL_INVARIANT_WARN_USD = 2.00  # warn at this level
+CAPITAL_INVARIANT_CRITICAL_USD = 10.00  # log critical at this level
+CAPITAL_INVARIANT_ALERT_FILENAME = "capital_invariant_alerts.json"
+
+
+def _read_all_open_notional(state_dir: Path) -> float:
+    """Sum open-position notional across every strategy state file.
+
+    Pair strategies use entry_alloc × 2 (long + short legs). Symbol-keyed
+    strategies use size_usd. Files that don't exist contribute 0.
+    """
+    total = 0.0
+    for fname, (_strategy_id, key) in _STATE_FILES.items():
+        f = state_dir / fname
+        if not f.exists():
+            continue
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        for pos in data.values():
+            if not isinstance(pos, dict):
+                continue
+            try:
+                amount = float(pos.get(key, 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            # Pair strategies: entry_alloc is per-leg, two legs open.
+            multiplier = 2.0 if key == "entry_alloc" else 1.0
+            total += amount * multiplier
+    return total
+
+
+def _read_directional_open_notional(positions_dict: dict, market: str) -> float:
+    """Sum execute()-path directional positions (paper_positions.json) for
+    the market. These are NOT in the strategy-state files — they're tracked
+    separately by execute() via mkt_pos[symbol] = {shares, entry_price, ...}.
+    """
+    if not isinstance(positions_dict, dict):
+        return 0.0
+    mkt = positions_dict.get(market, {})
+    if not isinstance(mkt, dict):
+        return 0.0
+    total = 0.0
+    for pos in mkt.values():
+        if not isinstance(pos, dict):
+            continue
+        try:
+            shares = float(pos.get("shares", 0.0) or 0.0)
+            entry_price = float(pos.get("entry_price", 0.0) or 0.0)
+            total += shares * entry_price
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def compute_capital_invariant(
+    portfolio: dict,
+    market: str,
+    positions: dict | None = None,
+    db_path: str | None = None,
+    state_dir: Path | None = None,
+) -> dict[str, float]:
+    """Returns a dict with:
+    actual_capital     — portfolio[market]["capital"]
+    starting_equity    — portfolio[market]["starting_equity"]
+    realized_pnl_db    — sum of pnl from paper_trades.db for market
+    open_notional      — strategy_state + execute() directional positions
+    expected_capital   — derived from the three above
+    delta_usd          — actual - expected (positive = unexplained surplus,
+                                            negative = unexplained leak)
+    verdict            — "ok" | "watch" | "warn" | "critical"
+    """
+    if db_path is None:
+        db_path = os.environ.get("DB_PATH", "/app/data/paper_trades.db")
+    if state_dir is None:
+        state_dir = _ledger_data_dir()
+
+    mkt = portfolio.get(market, {}) if isinstance(portfolio, dict) else {}
+    actual = float(mkt.get("capital", 0.0) or 0.0)
+    starting = float(mkt.get("starting_equity", 0.0) or 0.0)
+
+    # Realized PnL from the DB — sum over all trades for this market.
+    realized = 0.0
+    if Path(db_path).exists():
+        try:
+            with sqlite3.connect(db_path) as conn:
+                row = conn.execute(
+                    "SELECT COALESCE(SUM(pnl), 0.0) FROM paper_trades "
+                    "WHERE market = ?",
+                    (market,),
+                ).fetchone()
+                if row and row[0] is not None:
+                    realized = float(row[0])
+        except sqlite3.OperationalError:
+            pass
+
+    strategy_open = _read_all_open_notional(state_dir)
+    directional_open = (
+        _read_directional_open_notional(positions or {}, market) if positions else 0.0
+    )
+    open_notional = strategy_open + directional_open
+
+    expected = starting + realized - open_notional
+    delta = actual - expected
+    abs_delta = abs(delta)
+
+    if abs_delta <= CAPITAL_INVARIANT_TOLERANCE_USD:
+        verdict = "ok"
+    elif abs_delta <= CAPITAL_INVARIANT_WARN_USD:
+        verdict = "watch"
+    elif abs_delta <= CAPITAL_INVARIANT_CRITICAL_USD:
+        verdict = "warn"
+    else:
+        verdict = "critical"
+
+    return {
+        "actual_capital": round(actual, 4),
+        "starting_equity": round(starting, 4),
+        "realized_pnl_db": round(realized, 4),
+        "strategy_open_notional": round(strategy_open, 4),
+        "directional_open_notional": round(directional_open, 4),
+        "open_notional": round(open_notional, 4),
+        "expected_capital": round(expected, 4),
+        "delta_usd": round(delta, 4),
+        "verdict": verdict,
+    }
+
+
+def assert_capital_invariant(
+    portfolio: dict,
+    market: str,
+    positions: dict | None = None,
+    db_path: str | None = None,
+    state_dir: Path | None = None,
+) -> dict[str, float]:
+    """End-of-cycle capital invariant check. Writes alert JSON on
+    watch/warn/critical. Returns the same dict as compute_capital_invariant
+    so the caller can log it.
+
+    Does NOT auto-halt — capital drift can have legitimate causes (operator
+    deposit/withdrawal, mid-cycle state file corruption recovery). Halting
+    on it would risk locking the operator out of a healthy bot. Instead the
+    alert chain (Telegram + Grafana) surfaces it; the operator decides.
+    """
+    result = compute_capital_invariant(
+        portfolio,
+        market,
+        positions=positions,
+        db_path=db_path,
+        state_dir=state_dir,
+    )
+    verdict = result["verdict"]
+    delta = result["delta_usd"]
+
+    if verdict == "ok":
+        # Clear stale alert file so Grafana goes back to baseline-zero.
+        f = _ledger_data_dir() / CAPITAL_INVARIANT_ALERT_FILENAME
+        if f.exists():
+            try:
+                existing = json.loads(f.read_text(encoding="utf-8"))
+                # Only overwrite if current state actually transitioned ok.
+                if existing.get("verdict") != "ok":
+                    payload = {
+                        "last_check_utc": datetime.now(timezone.utc).isoformat(),
+                        "market": market,
+                        "verdict": "ok",
+                        **result,
+                    }
+                    _write_capital_invariant_alert(payload)
+            except (OSError, json.JSONDecodeError):
+                pass
+        return result
+
+    # Non-OK — write alert.
+    payload = {
+        "last_check_utc": datetime.now(timezone.utc).isoformat(),
+        "market": market,
+        **result,
+    }
+    _write_capital_invariant_alert(payload)
+
+    if verdict == "critical":
+        _log.error(
+            "[L11] CAPITAL INVARIANT CRITICAL | market=%s | delta=$%.4f | "
+            "actual=$%.2f expected=$%.2f (starting=$%.2f + realized=$%.4f - open=$%.2f)",
+            market,
+            delta,
+            result["actual_capital"],
+            result["expected_capital"],
+            result["starting_equity"],
+            result["realized_pnl_db"],
+            result["open_notional"],
+        )
+    elif verdict == "warn":
+        _log.warning(
+            "[L11] capital invariant warn | market=%s | delta=$%.4f | actual=$%.2f expected=$%.2f",
+            market,
+            delta,
+            result["actual_capital"],
+            result["expected_capital"],
+        )
+    else:  # watch
+        _log.info(
+            "[L11] capital invariant watch | market=%s | delta=$%.4f (within rounding+slip band)",
+            market,
+            delta,
+        )
+
+    return result
+
+
+def _write_capital_invariant_alert(payload: dict[str, Any]) -> None:
+    """Atomic temp+mv into data/capital_invariant_alerts.json. Cross-container
+    handoff matches the L5 ledger_divergence_alerts.json pattern.
+    """
+    try:
+        f = _ledger_data_dir() / CAPITAL_INVARIANT_ALERT_FILENAME
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.replace(f)
+    except Exception as exc:
+        _log.warning("capital_invariant_alerts.json write failed: {}", exc)
