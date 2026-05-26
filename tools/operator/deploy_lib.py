@@ -75,6 +75,27 @@ HARD_REQUIRED_STATE_FILES: frozenset[str] = frozenset(
     ("paper_trades.db", "paper_positions.json", "paper_portfolio.json")
 )
 
+# Provisioned datasource UID — from
+# /srv/aaats/compose/grafana/provisioning/datasources/prometheus.yml.
+# NOT the literal string "prometheus" that Grafana dashboards sometimes
+# default to. Bit during 2026-05-26 v3 dashboard rollout: 143 panel-level
+# uid references to "prometheus" all rendered "No data" because the actual
+# provisioned datasource has uid "aaats-prom". Confirmed by:
+#   ssh aaats@100.95.126.39 'curl -s -u admin:<pw> http://localhost:3000/api/datasources'
+PROMETHEUS_DATASOURCE_UID: str = "aaats-prom"
+
+
+def grafana_datasource_ref() -> dict:
+    """Canonical Grafana datasource ref for a dashboard panel. Use this in
+    every dashboard JSON generator so the UID is right by construction.
+
+    Returns the dict that goes into both panel-level "datasource" and each
+    target's "datasource" field. Replaces ad-hoc {"type": "prometheus",
+    "uid": "prometheus"} literals — that "prometheus" UID does NOT match
+    the provisioned datasource and causes "No data" everywhere.
+    """
+    return {"type": "prometheus", "uid": PROMETHEUS_DATASOURCE_UID}
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # Line-ending normalization

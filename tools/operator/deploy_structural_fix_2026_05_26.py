@@ -50,6 +50,18 @@ except ImportError:
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
+# Pull in canonical deploy helpers so a re-run can't reintroduce the CRLF leak
+# path that landed v3 dashboard JSON on the box with Windows line endings
+# during the 2026-05-26 deploy. See tools/operator/deploy_lib.py.
+sys.path.insert(0, str(PROJECT_ROOT))
+from tools.operator.deploy_lib import (  # noqa: E402
+    atomic_upload_normalized,
+    clear_stale_git_locks,  # noqa: F401  (kept for symmetry with other deploy scripts)
+    enforce_utf8_console,
+)
+
+enforce_utf8_console()
+
 
 def load_env(path: pathlib.Path) -> dict[str, str]:
     env: dict[str, str] = {}
@@ -120,14 +132,15 @@ def run(
 
 
 def atomic_upload(sftp: paramiko.SFTPClient, local: pathlib.Path, remote: str) -> None:
-    """Upload to <remote>.tmp then mv into place. Match the existing
-    deploy-discipline pattern from CLAUDE.md."""
-    tmp = remote + ".tmp"
+    """Atomic .tmp + posix_rename swap with line-ending normalization for
+    textual files. Thin wrapper over deploy_lib.atomic_upload_normalized so
+    this script can't reintroduce the CRLF leak path. Retrofitted 2026-05-26
+    after the v3 dashboard JSON landed on the box with Windows line endings.
+    """
     print(
         f"  → upload {local.name} ({local.stat().st_size}B sha={sha256_of(local)}) -> {remote}"
     )
-    sftp.put(str(local), tmp)
-    sftp.posix_rename(tmp, remote)
+    atomic_upload_normalized(sftp, local, remote)
 
 
 def main() -> int:
