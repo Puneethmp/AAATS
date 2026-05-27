@@ -173,6 +173,56 @@ Out of B.1.5 scope (deferred to other tracks):
 
 ---
 
+---
+
+## Known model gap: live C3 path applies zero slippage
+
+Added 2026-05-27 during Phase 2 deploy. The harness and the live strategy code use **different slippage models** today; live = zero, harness = configurable. Surfaced here so future sessions don't conflate harness PnL with live (soak) PnL.
+
+### What live C3 does
+
+The C3 live runner at [trading/altcoin_reversion.py](../../trading/altcoin_reversion.py) computes capital directly from raw bar-close prices:
+
+- **EXIT** ([altcoin_reversion.py:653](../../trading/altcoin_reversion.py#L653)): `capital += size + pnl` — capital returns plus computed PnL, where `pnl` is derived from raw close prices, no slippage subtraction.
+- **ENTRY** ([altcoin_reversion.py:754](../../trading/altcoin_reversion.py#L754)): `capital -= trade_usd` — full notional deducted, no slippage charge.
+
+The runner-level `_fill_price` helper at [live_paper_runner.py:1055-1083](../../trading/live_paper_runner.py#L1055-L1083) DOES model dynamic slippage (0.10–0.40% based on realized vol), but C3 doesn't route through it — C3's per-cycle code path computes its own capital math independently.
+
+### What the C3 harness does
+
+[tools/backtest/c3_replay.py:127,200](../../tools/backtest/c3_replay.py#L127) applies a configurable `slippage_bps` symmetrically (entry pays +slip, exit pays -slip). The Phase 1 run on 60d cached data:
+
+| Slippage | PnL ($100 cap) | Sharpe | Win rate | Recommendation |
+|---|---|---|---|---|
+| 0 bps (headline) | **+$5.43** | +1.52 | 47.7% | PARTIAL (passes pnl/sharpe/regimes, fails slip-sensitivity gate) |
+| 50 bps | **-$5.72** | -2.08 | 31.6% | (PARTIAL because pnl<0 in this sensitivity branch) |
+
+50bps is a realistic round-trip cost for Binance USDT spot at small notional (taker fee 10bps + spread 5–25bps round-trip). The strategy's headline P&L hides this fragility.
+
+### Consequences
+
+1. **Soak C3 PnL is biased optimistic.** Real-world live-flip fills will eat 5–20bps round-trip. The +$0.99 realized PnL on the running soak (per `runtime/paper_portfolio.json`) reflects zero-slippage accounting; live-money equivalent would be lower (perhaps net-negative for some windows).
+2. **Don't compare harness PnL to live PnL directly.** They measure different things. The harness's **slippage-sensitivity output** IS the live-flip risk model — not the headline-PnL number.
+3. **GO/NO-GO must read the slippage row.** The session-9 recommendation rule already requires `slippage_sensitivity_50bps_pnl_usd > 0` for a GO verdict ([run_b15_c3.py:53-73](../../tools/backtest/run_b15_c3.py#L53-L73)). Today's verdict (PARTIAL) is the correct one — the strategy is not yet live-flip ready under realistic slippage assumptions.
+
+### Resolution paths (out of B.1.5 scope — future sprint)
+
+Two options for closing the model gap:
+
+(a) **Make C3 live path apply slippage.** Modify `trading/altcoin_reversion.py` to call `live_paper_runner._fill_price` (or an equivalent helper) on entry + exit, so the live capital math mirrors the harness math. Pro: single source of truth. Con: changes live behavior mid-soak; would invalidate the current 30d baseline.
+
+(b) **Document a paper→live haircut factor at the GO/NO-GO threshold.** Leave live C3 as-is; teach the doctrine criterion to apply a haircut (e.g. "live-flip GO if harness 50bps PnL > 0 AND paper-soak PnL > harness 50bps PnL + N%"). Pro: no live-code change mid-soak. Con: adds doctrine complexity, harder to audit.
+
+Operator decision; queue for post-D.5-soak triage.
+
+### Cross-references
+
+- [aaats_c3_slippage_fragility.md] in memory — concise anchor for live-flip readiness reviews.
+- [tools/backtest/c3_replay.py:127](../../tools/backtest/c3_replay.py#L127) — entry slippage application
+- [tools/backtest/c3_replay.py:200](../../tools/backtest/c3_replay.py#L200) — exit slippage application
+
+---
+
 ## Cross-references
 
 - Inventory: [docs/specs/b15_data_inventory.md](b15_data_inventory.md)
