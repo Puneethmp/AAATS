@@ -1,73 +1,3 @@
-[32m10:16:48[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN risk...): duplicate column name: risk_action
-[32m10:16:48[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN clie...): duplicate column name: client_order_id
-[32m10:16:48[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN corr...): duplicate column name: correlation_id
-[32m10:16:48[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [1mINFO    [0m | PAPER SELL BFUSD/USDT @ 0.9998 x10.603122 | strat=C6_bollinger_range | regime=RANGE_BOUND | cli=766f2e77c8e6 | corr=62fa1aa0
-2026-05-27T10:16:48Z  INFO     trading.bollinger_range  [c6] EXIT  BFUSD/USDT  reason=pct_b_target(0.928>=0.5)  pnl=$0.0032 (+0.03%)  cap=$151.82
-2026-05-27T10:16:48Z  INFO     paper_runner    [reconcile] crypto portfolio stats refreshed from DB: trades 127→128, realized_pnl +1.1458→+1.1490
-2026-05-27T10:16:48Z  INFO     paper_runner  == Crypto cycle done | capital=USD 151.82 ==
-[32m10:16:48[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter (drift): SPK/USDT drift_shares=0.000000 notional<$0.25 — skip
-[32m10:16:48[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter (drift): ONDO/USDT drift_shares=0.000000 notional<$0.25 — skip
-[32m10:16:48[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | reconciler: filtered 2 dust drift entries (notional < $0.25)
-[32m10:16:48[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | Reconciliation clean | checked=2 positions across crypto
-2026-05-27T10:16:48Z  INFO     paper_runner    Cycle 10 done in 6.6s — sleeping 893s
-2026-05-27T10:16:48Z  INFO     paper_runner  [runner] cycle 10 complete: C1=hold(1) C2=idle C3=hold(2,picks=3) C5b=halted_src C6=idle(picks=1)
-2026-05-27T10:31:42Z  INFO     paper_runner  ── Cycle 11 ─────────────────────────────────────
-2026-05-27T10:31:42Z  INFO     paper_runner  == Crypto cycle | capital=USD 151.82 ==
-2026-05-27T10:31:43Z  INFO     paper_runner    BTC dominance proxy: 55.5%
-2026-05-27T10:31:43Z  INFO     paper_runner    [BTC/USDT] price=76009.1300 | BTC.D=55.5%
-2026-05-27T10:31:43Z  INFO     paper_runner      regime=BEAR_TREND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
-2026-05-27T10:31:43Z  INFO     paper_runner      ML gate: conf=0.115 -> SKIP HOLD
-2026-05-27T10:31:43Z  INFO     paper_runner    [ETH/USDT] price=2085.8100 | BTC.D=55.5%
-2026-05-27T10:31:43Z  INFO     paper_runner      regime=BULL_TREND(0.98) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
-[32m10:31:43[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
-2026-05-27T10:31:43Z  INFO     paper_runner    ⏸  HOLD ETH/USDT @ 2085.8100
-[32m10:31:43[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT CRYPTO — CRYPTO drawdown -17.2% breached -15% halt threshold
-2026-05-27T10:31:43Z  INFO     paper_runner    [SOL/USDT] price=84.0200 | BTC.D=55.5%
-2026-05-27T10:31:44Z  INFO     paper_runner      regime=RANGE_BOUND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
-2026-05-27T10:31:44Z  INFO     paper_runner    📊 Fear & Greed: 25 (Extreme Fear)
-[32m10:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
-2026-05-27T10:31:44Z  INFO     paper_runner    ⏸  HOLD SOL/USDT @ 84.0200
-2026-05-27T10:31:44Z  INFO     paper_runner    [LINK/USDT] price=9.3640 | BTC.D=55.5%
-2026-05-27T10:31:44Z  INFO     paper_runner      regime=BULL_TREND(0.78) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
-[32m10:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT CRYPTO — CRYPTO drawdown -17.2% breached -15% halt threshold
-[32m10:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
-2026-05-27T10:31:44Z  INFO     paper_runner    ⏸  HOLD LINK/USDT @ 9.3640
-2026-05-27T10:31:44Z  INFO     paper_runner    [DOT/USDT] price=1.2610 | BTC.D=55.5%
-2026-05-27T10:31:44Z  INFO     paper_runner      regime=BULL_TREND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
-[32m10:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT CRYPTO — CRYPTO drawdown -17.2% breached -15% halt threshold
-[32m10:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
-2026-05-27T10:31:44Z  INFO     paper_runner    ⏸  HOLD DOT/USDT @ 1.2610
-2026-05-27T10:31:44Z  INFO     paper_runner    [AVAX/USDT] price=9.1650 | BTC.D=55.5%
-2026-05-27T10:31:44Z  INFO     paper_runner      regime=BULL_TREND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
-[32m10:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT CRYPTO — CRYPTO drawdown -17.2% breached -15% halt threshold
-[32m10:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
-[32m10:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT CRYPTO — CRYPTO drawdown -17.2% breached -15% halt threshold
-2026-05-27T10:31:44Z  INFO     paper_runner    ⏸  HOLD AVAX/USDT @ 9.1650
-2026-05-27T10:31:45Z  INFO     trading.stat_arb    [BTC/USDT/ETH/USDT] spread=3.5957 z=-0.801 prices=(76009.1400, 2085.8100)
-2026-05-27T10:31:45Z  INFO     paper_runner  [scanner] universe size=27  top5=['USD1/USDT', 'NEAR/USDT', 'RLUSD/USDT', 'WLD/USDT', 'ALT/USDT']
-2026-05-27T10:31:48Z  INFO     markets.crypto.scanner  [scanner] universe=27 fetched=27 skipped=0  candidates: c3=4, c6=2
-2026-05-27T10:31:48Z  INFO     markets.crypto.scanner  [scanner] c3 top3: ENA/USDT(-2.197), PENDLE/USDT(-2.133), ONDO/USDT(-1.793)
-2026-05-27T10:31:48Z  INFO     markets.crypto.scanner  [scanner] c6 top3: USD1/USDT(-0.087), PENDLE/USDT(-0.076)
-2026-05-27T10:31:48Z  INFO     markets.crypto.allocator  [allocator] capital=$151.82  open=0/6  per_strategy_counts={}
-2026-05-27T10:31:48Z  INFO     markets.crypto.allocator  [allocator] c3 picks (top 3): ENA/USDT, PENDLE/USDT, ONDO/USDT
-2026-05-27T10:31:48Z  INFO     markets.crypto.allocator  [allocator] c6 picks (top 1): USD1/USDT
-2026-05-27T10:31:48Z  INFO     paper_runner  [scanner] final plan: c3=['ENA/USDT', 'PENDLE/USDT', 'ONDO/USDT']  c6=['USD1/USDT']  fg=25  skip_c3=False  skip_c6=False
-2026-05-27T10:31:48Z  INFO     trading.altcoin_reversion  [c3] also evaluating 1 held position(s) outside picks: ['SPK/USDT']
-2026-05-27T10:31:48Z  INFO     trading.altcoin_reversion  [c3] cooldown active for: EDEN/USDT(1.7h), UNI/USDT(4.9h), 币安人生/USDT(8.7h), SAHARA/USDT(12.2h)
-2026-05-27T10:31:49Z  INFO     trading.altcoin_reversion  [c3] HOLD  ONDO/USDT  z=-1.785  pct=-1.04%  age=12.6h
-2026-05-27T10:31:49Z  INFO     trading.altcoin_reversion  [c3] HOLD  SPK/USDT  z=-1.410  pct=-2.42%  age=23.8h
-2026-05-27T10:31:49Z  INFO     trading.bollinger_range  [c6] USD1/USDT  price=0.9996  %B=0.125  RSI=29.3  regime=RANGE_BOUND
-2026-05-27T10:31:49Z  INFO     trading.bollinger_range  [c6] USD1/USDT: volume below floor — skip
-2026-05-27T10:31:49Z  INFO     paper_runner  == Crypto cycle done | capital=USD 151.82 ==
-[32m10:31:49[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter (drift): SPK/USDT drift_shares=0.000000 notional<$0.25 — skip
-[32m10:31:49[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter (drift): ONDO/USDT drift_shares=0.000000 notional<$0.25 — skip
-[32m10:31:49[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | reconciler: filtered 2 dust drift entries (notional < $0.25)
-[32m10:31:49[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | Reconciliation clean | checked=2 positions across crypto
-2026-05-27T10:31:49Z  INFO     paper_runner    Cycle 11 done in 6.9s — sleeping 893s
-2026-05-27T10:31:49Z  INFO     paper_runner  [runner] cycle 11 complete: C1=hold(1) C2=idle C3=hold(2,picks=3) C5b=halted_src C6=idle(picks=1)
-2026-05-27T10:46:42Z  INFO     paper_runner  ── Cycle 12 ─────────────────────────────────────
-2026-05-27T10:46:42Z  INFO     paper_runner  == Crypto cycle | capital=USD 151.82 ==
-2026-05-27T10:46:43Z  INFO     paper_runner    BTC dominance proxy: 55.9%
 2026-05-27T10:46:44Z  INFO     paper_runner    [BTC/USDT] price=75914.3900 | BTC.D=55.9%
 2026-05-27T10:46:44Z  INFO     paper_runner      regime=BEAR_TREND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
 2026-05-27T10:46:44Z  INFO     paper_runner      ML gate: conf=0.154 -> SKIP HOLD
@@ -498,3 +428,73 @@
 [32m12:16:53[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | Reconciliation clean | checked=1 positions across crypto
 2026-05-27T12:16:53Z  INFO     paper_runner    Cycle 18 done in 11.2s — sleeping 889s
 2026-05-27T12:16:53Z  INFO     paper_runner  [runner] cycle 18 complete: C1=hold(1) C2=idle C3=hold(1,picks=3) C5b=halted_src C6=idle(picks=2)
+2026-05-27T12:31:42Z  INFO     paper_runner  ── Cycle 19 ─────────────────────────────────────
+2026-05-27T12:31:42Z  INFO     paper_runner  == Crypto cycle | capital=USD 161.76 ==
+2026-05-27T12:31:43Z  INFO     paper_runner    BTC dominance proxy: 56.4%
+2026-05-27T12:31:44Z  INFO     paper_runner    [BTC/USDT] price=75946.6700 | BTC.D=56.4%
+2026-05-27T12:31:44Z  INFO     paper_runner      regime=BULL_TREND(0.94) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
+[32m12:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
+2026-05-27T12:31:44Z  INFO     paper_runner    ⏸  HOLD BTC/USDT @ 75946.6700
+2026-05-27T12:31:44Z  INFO     paper_runner    [ETH/USDT] price=2085.0100 | BTC.D=56.4%
+[32m12:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT CRYPTO — CRYPTO drawdown -17.3% breached -15% halt threshold
+2026-05-27T12:31:44Z  INFO     paper_runner      regime=BEAR_TREND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
+[32m12:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
+2026-05-27T12:31:44Z  INFO     paper_runner    ⏸  HOLD ETH/USDT @ 2085.0100
+2026-05-27T12:31:44Z  INFO     paper_runner    [SOL/USDT] price=84.3600 | BTC.D=56.4%
+[32m12:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT CRYPTO — CRYPTO drawdown -17.3% breached -15% halt threshold
+2026-05-27T12:31:44Z  INFO     paper_runner      regime=BEAR_TREND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
+[32m12:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
+2026-05-27T12:31:44Z  INFO     paper_runner    ⏸  HOLD SOL/USDT @ 84.3600
+2026-05-27T12:31:44Z  INFO     paper_runner    [LINK/USDT] price=9.4380 | BTC.D=56.4%
+2026-05-27T12:31:44Z  INFO     paper_runner      regime=RANGE_BOUND(0.92) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
+[32m12:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT CRYPTO — CRYPTO drawdown -17.3% breached -15% halt threshold
+[32m12:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
+[32m12:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT CRYPTO — CRYPTO drawdown -17.3% breached -15% halt threshold
+2026-05-27T12:31:44Z  INFO     paper_runner    ⏸  HOLD LINK/USDT @ 9.4380
+2026-05-27T12:31:44Z  INFO     paper_runner    [DOT/USDT] price=1.2710 | BTC.D=56.4%
+2026-05-27T12:31:44Z  INFO     paper_runner      regime=RANGE_BOUND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
+[32m12:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
+2026-05-27T12:31:44Z  INFO     paper_runner    ⏸  HOLD DOT/USDT @ 1.2710
+2026-05-27T12:31:44Z  INFO     paper_runner    [AVAX/USDT] price=9.2130 | BTC.D=56.4%
+2026-05-27T12:31:44Z  INFO     paper_runner      regime=BULL_TREND(0.94) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
+[32m12:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT CRYPTO — CRYPTO drawdown -17.3% breached -15% halt threshold
+[32m12:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
+2026-05-27T12:31:44Z  INFO     paper_runner    ⏸  HOLD AVAX/USDT @ 9.2130
+[32m12:31:44[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT CRYPTO — CRYPTO drawdown -17.3% breached -15% halt threshold
+2026-05-27T12:31:44Z  INFO     trading.stat_arb    [BTC/USDT/ETH/USDT] spread=3.5953 z=-0.845 prices=(75946.6700, 2085.0100)
+2026-05-27T12:31:44Z  INFO     paper_runner  [scanner] universe size=24  top5=['USD1/USDT', 'NEAR/USDT', 'RLUSD/USDT', 'WLD/USDT', 'ALT/USDT']
+2026-05-27T12:31:48Z  INFO     markets.crypto.scanner  [scanner] universe=24 fetched=24 skipped=0  candidates: c3=2, c6=2
+2026-05-27T12:31:48Z  INFO     markets.crypto.scanner  [scanner] c3 top3: PENDLE/USDT(-2.416), NIL/USDT(-1.705)
+2026-05-27T12:31:48Z  INFO     markets.crypto.scanner  [scanner] c6 top3: USD1/USDT(-0.171), PENDLE/USDT(-0.130)
+2026-05-27T12:31:48Z  INFO     markets.crypto.allocator  [allocator] capital=$161.76  open=0/6  per_strategy_counts={}
+2026-05-27T12:31:48Z  INFO     markets.crypto.allocator  [allocator] c3 picks (top 2): PENDLE/USDT, NIL/USDT
+2026-05-27T12:31:48Z  INFO     markets.crypto.allocator  [allocator] c6 picks (top 1): USD1/USDT
+2026-05-27T12:31:48Z  INFO     paper_runner  [scanner] final plan: c3=['PENDLE/USDT', 'NIL/USDT']  c6=['USD1/USDT']  fg=25  skip_c3=False  skip_c6=False
+2026-05-27T12:31:48Z  INFO     trading.altcoin_reversion  [c3] also evaluating 1 held position(s) outside picks: ['ONDO/USDT']
+2026-05-27T12:31:48Z  INFO     trading.altcoin_reversion  [c3] cooldown active for: UNI/USDT(2.9h), 币安人生/USDT(6.7h), SAHARA/USDT(10.2h), SPK/USDT(22.2h)
+[32m12:31:48[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
+2026-05-27T12:31:48Z  WARNING  paper_runner    🛑 RISK HALT [crypto]: CRYPTO drawdown -17.3% breached -15% halt threshold
+[32m12:31:48[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT CRYPTO — CRYPTO drawdown -17.3% breached -15% halt threshold
+2026-05-27T12:31:49Z  INFO     httpx  HTTP Request: POST https://api.telegram.org/bot8383494278:AAHPs1_Z8e0-oRB59YpU8cNSBtfVuZ0Tss8/getMe "HTTP/1.1 200 OK"
+2026-05-27T12:31:49Z  INFO     httpx  HTTP Request: POST https://api.telegram.org/bot8383494278:AAHPs1_Z8e0-oRB59YpU8cNSBtfVuZ0Tss8/sendMessage "HTTP/1.1 200 OK"
+2026-05-27T12:31:49Z  INFO     trading.altcoin_reversion  [c3] PENDLE/USDT: SKIP BUY — kill switch active (CRYPTO drawdown -17.3% breached -15% halt threshold)
+[32m12:31:49[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
+[32m12:31:49[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT CRYPTO — CRYPTO drawdown -17.3% breached -15% halt threshold
+2026-05-27T12:31:49Z  WARNING  paper_runner    🛑 RISK HALT [crypto]: CRYPTO drawdown -17.3% breached -15% halt threshold
+2026-05-27T12:31:50Z  INFO     httpx  HTTP Request: POST https://api.telegram.org/bot8383494278:AAHPs1_Z8e0-oRB59YpU8cNSBtfVuZ0Tss8/getMe "HTTP/1.1 200 OK"
+2026-05-27T12:31:50Z  INFO     httpx  HTTP Request: POST https://api.telegram.org/bot8383494278:AAHPs1_Z8e0-oRB59YpU8cNSBtfVuZ0Tss8/sendMessage "HTTP/1.1 200 OK"
+2026-05-27T12:31:50Z  INFO     trading.altcoin_reversion  [c3] NIL/USDT: SKIP BUY — kill switch active (CRYPTO drawdown -17.3% breached -15% halt threshold)
+2026-05-27T12:31:50Z  INFO     trading.altcoin_reversion  [c3] HOLD  ONDO/USDT  z=-1.133  pct=+0.25%  age=14.6h
+2026-05-27T12:31:50Z  INFO     trading.bollinger_range  [c6] USD1/USDT  price=0.9995  %B=0.029  RSI=23.5  regime=RANGE_BOUND
+[32m12:31:50[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
+2026-05-27T12:31:50Z  WARNING  paper_runner    🛑 RISK HALT [crypto]: CRYPTO drawdown -17.3% breached -15% halt threshold
+[32m12:31:50[0m | [36mrisk        [0m | [36mengine              [0m | [31m[1mERROR   [0m | HALT CRYPTO — CRYPTO drawdown -17.3% breached -15% halt threshold
+2026-05-27T12:31:51Z  INFO     httpx  HTTP Request: POST https://api.telegram.org/bot8383494278:AAHPs1_Z8e0-oRB59YpU8cNSBtfVuZ0Tss8/getMe "HTTP/1.1 200 OK"
+2026-05-27T12:31:51Z  INFO     httpx  HTTP Request: POST https://api.telegram.org/bot8383494278:AAHPs1_Z8e0-oRB59YpU8cNSBtfVuZ0Tss8/sendMessage "HTTP/1.1 200 OK"
+2026-05-27T12:31:51Z  INFO     trading.bollinger_range  [c6] USD1/USDT: SKIP BUY — kill switch active (CRYPTO drawdown -17.3% breached -15% halt threshold)
+2026-05-27T12:31:51Z  INFO     paper_runner  == Crypto cycle done | capital=USD 161.76 ==
+[32m12:31:51[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter (drift): ONDO/USDT drift_shares=0.000000 notional<$0.25 — skip
+[32m12:31:51[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | reconciler: filtered 1 dust drift entries (notional < $0.25)
+[32m12:31:51[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | Reconciliation clean | checked=1 positions across crypto
+2026-05-27T12:31:51Z  INFO     paper_runner    Cycle 19 done in 9.3s — sleeping 891s
+2026-05-27T12:31:51Z  INFO     paper_runner  [runner] cycle 19 complete: C1=hold(1) C2=idle C3=hold(1,picks=2) C5b=halted_src C6=idle(picks=1)
