@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
 
@@ -98,12 +98,17 @@ class StrategyOptimizer:
                        ORDER BY created_at""",
                     (self._market, cutoff),
                 ).fetchall()
-            return [{"action": r[0], "pnl": r[1] or 0.0, "regime": r[2], "signal": r[3]} for r in rows]
+            return [
+                {"action": r[0], "pnl": r[1] or 0.0, "regime": r[2], "signal": r[3]}
+                for r in rows
+            ]
         except Exception as exc:
             _log.warning(f"Could not load trades: {exc}")
             return []
 
-    def _score(self, trades: list[dict], params: dict) -> tuple[float, float, float, int]:
+    def _score(
+        self, trades: list[dict], params: dict
+    ) -> tuple[float, float, float, int]:
         """
         Simulate simple scoring against trades for given params.
         Returns (win_rate, total_pnl, sharpe, trade_count).
@@ -121,8 +126,10 @@ class StrategyOptimizer:
         if len(pnls) > 1:
             mean = total_pnl / len(pnls)
             variance = sum((p - mean) ** 2 for p in pnls) / len(pnls)
-            std = variance ** 0.5
-            sharpe = (mean / std * (252 ** 0.5)) if std > 0 else 0.0
+            std = variance**0.5
+            # sqrt(8760) annualizes for crypto 24/7 (365*24 hourly bars/year);
+            # sqrt(252) was stock convention. See docs/specs/b15_data_inventory.md §3a.
+            sharpe = (mean / std * (8760**0.5)) if std > 0 else 0.0
         else:
             sharpe = 0.0
 
@@ -134,12 +141,18 @@ class StrategyOptimizer:
         trades = self._load_trades()
 
         if not trades:
-            _log.warning(f"No trades found for {self._market} — returning default params")
+            _log.warning(
+                f"No trades found for {self._market} — returning default params"
+            )
             default_params = {k: v[1] for k, v in grid.items()}
             return OptimizationResult(
-                market=self._market, params=default_params,
-                win_rate=0.0, total_pnl=0.0, sharpe_ratio=0.0,
-                total_trades=0, optimized_at=time.time(),
+                market=self._market,
+                params=default_params,
+                win_rate=0.0,
+                total_pnl=0.0,
+                sharpe_ratio=0.0,
+                total_trades=0,
+                optimized_at=time.time(),
             )
 
         keys = list(grid.keys())
@@ -188,8 +201,15 @@ class StrategyOptimizer:
                 """INSERT INTO optimization_results
                    (market, params, win_rate, total_pnl, sharpe_ratio, total_trades, optimized_at)
                    VALUES (?,?,?,?,?,?,?)""",
-                (result.market, json.dumps(result.params), result.win_rate,
-                 result.total_pnl, result.sharpe_ratio, result.total_trades, result.optimized_at),
+                (
+                    result.market,
+                    json.dumps(result.params),
+                    result.win_rate,
+                    result.total_pnl,
+                    result.sharpe_ratio,
+                    result.total_trades,
+                    result.optimized_at,
+                ),
             )
 
     def get_best_params(self) -> dict:

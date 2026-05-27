@@ -1,0 +1,16 @@
+# AAATS sqrt(252)→sqrt(8760) rollback baseline
+# Generated: 2026-05-27T09:21:27.376769+00:00
+# Host: aaats@100.95.126.39
+
+## Files changed (workstation -> box)
+  monitoring/metrics_exporter.py  ->  /home/aaats/aaats/monitoring/metrics_exporter.py
+    sha256_16 = 2cbce4dbd53bdb42
+    size      = 89972B
+  analytics/strategy_optimizer.py  ->  /home/aaats/aaats/analytics/strategy_optimizer.py
+    sha256_16 = 9ea69c8d514995ac
+    size      = 7671B
+
+## Rollback steps
+  1. On box: cp <path>.bak-<ts> <path> for each backup taken.
+  2. On box: docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-metrics
+  3. Sharpe panel will revert to sqrt(252) values (~5.9× higher than corrected).

@@ -848,7 +848,10 @@ def collect_performance_timeline() -> list[str]:
                 mean_r = sum(pnls) / len(pnls)
                 var_r = sum((x - mean_r) ** 2 for x in pnls) / len(pnls)
                 std_r = math.sqrt(var_r) if var_r > 0 else 0.001
-                sharpe = (mean_r / std_r) * math.sqrt(252) if std_r > 0 else 0.0
+                # sqrt(8760) annualizes 1h-bar returns for crypto 24/7
+                # (8760 = 365 * 24); sqrt(252) was stock-market convention
+                # and wrong for 24/7 markets. See docs/specs/b15_data_inventory.md §3a.
+                sharpe = (mean_r / std_r) * math.sqrt(8760) if std_r > 0 else 0.0
                 out.append(
                     _g(
                         "aaats_rolling_sharpe_14d",
