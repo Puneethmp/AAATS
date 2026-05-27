@@ -223,12 +223,62 @@ Operator decision; queue for post-D.5-soak triage.
 
 ---
 
+---
+
+## C6 Sharpe sanity check (Phase 3)
+
+Added 2026-05-27 during Phase 3. The post-sqrt-fix live `aaats_rolling_sharpe_14d` panel reads ≈8.4 for C6 (`bollinger_range`), which would be exceptional if real. Built a minimal harness ([tools/backtest/c6_replay.py](../../tools/backtest/c6_replay.py)) and ran 60d corroboration to confirm vs. dismiss.
+
+### Setup
+
+- Universe: BTC/USDT, ETH/USDT, SOL/USDT (matches `bollinger_range.SYMBOLS`).
+- Cache: `data/historical/{BTC,ETH,SOL}_USDT_1h.parquet`, window 2026-03-24T11Z → 2026-05-23T10Z, 1440 bars × 3 symbols.
+- Strategy parameters snapshot at trading/bollinger_range constants (BB(20,2), RSI(14), %B entry < 0.15, RSI entry < 32, target %B ≥ 0.50, TP +1.5%, stop -1.0%, time-stop 12h, CAPITAL_PCT 6%, MAX_CONCURRENT 2).
+- Two simplifications vs. live, both PERMISSIVE (make replay look better than live should):
+  - **Regime gate skipped** in permissive run (live requires HMM-RANGE_BOUND).
+  - **Regime-flip exit skipped** (live exits on flip to BULL/BEAR).
+- Regime-gated run uses a BTC BBand-width <50th-percentile proxy (narrow bands ≈ RANGE_BOUND) as a transparent stand-in for the HMM.
+
+### Results
+
+| Run | Trades | PnL ($100 cap) | Sharpe | Win rate | Profit factor | Max DD |
+|---|---|---|---|---|---|---|
+| Permissive, 0 slip | 85 | **-$0.87** | -1.28 | 49.4% | 0.67 | 0.9% |
+| Permissive, 50bps | 105 | -$6.59 | -9.80 | 12.4% | 0.04 | 6.6% |
+| Regime-gated, 0 slip | 44 | -$0.64 | -1.82 | 43.2% | 0.58 | 0.7% |
+| Regime-gated, 50bps | 55 | -$3.61 | -10.09 | 14.5% | 0.05 | 3.6% |
+
+### Verdict — (c) per Phase-3 prompt taxonomy: <2 or negative
+
+**C6 has no demonstrated edge on this 60d window.** Sharpe is negative even at zero friction, in both permissive (no regime gate) and regime-gated configurations. Regime gating actually made Sharpe *worse* (-1.28 → -1.82) — the trades filtered out were marginally net-positive, suggesting the strategy's signal degrades under stricter conditions rather than improving.
+
+The gap to the live 14d Sharpe of +8.41 is **9.7 units**. Neither regime gating nor slippage modeling can explain that. The most defensible interpretation: the live 14d reading is a small-sample artifact (window may contain only 2–4 closed C6 trades, favorable bar alignment, or coincident pickup of a single strong move).
+
+### Recommendation — downweight live 14d Sharpe in any forward decision
+
+Per the Phase-3 prompt's explicit warning for verdict (c): **do not treat the live 14d aaats_rolling_sharpe_14d for C6 as a real edge.** When evaluating C6 for any forward decision (live-flip readiness, capital allocation, parameter changes), use the 60d harness number (Sharpe -1.28 permissive / -1.82 gated), not the rolling 14d panel.
+
+### What this does NOT do
+
+Per the prompt: **NOT changing live thresholds based on this finding alone.** The doctrine bakes in strategy-level decisions in Phase 4 when all strategies have 60d verdicts. Live C6 continues to run during the soak; the operator decides post-D.5 whether to keep, retune, or retire it.
+
+### Caveats specific to this corroboration
+
+1. **Single 60d window.** A different window might produce a different Sharpe. The fact that one window shows negative is not "C6 is permanently dead"; it is "C6 has no robust edge in this window."
+2. **BBand-width proxy is approximate.** The live HMM regime classifier uses additional signals (returns autocorrelation, dispersion). The proxy is a first-order stand-in.
+3. **Spread + fees set to 0 in base run.** Same caveat as C3 / C1 — real-world Binance fills will eat additional bps.
+4. **Statsmodels not installed on workstation** — affects C1 cointegration check only (forced p=0.0). C6 has no cointegration dependency.
+
+---
+
 ## Cross-references
 
 - Inventory: [docs/specs/b15_data_inventory.md](b15_data_inventory.md)
 - Original session-9 spec: [docs/decisions/2026-05-22_b15_backtest_harness.md](../decisions/2026-05-22_b15_backtest_harness.md)
 - Locked doctrine: [docs/operator/aaats_locked_doctrine_2026_05_14.md](../operator/aaats_locked_doctrine_2026_05_14.md)
 - Doctrine amendment: [docs/decisions/2026-05-23_doctrine_amendment_200_floor.md](../decisions/2026-05-23_doctrine_amendment_200_floor.md)
+- C1 replay: [tools/backtest/c1_replay.py](../../tools/backtest/c1_replay.py)
 - C3 replay: [tools/backtest/c3_replay.py](../../tools/backtest/c3_replay.py)
 - C3 runner: [tools/backtest/run_b15_c3.py](../../tools/backtest/run_b15_c3.py)
+- C6 replay: [tools/backtest/c6_replay.py](../../tools/backtest/c6_replay.py)
 - Backtest engine: [backtesting/engine.py](../../backtesting/engine.py)
