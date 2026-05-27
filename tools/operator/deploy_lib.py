@@ -288,10 +288,31 @@ def preflight_ruff_format(
 
 
 def ensure_remote_dirs(client, paths: Iterable[str]) -> None:
-    """mkdir -p on the box for each remote path's parent dir. Idempotent.
+    """mkdir -p on the box for each remote path's PARENT dir. Idempotent.
 
-    `paths` are absolute remote paths (file paths, not dirs). The function
-    extracts each parent and mkdir -p's them in a single SSH round-trip.
+    `paths` are absolute remote FILE paths (NOT dir paths). The function
+    extracts each parent via PurePosixPath(p).parent and mkdir -p's the
+    parents in a single SSH round-trip.
+
+    Right:
+        ensure_remote_dirs(client, [
+            "/home/aaats/aaats/data/capital_invariant_baseline.json",
+            "/home/aaats/aaats/docs/known_issues/foo.md",
+        ])
+        # → mkdir -p /home/aaats/aaats/data /home/aaats/aaats/docs/known_issues
+
+    Wrong (creates the WRONG dirs):
+        ensure_remote_dirs(client, [
+            "/home/aaats/aaats/data",
+            "/home/aaats/aaats/docs/known_issues",
+        ])
+        # → mkdir -p /home/aaats/aaats /home/aaats/aaats/docs
+        # → the actual target dirs are NEVER created; upload fails downstream.
+
+    Tripped on the 2026-05-27 L11 baseline deploy; the name reads like
+    "ensure these dirs exist" but the body makes parents. Either pass
+    list(CHANGED_FILES.values()) directly (the file paths you're about
+    to upload) or compose your own dir list and don't use this helper.
     """
     dirs: set[str] = set()
     for p in paths:
