@@ -43,6 +43,9 @@ logs/
 # B.1.5 backtest harness OHLCV cache (see docs/specs/b15_data_inventory.md)
 !data/historical/
 !data/historical/*.parquet
+# B.1.5 backtest outputs are deliverables, not transient state
+!data/backtest_results/
+!data/backtest_results/*.json
 
 # ── ML model weights ──────────────────────────────────────────
 models/
