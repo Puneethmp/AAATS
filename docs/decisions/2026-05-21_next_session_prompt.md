@@ -6,6 +6,31 @@
 
 ---
 
+## READ FIRST ON RETURN (added 2026-05-27 — B.1.5 wrap)
+
+The B.1.5 backtest-harness sprint completed Phases 1-5 during the away period. Findings exhaust what a single-strategy harness can determine. **There is one operator decision waiting:** which of C1/C3/C6 stay in the live-flip path, and at what architectural layer regime-awareness lives. The decision artifact is ready to read; no automated action has been taken pending operator approval. Soak continues normally regardless.
+
+**Read in this order:**
+
+1. **[docs/decisions/2026-05-27_b15_doctrine_proposal.md](2026-05-27_b15_doctrine_proposal.md)** — the decision document. 5 sections (executive summary, harness verdicts table, 4 strategic options, recommendation, what-it-doesn't-change). Target read time <5 min. Recommendation is **Option B + D** (retire C1+C6 now via `kill.py`; queue allocator-level regime weighting as next major sprint). Read this first — everything else below is supporting depth.
+
+2. **[docs/specs/b15_backtest_harness.md](../specs/b15_backtest_harness.md)** — full methodology if you want depth. Phases 3, 3.5, 4, 5 each have per-strategy tables, regime feature tables, and gating re-test tables. The "Phase 5" section documents the GATE-INEFFECTIVE verdict and why a single-strategy regime gate cannot be made to work.
+
+3. **Phase memory anchor series** (in MEMORY.md, all dated 2026-05-27):
+   - `aaats_2026_05_27_b15_gap_analysis.md` — overall B.1.5 anchor (Phase 1-2)
+   - `aaats_c3_slippage_fragility.md` — live C3 path applies zero slippage
+   - `aaats_2026_05_27_b15_phase4_c3_walkforward.md` — Phase 4 WINDOW-DEPENDENT verdict
+   - `aaats_2026_05_27_b15_phase5_regime_gate.md` — Phase 5 GATE-INEFFECTIVE verdict
+   - `feedback_regime_filtering_at_allocator.md` — durable rule established by Phase 5
+
+**Decision posture:**
+- **No automated action** has been taken on any of the four options. Soak runs unchanged.
+- **L11 capital invariant** `effective_delta_usd ≈ 0` anchor since 2026-05-27T08:01:50Z. The doctrine proposal does not modify any code; it is purely a decision artifact.
+- **Implementation** of whichever option lands is a follow-up sprint after operator approval. The autonomy contract still applies (live-flip is operator-only).
+- **Soak day-30 ETA** 2026-06-22 still on track; decision can wait until soak end or be made earlier (Option B can be taken mid-soak via `kill.py` without code changes).
+
+---
+
 ## Next autonomous session (mid-soak) — B.1.5 Phase 2
 
 D.5 soak is day 4 of 30 (runs to 2026-06-22). The next autonomous session works on B.1.5 backtest-harness Phase 2, the gap-analysis-derived follow-up to session 13c (2026-05-27).
