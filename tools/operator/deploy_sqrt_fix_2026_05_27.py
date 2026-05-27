@@ -39,7 +39,6 @@ import datetime
 import hashlib
 import os
 import pathlib
-import shlex
 import subprocess
 import sys
 import time
@@ -61,6 +60,8 @@ from tools.operator.deploy_lib import (  # noqa: E402
     enforce_utf8_console,
     ensure_remote_dirs,
     preflight_ruff_format,
+    send_telegram_message,
+    verify_telegram_path,
 )
 
 enforce_utf8_console()
@@ -87,8 +88,11 @@ if not PASSWORD:
 REMOTE_DIR = _env.get("CONTABO__REMOTE_DIR", "/home/aaats/aaats")
 PORT = 22
 
-TELEGRAM_CHAT_ID = "1946109268"
-TELEGRAM_TOKEN_PATH = "/srv/aaats/secrets/telegram_bot_token"
+# Telegram credentials are sourced from /home/aaats/aaats/.env via
+# deploy_lib's verify_telegram_path / send_telegram_message helpers.
+# DO NOT hardcode /srv/aaats/secrets/telegram_bot_token here — that path
+# is stale (HTTP 404 from api.telegram.org/getMe) and Phase 2 lost its
+# pre/post alerts silently using it. See CLAUDE.md gotcha #11.
 
 CHANGED_FILES = {
     "monitoring/metrics_exporter.py": f"{REMOTE_DIR}/monitoring/metrics_exporter.py",
@@ -125,30 +129,10 @@ def run(
     return rc, out, err
 
 
-def send_telegram(client: paramiko.SSHClient, text: str) -> bool:
-    """Send a Telegram message from the BOX (where the secret lives).
-
-    Reads /srv/aaats/secrets/telegram_bot_token at runtime; curls api.telegram.org
-    /bot<TOKEN>/sendMessage with chat_id + text. Returns True on HTTP 200.
-    """
-    # Use printf %s and the file read inline so the token never appears in the
-    # command echo printed by paramiko.
-    text_quoted = shlex.quote(text)
-    chat_id_quoted = shlex.quote(TELEGRAM_CHAT_ID)
-    cmd = (
-        f"TOK=$(cat {TELEGRAM_TOKEN_PATH}) && "
-        f"curl -s -o /tmp/tg_resp -w '%{{http_code}}' "
-        f"-X POST https://api.telegram.org/bot${{TOK}}/sendMessage "
-        f"-d chat_id={chat_id_quoted} "
-        f"--data-urlencode text={text_quoted}"
-    )
-    rc, out, err = run(client, cmd, desc="telegram sendMessage", ok_rc=(0,))
-    http_code = out.strip().splitlines()[-1] if out else ""
-    if http_code == "200":
-        print("    [telegram] sent ok")
-        return True
-    print(f"    [telegram] FAILED (http={http_code!r}, stderr={err[:200]!r})")
-    return False
+# Telegram send/verify now live in deploy_lib (Phase 3, 2026-05-27).
+# The old local send_telegram() used a stale /srv/aaats/secrets path and
+# silently no-op'd. Use deploy_lib.send_telegram_message / verify_telegram_path
+# in any new deploy script.
 
 
 def main() -> int:
@@ -229,6 +213,21 @@ def main() -> int:
     client.connect(HOST, port=PORT, username=USER, password=PASSWORD, timeout=30)
     sftp = client.open_sftp()
     try:
+        # Fail-fast on Telegram smoke BEFORE any destructive step (see CLAUDE.md
+        # gotcha #11). Phase 2 silently no-op'd alerts on a stale token path
+        # and the Sharpe-panel jump went out unannounced. Don't repeat that.
+        if not args.skip_telegram:
+            print("\n== Verifying Telegram path (deploy_lib smoke) ==")
+            if not verify_telegram_path(client):
+                client.close()
+                raise SystemExit(
+                    "Telegram smoke verify FAILED. The token at the canonical "
+                    "/home/aaats/aaats/.env path is missing or invalid. "
+                    "Rotate the token and re-run, or pass --skip-telegram "
+                    "if you explicitly accept silent alerts."
+                )
+            print("    [telegram] smoke ok")
+
         # Capture a PRE snapshot of one current Sharpe value for the post-
         # rebuild message. This is best-effort; missing metric is fine.
         rc, pre_metrics, _ = run(
@@ -244,14 +243,17 @@ def main() -> int:
         # Pre-rebuild Telegram heads-up.
         if not args.skip_telegram:
             print("\n== Sending pre-rebuild Telegram heads-up ==")
-            send_telegram(
+            if not send_telegram_message(
                 client,
                 "AAATS: rebuilding aaats-metrics with sqrt(252)→sqrt(8760) fix. "
                 "aaats_rolling_sharpe_14d will appear ~5.9× lower in Grafana. "
                 "This is the correction (crypto trades 24/7, not 252 days/year), "
                 "not regression. Pre-fix value can be reconstructed by "
                 "multiplying post-fix Sharpe by sqrt(8760/252) ≈ 5.9.",
-            )
+            ):
+                print("    [telegram] pre-rebuild message FAILED (continuing)")
+            else:
+                print("    [telegram] pre-rebuild message sent")
 
         # Backup current state.
         ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -311,14 +313,17 @@ def main() -> int:
         # Post-rebuild Telegram confirmation.
         if not args.skip_telegram:
             print("\n== Sending post-rebuild Telegram confirmation ==")
-            send_telegram(
+            if not send_telegram_message(
                 client,
                 "AAATS: sqrt-fix deployed. aaats-metrics rebuilt OK. "
                 f"PRE sample: {pre_sample[:120]}. "
                 f"POST sample: {post_sample[:120]}. "
                 "Post value × sqrt(8760/252) ≈ pre value. Grafana panel "
                 "'Rolling 14d Sharpe Ratio' shows the corrected value.",
-            )
+            ):
+                print("    [telegram] post-rebuild message FAILED (continuing)")
+            else:
+                print("    [telegram] post-rebuild message sent")
 
         print("\n== DEPLOY COMPLETE ==")
         print(f"Rollback manifest: {manifest}")

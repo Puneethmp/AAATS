@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path, PurePosixPath
@@ -391,3 +392,111 @@ def smart_cp_state(
     if rc != 0:
         return False, f"cp failed: {stderr.read().decode().strip()}"
     return True, "cp ok"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Telegram alerts — operator courtesy messages during deploys
+# ──────────────────────────────────────────────────────────────────────────
+
+# Canonical Telegram credential source on the box. Mirrors
+# scripts/box/aaats-cron-alert.sh (the path proven to work — the 2026-05-27
+# DB-FREEZE alert was sent via this exact extraction pattern). Do NOT use
+# /srv/aaats/secrets/telegram_bot_token — that file is stale (HTTP 404
+# from api.telegram.org/getMe). Phase 2 sqrt-fix deploy hit this and its
+# pre/post alerts silently no-op'd.
+TELEGRAM_ENV_FILE: str = "/home/aaats/aaats/.env"
+TELEGRAM_TOKEN_VAR: str = "ALERTS__TELEGRAM_BOT_TOKEN"
+TELEGRAM_CHAT_ID_VAR: str = "ALERTS__TELEGRAM_CHAT_ID"
+
+
+def _shell_extract_env_var(env_file: str, var_name: str) -> str:
+    """Build a shell snippet matching aaats-cron-alert.sh's extraction:
+    grep ^VAR= | head -1 | cut -d= -f2- | strip-quotes."""
+    return (
+        f"grep -E '^{var_name}=' {env_file} | head -1 | "
+        f"cut -d= -f2- | tr -d '\"' | tr -d \"'\""
+    )
+
+
+def verify_telegram_path(
+    client,
+    env_file: str = TELEGRAM_ENV_FILE,
+    token_var: str = TELEGRAM_TOKEN_VAR,
+) -> bool:
+    """Smoke-test the Telegram alert path BEFORE any destructive deploy step.
+
+    Reads ``token_var`` from ``env_file`` on the box (via SSH, using
+    aaats-cron-alert.sh's exact extraction pattern), then calls
+    ``api.telegram.org/bot<TOKEN>/getMe``. Returns True on HTTP 200,
+    False otherwise. On False, prints the failure mode to stderr so the
+    caller can fail-fast.
+
+    Why this exists: Phase 2 sqrt-fix deploy (2026-05-27) used the wrong
+    token path (``/srv/aaats/secrets/telegram_bot_token``, returns 404).
+    Pre/post-rebuild Telegram alerts silently no-op'd; the Sharpe-panel
+    jump went out unannounced. A real future rebuild that genuinely
+    breaks something would go unobserved the same way.
+
+    Canonical token source is ``/home/aaats/aaats/.env`` on the box,
+    matching ``scripts/box/aaats-cron-alert.sh``.
+
+    Caller contract: deploy scripts that send pre/post alerts MUST call
+    this before the destructive step and ``SystemExit`` on False. The
+    cost of a failed smoke is "rotate the token, re-run"; the cost of
+    skipping the smoke is "deploy disaster goes silent."
+    """
+    extract_token = _shell_extract_env_var(env_file, token_var)
+    cmd = (
+        f"TOK=$({extract_token}); "
+        f'if [ -z "$TOK" ]; then echo MISSING; exit 2; fi; '
+        f"curl -sS --max-time 10 -o /tmp/.tg_smoke -w '%{{http_code}}' "
+        f'"https://api.telegram.org/bot${{TOK}}/getMe"'
+    )
+    _, stdout, stderr = client.exec_command(cmd, timeout=20)
+    rc = stdout.channel.recv_exit_status()
+    out = stdout.read().decode().strip()
+    err = stderr.read().decode().strip()
+    last = out.splitlines()[-1] if out else ""
+    if last == "200":
+        return True
+    sys.stderr.write(
+        f"[telegram] smoke verify FAILED: env_file={env_file} "
+        f"token_var={token_var} rc={rc} last_line={last!r} stderr={err[:200]!r}\n"
+    )
+    return False
+
+
+def send_telegram_message(
+    client,
+    text: str,
+    env_file: str = TELEGRAM_ENV_FILE,
+    token_var: str = TELEGRAM_TOKEN_VAR,
+    chat_id_var: str = TELEGRAM_CHAT_ID_VAR,
+) -> bool:
+    """Send a Telegram message FROM THE BOX (where credentials live).
+
+    Mirrors ``aaats-cron-alert.sh``'s extraction + curl pattern, so
+    deploys and cron use the same credential source. Returns True on
+    HTTP 200, False otherwise.
+
+    Always call :func:`verify_telegram_path` first if the message matters
+    (pre/post deploy alerts, etc.) so you fail-fast before any destructive
+    step rather than silently no-op'ing.
+    """
+    extract_token = _shell_extract_env_var(env_file, token_var)
+    extract_chat = _shell_extract_env_var(env_file, chat_id_var)
+    text_quoted = shlex.quote(text)
+    cmd = (
+        f"TOK=$({extract_token}); "
+        f"CHAT=$({extract_chat}); "
+        f'if [ -z "$TOK" ] || [ -z "$CHAT" ]; then echo MISSING; exit 2; fi; '
+        f"curl -sS --max-time 15 -o /tmp/.tg_resp -w '%{{http_code}}' -X POST "
+        f'"https://api.telegram.org/bot${{TOK}}/sendMessage" '
+        f"-d chat_id=${{CHAT}} "
+        f"--data-urlencode text={text_quoted}"
+    )
+    _, stdout, _ = client.exec_command(cmd, timeout=20)
+    stdout.channel.recv_exit_status()
+    out = stdout.read().decode().strip()
+    last = out.splitlines()[-1] if out else ""
+    return last == "200"
