@@ -1,0 +1,80 @@
+{
+  "as_of": "2026-05-23T11:00:00+00:00",
+  "horizon_days": 60,
+  "trades": 86,
+  "pnl_usd": 5.4289,
+  "sharpe": 1.5209,
+  "win_rate": 0.4767,
+  "profitable_regime_count": 2,
+  "slippage_sensitivity_50bps_pnl_usd": -5.7211,
+  "recommendation": "PARTIAL",
+  "evidence": "60d C3 replay across ['SOL/USDT', 'LINK/USDT', 'AVAX/USDT', 'DOT/USDT'] on 1h Binance USDT bars. 86 trades, $5.43 pnl, sharpe 1.52, win-rate 48%. 50bps slippage sensitivity: $-5.72. Profitable regimes: 2/3 (per-regime PnL low_vol=$2.53, mid_vol=$-0.32, high_vol=$3.33). LIMITATIONS: replay disables BEAR regime gate (HMM not in replay) and BTC.D fast-rise filter; both make replay PERMISSIVE (it allows entries production would skip). Recommendation is therefore an upper bound -- live behavior may underperform. Slippage / fees / reconciler dust filters all set to zero in the base run; the 50bps sensitivity gives one data point on slippage sensitivity but production also has spread + exchange fees not modeled here.",
+  "_metadata": {
+    "universe": [
+      "SOL/USDT",
+      "LINK/USDT",
+      "AVAX/USDT",
+      "DOT/USDT"
+    ],
+    "btc_symbol": "BTC/USDT",
+    "starting_capital_usd": 100.0,
+    "bar_timeframe": "1h",
+    "lookback_bars": 60,
+    "n_aligned_bars": 1440,
+    "headline_metrics": {
+      "n_trades": 86,
+      "pnl_usd": 5.428875005716353,
+      "win_rate": 0.47674418604651164,
+      "sharpe": 1.5208864085290157,
+      "avg_pnl_pct": 0.0041824338031227586,
+      "profit_factor": 1.8088566045612557
+    },
+    "slip_50bps_metrics": {
+      "n_trades": 76,
+      "pnl_usd": -5.7210970614572,
+      "win_rate": 0.3157894736842105,
+      "sharpe": -2.0794462196597183,
+      "avg_pnl_pct": -0.00592318556338997,
+      "profit_factor": 0.5368206100362233
+    },
+    "regime_results": [
+      {
+        "label": "low_vol",
+        "start_idx": 960,
+        "end_idx": 1440,
+        "btc_realized_vol_daily": 0.016468760863620556,
+        "n_trades": 23,
+        "pnl_usd": 2.53106874167845,
+        "win_rate": 0.6521739130434783,
+        "sharpe": 2.716867725598567,
+        "avg_pnl_pct": 0.007501359058924256,
+        "profit_factor": 2.2825366919171417
+      },
+      {
+        "label": "mid_vol",
+        "start_idx": 480,
+        "end_idx": 960,
+        "btc_realized_vol_daily": 0.018204813574942663,
+        "n_trades": 38,
+        "pnl_usd": -0.32147060218973245,
+        "win_rate": 0.4473684210526316,
+        "sharpe": -0.3881536634622336,
+        "avg_pnl_pct": -0.0006544859467141353,
+        "profit_factor": 0.8763877035353743
+      },
+      {
+        "label": "high_vol",
+        "start_idx": 0,
+        "end_idx": 480,
+        "btc_realized_vol_daily": 0.020403787660547384,
+        "n_trades": 27,
+        "pnl_usd": 3.3304721497036502,
+        "win_rate": 0.4074074074074074,
+        "sharpe": 2.272474642180618,
+        "avg_pnl_pct": 0.008210771070100984,
+        "profit_factor": 2.55799415802632
+      }
+    ],
+    "harness_completed": true
+  }
+}
