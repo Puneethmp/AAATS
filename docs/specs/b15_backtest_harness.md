@@ -271,6 +271,99 @@ Per the prompt: **NOT changing live thresholds based on this finding alone.** Th
 
 ---
 
+## Phase 3.5 — Slippage break-even sweep (2026-05-27, Cowork autonomous)
+
+Phase 3 reported binary verdicts at 0bps and 50bps. The 50bps stress was arbitrary; the real-world cost surface is more granular. This sweep runs each harness at 7 slippage levels (0/5/10/15/20/25/50 bps per side) and finds the precise break-even point for each strategy. The break-evens lead to sharper per-strategy verdicts.
+
+### Harness slip_bps semantics
+
+`slip_bps` is **per side** — entry pays +slip, exit pays +slip. Round trip = 2× slip total. Compare per-side slip directly against Binance per-side fee tiers.
+
+### Binance VIP-0 reference (per side)
+
+| Venue | Taker | Maker |
+|---|---|---|
+| Spot | 10 bps | 10 bps |
+| USDT-M Perp | 5 bps | 2 bps |
+
+Plus 2-15 bps market impact depending on size and orderbook depth. On $5-15 trades (the soak's actual sizing), realistic per-side cost ~12-20 bps spot, ~7-12 bps perp.
+
+### Sweep results
+
+**C1 stat_arb** (BTC/ETH pair, 69 trades)
+
+| slip (bps) | n | PnL (USD) | Sharpe | Win |
+|---:|---:|---:|---:|---:|
+|  0 | 69 | +0.63 | +1.22 | 55.1% |
+|  5 | 69 | -0.48 | -0.93 | 50.7% |
+| 10 | 69 | -1.57 | -3.09 | 31.9% |
+| 15 | 69 | -2.65 | -5.24 | 20.3% |
+| 20 | 69 | -3.72 | -7.40 | 11.6% |
+| 25 | 69 | -4.78 | -9.55 |  8.7% |
+| 50 | 69 | -9.89 | -20.3 |  0.0% |
+
+**Break-even ≈ 2.8 bps per side.** Below even Binance perp maker (2 bps). **Verdict: DEAD.**
+
+**C3 altcoin_reversion** (4 alts vs BTC, 86 trades)
+
+| slip (bps) | n | PnL (USD) | Sharpe | Win |
+|---:|---:|---:|---:|---:|
+|  0 | 86 | +5.43 | +1.52 | 47.7% |
+|  5 | 86 | +4.24 | +1.16 | 47.7% |
+| 10 | 84 | +3.25 | +0.86 | 46.4% |
+| 15 | 82 | +2.17 | +0.54 | 45.1% |
+| 20 | 81 | +0.62 | +0.05 | 43.2% |
+| 25 | 81 | -0.49 | -0.30 | 42.0% |
+| 50 | 76 | -5.72 | -2.08 | 31.6% |
+
+**Break-even ≈ 22.8 bps per side.** Survives Binance spot taker (10) with 12 bps of margin to absorb market impact. **Verdict: MARGINAL** — real edge if execution is clean (TWAP / limit orders). Naive market-order execution at peak size kills it.
+
+**C6 bollinger_range** (BTC/ETH/SOL no regime gate, ~85 trades)
+
+| slip (bps) | n | PnL (USD) | Sharpe | Win |
+|---:|---:|---:|---:|---:|
+|  0 |  85 | -0.87 | -1.28 | 49.4% |
+|  5 |  86 | -1.43 | -2.12 | 47.7% |
+| 10 |  86 | -1.94 | -2.91 | 43.0% |
+| 15 |  86 | -2.49 | -3.81 | 38.4% |
+| 20 |  86 | -2.97 | -4.58 | 33.7% |
+| 25 |  88 | -3.47 | -5.28 | 28.4% |
+| 50 | 105 | -6.59 | -9.80 | 12.4% |
+
+**No positive zone — unprofitable at zero cost.** **Verdict: DEAD** on this 60d window.
+
+### Sharpened strategic picture
+
+Phase 3 said "all three failed at 50bps." Phase 3.5 produces three distinct verdicts:
+
+| Strategy | Break-even (bps/side) | Live-flip class |
+|---|---|---|
+| C1 | 2.8 | **Dead** — retire |
+| C3 | 22.8 | **Marginal** — keep, fix execution |
+| C6 | <0 | **Dead** — retire |
+
+This re-frames operator option A/B/C from Phase 3:
+
+- **A (accept harness, no live-flip):** retire C1+C6, keep C3 with execution discipline focus, build 1-2 additional C3-class strategies before live-flip.
+- **B (investigate model gap):** matters most for C3 (where margin is real but tight) and least for C6 (where harness clearly captures truth). Don't waste B-cycles on C1/C6.
+- **C (build new):** stays valid, with directional target: C3-class mean-reversion on alt-vs-BTC pairs.
+
+### What this does NOT do
+
+- Not changing live thresholds, halt states, or strategy weights.
+- Not retiring C1 or C6 in the live runner — operator decides post-D.5.
+- Not validating C3 for live-flip — MARGINAL means tight, single-window; Phase 4 must re-run C3 on 6-month history before any GO.
+
+### Method + caveats
+
+- Data: same 60d 1h cached parquets as Phases 1-3, common-timestamp inner-join across {BTC, ETH, SOL, LINK, AVAX, DOT}, start_idx=35 (warmup).
+- Break-even is linear interpolation between adjacent slip points where PnL crosses zero. True curve is monotonic but not strictly linear — break-evens approximate to ±~1 bp.
+- C1 cointegration check bypassed (statsmodels not installed); real correlation 0.98 keeps health gate alive.
+- One 60d window only. Different windows may shift break-evens; this is especially limiting for C6 since the cached history IS the full window (no OOS without 6mo fetch).
+- Consolidated JSON: `data/backtest_results/slippage_sweep_2026_05_27.json`.
+
+---
+
 ## Cross-references
 
 - Inventory: [docs/specs/b15_data_inventory.md](b15_data_inventory.md)
@@ -281,4 +374,6 @@ Per the prompt: **NOT changing live thresholds based on this finding alone.** Th
 - C3 replay: [tools/backtest/c3_replay.py](../../tools/backtest/c3_replay.py)
 - C3 runner: [tools/backtest/run_b15_c3.py](../../tools/backtest/run_b15_c3.py)
 - C6 replay: [tools/backtest/c6_replay.py](../../tools/backtest/c6_replay.py)
+- Sweep driver: [tools/backtest/_slip_sweep_oneoff.py](../../tools/backtest/_slip_sweep_oneoff.py) (one-off, not for production)
+- Sweep results: `data/backtest_results/slippage_sweep_2026_05_27.json`
 - Backtest engine: [backtesting/engine.py](../../backtesting/engine.py)
