@@ -6,7 +6,56 @@
 
 ---
 
-## Paste this block into the next Claude Code session
+## Next autonomous session (mid-soak) — B.1.5 Phase 2
+
+D.5 soak is day 4 of 30 (runs to 2026-06-22). The next autonomous session works on B.1.5 backtest-harness Phase 2, the gap-analysis-derived follow-up to session 13c (2026-05-27).
+
+```
+Context: AAATS B.1.5 backtest harness — Phase 2 (mechanical fixes +
+data gap). D.5 soak ongoing (operator away). L11 baseline ok since
+2026-05-27T08:01:50Z. Don't touch strategy/risk/halt code.
+
+Background: session 13c (2026-05-27) found B.1.5 partly shipped for C3
+(see docs/specs/b15_data_inventory.md + docs/specs/b15_backtest_harness.md
+for the full inventory + design). First C3 run produced verdict=PARTIAL:
++$5.43 headline / Sharpe +1.52 but 50bps-slippage flips to -$5.72.
+Three Phase-2 work items, in order:
+
+1. sqrt(252) → sqrt(N/window_days*365) at two callsites:
+   - monitoring/metrics_exporter.py:851 (window = 14d, fixed)
+   - analytics/strategy_optimizer.py:125 (compute window from trade
+     timestamps; extend SELECT)
+   After landing, rebuild aaats-metrics container (use deploy_lib
+   helpers per CLAUDE.md). aaats_rolling_sharpe_14d Grafana panel will
+   jump to corrected (smaller-magnitude) values — that's expected.
+
+2. Fetch ETH/USDT 1h 60d bars into data/historical/:
+   venv\Scripts\python -c "from tools.backtest.historical_data import \
+     fetch_ohlcv; fetch_ohlcv('ETH/USDT', '1h', days_back=60, \
+     end_ts='2026-05-23T11:00Z')"
+   Unblocks C1 + C6 replay scaffolding.
+
+3. Optional stretch — begin C1 stat_arb replay scaffolding:
+   - Extract pure helpers from trading/stat_arb.py (_compute_zs,
+     _z_entry_allowed, _z_exit_allowed) into a clearly-marked pure
+     block. Tiny, no behavior change.
+   - tools/backtest/c1_replay.py mirroring c3_replay.py structure.
+   Run against the now-present ETH+BTC cache; record verdict.
+
+ESCALATE (stop) IF:
+  - L11 effective_delta_usd has moved off ≈ 0 since 2026-05-27T08:01:50Z
+  - The sqrt fix changes any *trading* logic (it shouldn't — these are
+    monitoring + analytics only)
+  - The ETH fetch hits a Binance rate limit or returns empty
+  - C1 has no extractable pure helpers (would need a larger refactor —
+    don't force it this session; reschedule to Phase 3 with proper scope)
+```
+
+When the operator returns, the operator-return paste-block below remains valid for that session's contract.
+
+---
+
+## Paste this block into the operator-return session
 
 ```
 Context: AAATS operator-return review. The bot has been running the
@@ -253,6 +302,28 @@ Reporting at session end
 ---
 
 ## Status log
+
+- **2026-05-27 (session 13c — B.1.5 inventory + design + first C3 run, autonomous):**
+  Mid-soak research session. Discovered the premise of the original B.1.5
+  prompt was outdated: B.1.5 is partly shipped for C3 (~1,300 LOC across
+  backtesting/, tools/backtest/, tests/) and 60d × 1H OHLCV cache exists
+  at data/historical/. Reframed Phase 1 as gap analysis. Deliverables:
+    - docs/specs/b15_data_inventory.md — what's on disk (file:line), what
+      ETH gap blocks (C1 + C6), sqrt(252) scope clarified.
+    - docs/specs/b15_backtest_harness.md — 5 subsections, GO/NO-GO floors
+      pulled from doctrine, architecture (hybrid) acknowledged as locked,
+      4-phase plan.
+    - Ran existing C3 harness against cached window 2026-03-24→2026-05-23:
+      verdict=**PARTIAL**. Headline 86 trades, +$5.43, Sharpe +1.52, 2/3
+      profitable regimes. 50bps slippage flips to -$5.72 — slippage knife-edge
+      is the actionable finding.
+  Tag-along: committed deploy_lib docstring tightening clarifying
+  ensure_remote_dirs accepts FILE paths (commit 4b5df88).
+  Three open carry-forwards for the next session (Phase 2):
+    1. Fix sqrt(252) → sqrt(N/window_days*365) in monitoring/metrics_exporter.py:851
+       + analytics/strategy_optimizer.py:125 (live Grafana panel will jump).
+    2. Fetch ETH/USDT 1H 60d bars into data/historical/.
+    3. Begin C1 stat_arb replay scaffolding (mirror c3_replay pattern).
 
 - **2026-05-27 (session 13b — mid-soak L11 baseline patch, autonomous):**
   Closed the recurring L11 capital invariant warn (-$8.5169 every cycle
