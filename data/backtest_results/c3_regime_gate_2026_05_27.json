@@ -1,0 +1,333 @@
+{
+  "strategy": "c3",
+  "phase": "B.1.5 phase 5 regime gate",
+  "data_window": "2025-11-28 15:00:00+00:00 to 2026-05-27 14:00:00+00:00 (4320 1h bars)",
+  "universe": [
+    "AVAX/USDT",
+    "BTC/USDT",
+    "DOT/USDT",
+    "LINK/USDT",
+    "SOL/USDT"
+  ],
+  "trailing_lookback_bars": 60,
+  "slippage_levels_bps": [
+    0.0,
+    22.0
+  ],
+  "step1_window_features": [
+    {
+      "window_id": "W1",
+      "start_idx": 0,
+      "end_idx": 1440,
+      "start_ts": "2025-11-28 15:00:00+00:00",
+      "end_ts": "2026-01-27 14:00:00+00:00",
+      "features": {
+        "realized_vol_annualized": 0.39889038268616583,
+        "trend_strength_per_bar": 1.5533072449141404e-05,
+        "autocorrelation_lag1": 0.046809460242118,
+        "bband_width_mean": 0.024552479622644865,
+        "directional_pct": 0.049992913790002855,
+        "max_drawdown_pct": 0.1142807639279719
+      },
+      "phase4_verdict": "MARGINAL",
+      "phase4_pnl_at_0bps": 3.7437
+    },
+    {
+      "window_id": "W2",
+      "start_idx": 720,
+      "end_idx": 2160,
+      "start_ts": "2025-12-28 15:00:00+00:00",
+      "end_ts": "2026-02-26 14:00:00+00:00",
+      "features": {
+        "realized_vol_annualized": 0.5096643440720527,
+        "trend_strength_per_bar": 0.0002869960326345283,
+        "autocorrelation_lag1": 0.018115800566664408,
+        "bband_width_mean": 0.032383678599086856,
+        "directional_pct": 0.2292735108173423,
+        "max_drawdown_pct": 0.35589760225970374
+      },
+      "phase4_verdict": "DEAD",
+      "phase4_pnl_at_0bps": -1.1782
+    },
+    {
+      "window_id": "W3",
+      "start_idx": 1440,
+      "end_idx": 2880,
+      "start_ts": "2026-01-27 15:00:00+00:00",
+      "end_ts": "2026-03-28 14:00:00+00:00",
+      "features": {
+        "realized_vol_annualized": 0.5792948347171102,
+        "trend_strength_per_bar": 7.124436725990299e-05,
+        "autocorrelation_lag1": 0.010678232954194171,
+        "bband_width_mean": 0.040111778346993025,
+        "directional_pct": 0.24197586165461218,
+        "max_drawdown_pct": 0.30310817079633245
+      },
+      "phase4_verdict": "MARGINAL",
+      "phase4_pnl_at_0bps": 1.5005
+    },
+    {
+      "window_id": "W4",
+      "start_idx": 2160,
+      "end_idx": 3600,
+      "start_ts": "2026-02-26 15:00:00+00:00",
+      "end_ts": "2026-04-27 14:00:00+00:00",
+      "features": {
+        "realized_vol_annualized": 0.4528759994499464,
+        "trend_strength_per_bar": 8.15348525625952e-05,
+        "autocorrelation_lag1": 0.013229415186184519,
+        "bband_width_mean": 0.030495799005660344,
+        "directional_pct": 0.15483734528509097,
+        "max_drawdown_pct": 0.13211416865380282
+      },
+      "phase4_verdict": "MARGINAL",
+      "phase4_pnl_at_0bps": 4.0951
+    },
+    {
+      "window_id": "W5",
+      "start_idx": 2880,
+      "end_idx": 4320,
+      "start_ts": "2026-03-28 15:00:00+00:00",
+      "end_ts": "2026-05-27 14:00:00+00:00",
+      "features": {
+        "realized_vol_annualized": 0.3474885288694346,
+        "trend_strength_per_bar": 0.00011110247514122592,
+        "autocorrelation_lag1": -0.003701248288777919,
+        "bband_width_mean": 0.0224118179531604,
+        "directional_pct": 0.12019638614750056,
+        "max_drawdown_pct": 0.09589496926246766
+      },
+      "phase4_verdict": "MARGINAL",
+      "phase4_pnl_at_0bps": 6.7924
+    }
+  ],
+  "step2_fingerprint": {
+    "realized_vol_annualized": {
+      "w2_value": 0.5096643440720527,
+      "marginal_mean": 0.4446374364306642,
+      "marginal_std": 0.09955097856632648,
+      "w2_z_score": 0.6532020938203428
+    },
+    "trend_strength_per_bar": {
+      "w2_value": 0.0002869960326345283,
+      "marginal_mean": 6.985369185321638e-05,
+      "marginal_std": 3.9960711158122296e-05,
+      "w2_z_score": 5.433895806360699
+    },
+    "autocorrelation_lag1": {
+      "w2_value": 0.018115800566664408,
+      "marginal_mean": 0.01675396502342969,
+      "marginal_std": 0.02137822502938347,
+      "w2_z_score": 0.06370199309638339
+    },
+    "bband_width_mean": {
+      "w2_value": 0.032383678599086856,
+      "marginal_mean": 0.029392968732114656,
+      "marginal_std": 0.007922034990868763,
+      "w2_z_score": 0.37751788150638127
+    },
+    "directional_pct": {
+      "w2_value": 0.2292735108173423,
+      "marginal_mean": 0.14175062671930164,
+      "marginal_std": 0.07979227842613397,
+      "w2_z_score": 1.0968841324547856
+    },
+    "max_drawdown_pct": {
+      "w2_value": 0.35589760225970374,
+      "marginal_mean": 0.16134951816014373,
+      "marginal_std": 0.09565560944407527,
+      "w2_z_score": 2.03383873909979
+    }
+  },
+  "step2_fingerprint_features": [
+    "trend_strength_per_bar",
+    "directional_pct",
+    "max_drawdown_pct"
+  ],
+  "step3_gate_spec": {
+    "trend_strength": {
+      "operator": "<",
+      "threshold": 0.0001990492538878771,
+      "w2_value": 0.0002869960326345283,
+      "worst_compatible_marginal": 0.00011110247514122592,
+      "marginal_mean": 6.985369185321638e-05,
+      "marginal_std": 3.9960711158122296e-05,
+      "z_score": 5.433895806360699,
+      "rationale": "W2 trend_strength_per_bar=0.0003 (z=+5.43 vs marginal mean 0.0001). Threshold at midpoint between W2 and worst-side MARGINAL (0.0001)."
+    },
+    "directional_pct": {
+      "operator": "<",
+      "threshold": 0.23562468623597724,
+      "w2_value": 0.2292735108173423,
+      "worst_compatible_marginal": 0.24197586165461218,
+      "marginal_mean": 0.14175062671930164,
+      "marginal_std": 0.07979227842613397,
+      "z_score": 1.0968841324547856,
+      "rationale": "W2 directional_pct=0.2293 (z=+1.10 vs marginal mean 0.1418). Threshold at midpoint between W2 and worst-side MARGINAL (0.2420)."
+    }
+  },
+  "step3_gate_live_thresholds": {
+    "trend_strength": {
+      "operator": "<",
+      "threshold": 0.0001990492538878771
+    },
+    "directional_pct": {
+      "operator": "<",
+      "threshold": 0.23562468623597724
+    }
+  },
+  "step4_gated_results": [
+    {
+      "window_id": "W1",
+      "rows": [
+        {
+          "slip_bps": 0.0,
+          "n_trades": 49,
+          "n_excluded_by_gate": 211,
+          "pnl_usd": 3.6616,
+          "sharpe": 2.704,
+          "win_rate": 0.633,
+          "profit_factor": 2.321,
+          "max_drawdown_pct": 0.0119
+        },
+        {
+          "slip_bps": 22.0,
+          "n_trades": 47,
+          "n_excluded_by_gate": 211,
+          "pnl_usd": 0.8327,
+          "sharpe": 0.83,
+          "win_rate": 0.532,
+          "profit_factor": 1.221,
+          "max_drawdown_pct": 0.0161
+        }
+      ],
+      "ungated_pnl_at_0bps": 3.7437,
+      "phase4_verdict": "MARGINAL",
+      "breakeven_bps_proxy": null,
+      "gated_verdict": "MARGINAL"
+    },
+    {
+      "window_id": "W2",
+      "rows": [
+        {
+          "slip_bps": 0.0,
+          "n_trades": 32,
+          "n_excluded_by_gate": 293,
+          "pnl_usd": 0.1106,
+          "sharpe": 0.101,
+          "win_rate": 0.531,
+          "profit_factor": 1.046,
+          "max_drawdown_pct": 0.0238
+        },
+        {
+          "slip_bps": 22.0,
+          "n_trades": 31,
+          "n_excluded_by_gate": 293,
+          "pnl_usd": -1.6489,
+          "sharpe": -2.256,
+          "win_rate": 0.387,
+          "profit_factor": 0.504,
+          "max_drawdown_pct": 0.0299
+        }
+      ],
+      "ungated_pnl_at_0bps": -1.1782,
+      "phase4_verdict": "DEAD",
+      "breakeven_bps_proxy": 1.3828928672918444,
+      "gated_verdict": "DEAD"
+    },
+    {
+      "window_id": "W3",
+      "rows": [
+        {
+          "slip_bps": 0.0,
+          "n_trades": 12,
+          "n_excluded_by_gate": 396,
+          "pnl_usd": -1.0876,
+          "sharpe": -3.553,
+          "win_rate": 0.167,
+          "profit_factor": 0.254,
+          "max_drawdown_pct": 0.0125
+        },
+        {
+          "slip_bps": 22.0,
+          "n_trades": 12,
+          "n_excluded_by_gate": 396,
+          "pnl_usd": -1.7053,
+          "sharpe": -5.771,
+          "win_rate": 0.167,
+          "profit_factor": 0.138,
+          "max_drawdown_pct": 0.0174
+        }
+      ],
+      "ungated_pnl_at_0bps": 1.5005,
+      "phase4_verdict": "MARGINAL",
+      "breakeven_bps_proxy": 0.0,
+      "gated_verdict": "DEAD"
+    },
+    {
+      "window_id": "W4",
+      "rows": [
+        {
+          "slip_bps": 0.0,
+          "n_trades": 29,
+          "n_excluded_by_gate": 504,
+          "pnl_usd": 1.3965,
+          "sharpe": 1.329,
+          "win_rate": 0.414,
+          "profit_factor": 1.651,
+          "max_drawdown_pct": 0.0171
+        },
+        {
+          "slip_bps": 22.0,
+          "n_trades": 28,
+          "n_excluded_by_gate": 504,
+          "pnl_usd": -0.6417,
+          "sharpe": -0.646,
+          "win_rate": 0.357,
+          "profit_factor": 0.794,
+          "max_drawdown_pct": 0.0209
+        }
+      ],
+      "ungated_pnl_at_0bps": 4.0951,
+      "phase4_verdict": "MARGINAL",
+      "breakeven_bps_proxy": 15.073594347954076,
+      "gated_verdict": "MARGINAL"
+    },
+    {
+      "window_id": "W5",
+      "rows": [
+        {
+          "slip_bps": 0.0,
+          "n_trades": 45,
+          "n_excluded_by_gate": 304,
+          "pnl_usd": 2.3287,
+          "sharpe": 1.302,
+          "win_rate": 0.489,
+          "profit_factor": 1.568,
+          "max_drawdown_pct": 0.0187
+        },
+        {
+          "slip_bps": 22.0,
+          "n_trades": 44,
+          "n_excluded_by_gate": 284,
+          "pnl_usd": -0.8112,
+          "sharpe": -0.465,
+          "win_rate": 0.432,
+          "profit_factor": 0.853,
+          "max_drawdown_pct": 0.0343
+        }
+      ],
+      "ungated_pnl_at_0bps": 6.7924,
+      "phase4_verdict": "MARGINAL",
+      "breakeven_bps_proxy": 16.316252109939807,
+      "gated_verdict": "MARGINAL"
+    }
+  ],
+  "aggregate_verdict": "GATE-INEFFECTIVE",
+  "max_degradation_pct": 1.7248250583138953,
+  "gated_verdict_distribution": {
+    "STRONG": 0,
+    "MARGINAL": 3,
+    "DEAD": 2
+  }
+}

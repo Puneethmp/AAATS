@@ -424,6 +424,90 @@ Phase 3.5 produced a MARGINAL verdict for C3 on a **single 60d window**. Before 
 
 ---
 
+## Phase 5 — C3 regime gate proposal (2026-05-27)
+
+Phase 4 showed C3 is WINDOW-DEPENDENT — 4/5 windows MARGINAL, 1/5 (W2) DEAD. Phase 5 asks: can a simple hand-designed regime gate exclude W2-equivalents while preserving MARGINAL windows? This phase is concept validation, not a production gate.
+
+### Step 1 — Window-aggregate regime features (BTC bars)
+
+For each Phase 4 window, computed 6 features on BTC's full 1440-bar (60d) slice:
+
+| Win | realized_vol_ann | trend_strength_per_bar | autocorr_lag1 | bband_width | directional_pct | max_dd_pct | Phase 4 verdict |
+|---|---:|---:|---:|---:|---:|---:|---|
+| W1 | 0.399 | 1.55e-05 | +0.047 | 0.0246 | 0.050 | 0.114 | MARGINAL |
+| W2 | 0.510 | **2.87e-04** | +0.018 | 0.0324 | **0.229** | **0.356** | **DEAD** |
+| W3 | 0.579 | 7.12e-05 | +0.011 | 0.0401 | 0.242 | 0.303 | MARGINAL |
+| W4 | 0.453 | 8.15e-05 | +0.013 | 0.0305 | 0.155 | 0.132 | MARGINAL |
+| W5 | 0.347 | 1.11e-04 | -0.004 | 0.0224 | 0.120 | 0.096 | MARGINAL |
+
+### Step 2 — W2 fingerprint
+
+Computed (W2_value - mean(MARGINAL)) / std(MARGINAL) for each feature:
+
+| Feature | W2 value | MARGINAL mean | MARGINAL std | W2 z-score | Fingerprint? |
+|---|---:|---:|---:|---:|---|
+| realized_vol_annualized | +0.5097 | +0.4446 | 0.0996 | +0.65 | no |
+| **trend_strength_per_bar** | +2.87e-04 | +1.04e-04 | 0.53e-04 | **+5.43** | **YES** |
+| autocorrelation_lag1 | +0.018 | +0.017 | 0.021 | +0.06 | no |
+| bband_width_mean | +0.0324 | +0.0294 | 0.0079 | +0.38 | no |
+| **directional_pct** | +0.229 | +0.142 | 0.080 | **+1.10** | **YES** |
+| **max_drawdown_pct** | +0.356 | +0.161 | 0.096 | **+2.03** | **YES** |
+
+W2's fingerprint is clear: **strong-trend, large-drawdown, big directional move**. The Phase 4 hypothesis (mean-reversion fails in trending regimes) is confirmed — W2's trend_strength is 5.4 standard deviations above the MARGINAL-window mean. Vol and autocorrelation are NOT distinguishing.
+
+### Step 3 — Proposed gate (60-bar trailing)
+
+Use the two top-z fingerprint features that have direct live-computable trailing analogs (max_drawdown_pct is window-aggregate by construction; live trailing version is the rolling drawdown, which is captured by `directional_pct` for the same lookback). Thresholds set at midpoint between W2's value and the worst-side MARGINAL value:
+
+| Live feature | Operator | Threshold | W2 (60d) | Worst MARGINAL (60d) | Derivation |
+|---|:-:|---:|---:|---:|---|
+| trend_strength | < | 1.99e-04 | 2.87e-04 | 1.11e-04 (W5) | Midpoint W2 ↔ worst MARGINAL |
+| directional_pct | < | 0.236 | 0.229 | 0.242 (W3) | Midpoint W2 ↔ worst MARGINAL |
+
+Gate computed per-bar on a **trailing 60-bar (60h ≈ 2.5d) BTC window**. C3 entry allowed only when BOTH conditions hold.
+
+### Step 4 — Gated C3 re-test
+
+| Window | Ungated PnL@0 | Gated PnL@0 | Gated Sharpe@0 | Gated PnL@22 | n_excluded | Gated verdict |
+|---|---:|---:|---:|---:|---:|---|
+| W1 | +3.74 | +3.66 | +2.70 | +0.83 | 211 | MARGINAL |
+| W2 | -1.18 | **+0.11** | +0.10 | -1.65 | 293 | **DEAD** *(Sharpe-killed)* |
+| W3 | +1.50 | **-1.09** | -3.55 | -1.71 | 396 | **DEAD** *(over-filter)* |
+| W4 | +4.10 | +1.40 | +1.33 | -0.64 | 504 | MARGINAL |
+| W5 | +6.79 | +2.33 | +1.30 | -0.81 | 304 | MARGINAL |
+
+**Max degradation on ungated-MARGINAL windows: 172.5% (W3 flipped sign).**
+
+### Cross-window verdict: **GATE-INEFFECTIVE**
+
+2/5 windows DEAD after gating (W2 + W3). W2 fingerprint at the 60d-aggregate level is unambiguous (z=+5.43 on trend_strength), but the per-bar trailing 60-bar version of the same feature is **too noisy to preserve the W2 ↔ W3 separation** — local trending bursts within W3 (which has window-aggregate trend_strength only slightly below W2) repeatedly cross the threshold, blocking 396 candidate entries and flipping W3 from +$1.50 to -$1.09. The same effect drops W4 and W5 PnL by ~66%.
+
+### Interpretation
+
+- **Regime concept is valid at the window level.** trend_strength_per_bar at 60d aggregate cleanly separates W2 (2.87e-04) from all MARGINAL windows (max 1.11e-04). Mean-reversion-fails-in-trends is the right intuition.
+- **60-bar trailing is the wrong observation horizon.** The trailing 60-bar window is shorter than C3's z-score lookback (also 60 bars), so the gate fires on the same micro-trends the strategy is *supposed* to fade. Need a smoother, longer-lookback signal.
+- **Marginal upside is small even with a perfect gate.** Maximally fixing W2 saves -$1.18 → +$1.18, distributed across 60d. The cost of any over-filtering in W3/W4/W5 (which collectively contribute +$12.4 ungated) quickly exceeds the W2 benefit. The risk asymmetry favors no-gate over imperfect-gate.
+- **Simple-threshold approach has hit its limit.** Threshold tightening fixes W3 over-filter but lets W2 through; loosening reopens W2 without saving W3. There is no clean univariate or bivariate threshold separation at the 60-bar trailing observation horizon.
+
+### Doctrine implications
+
+- C3 retains its Phase 4 standing: **MARGINAL, WINDOW-DEPENDENT, no graduation.** The live-flip GO/NO-GO decision must still account for ~20% historical loser-window probability.
+- The next viable step is **NOT another hand-designed gate at a different lookback** — same fragility, more design dimensions, more risk of overfitting. The next step is either:
+  - **Phase 6: ML-based regime classifier** trained on labeled W2-equivalent regimes (out-of-sample data required; Phase 5 was in-sample by design).
+  - **Operator-level acceptance** of window-dependent risk via sizing rule (e.g., reduce C3 capital allocation when a portfolio-level regime signal — outside C3 itself — flags a trending regime).
+- The Phase 3.5 option A framing ("keep C3 with execution discipline focus, build C3-class supplements") is unchanged. Phase 5 narrows it: **don't add a single-strategy regime gate; if regime-aware behavior is needed, it belongs at the portfolio/allocator level, not inside C3.**
+
+### Method caveats — please read before re-using the gate code
+
+- Phase 5 is **in-sample by design**: thresholds were derived on the same 5 windows they were tested against. Even if the result had been ROBUST, declaring real robustness would require out-of-sample validation on a held-out window. The Phase 5 driver makes no out-of-sample claim — see `tools/backtest/_c3_regime_gate_oneoff.py` line comments.
+- Trailing-window lookback was fixed at 60 bars per the Phase 5 spec; alternative lookbacks (e.g. 336h to match `VOL_LOOKBACK_HOURS`) were not tested. If a follow-up phase explores ML regime classification, longer-lookback features are a natural starting point.
+- Gate logic was applied at the C3 entry hook only; exits proceed unchanged. This matches the live runner's behavior under any other entry gate (BTC RSI floor, denylist).
+- `n_excluded` counts gate-blocked candidates AFTER the strategy's own filters (z-entry, cooldown, BTC RSI, denylist, MAX_CONCURRENT) — not raw bar counts. The high n_excluded reflects how often the trailing-60 features cross the threshold, not how often the strategy "wanted" to trade.
+- Driver: [tools/backtest/_c3_regime_gate_oneoff.py](../../tools/backtest/_c3_regime_gate_oneoff.py) (one-off; if Phase 6 pursues ML, lift feature computation into a real module).
+- Consolidated JSON: `data/backtest_results/c3_regime_gate_2026_05_27.json`.
+
+---
+
 ## Cross-references
 
 - Inventory: [docs/specs/b15_data_inventory.md](b15_data_inventory.md)
