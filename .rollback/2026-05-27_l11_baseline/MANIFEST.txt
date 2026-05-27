@@ -1,0 +1,23 @@
+# AAATS L11 baseline rollback baseline
+# Generated: 2026-05-27T08:00:29.422463Z
+# Host: aaats@100.95.126.39
+
+## Files changed (workstation -> box)
+  execution/paper_trader.py  ->  /home/aaats/aaats/execution/paper_trader.py
+    sha256_16 = 5cab20e65ffb98ad
+    size      = 38773B
+  monitoring/metrics_exporter.py  ->  /home/aaats/aaats/monitoring/metrics_exporter.py
+    sha256_16 = 925d0539a19771c8
+    size      = 89733B
+  data/capital_invariant_baseline.json  ->  /home/aaats/aaats/data/capital_invariant_baseline.json
+    sha256_16 = 579f1e98b17f917d
+    size      = 1658B
+  docs/known_issues/2026-05-27_l11_legacy_drift_baseline.md  ->  /home/aaats/aaats/docs/known_issues/2026-05-27_l11_legacy_drift_baseline.md
+    sha256_16 = 9378493e7e692260
+    size      = 6431B
+
+## Rollback steps
+  1. On box: cp <path>.bak-<ts> <path> for each backup taken below.
+  2. On box: docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-paper-crypto aaats-metrics
+  3. On box: rm -f /home/aaats/aaats/data/capital_invariant_baseline.json
+     (baseline file is harmless if missing; L11 falls back to v1 behavior.)
