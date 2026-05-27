@@ -29,6 +29,16 @@ The B.1.5 backtest-harness sprint completed Phases 1-5 during the away period. F
 - **Implementation** of whichever option lands is a follow-up sprint after operator approval. The autonomy contract still applies (live-flip is operator-only).
 - **Soak day-30 ETA** 2026-06-22 still on track; decision can wait until soak end or be made earlier (Option B can be taken mid-soak via `kill.py` without code changes).
 
+### Parallel thread — NautilusTrader port proposal (Cowork, 2026-05-27)
+
+A Cowork track proposes porting C3 into NautilusTrader (a production execution engine) to re-validate it under a realistic fee/fill model, gated by a "graduation gate." This is a concrete elaboration of the doctrine proposal's **Option D direction** (validate-then-deploy with honest execution). Three docs:
+
+- **[docs/decisions/2026-05-27_nautilus_consistency_review.md](2026-05-27_nautilus_consistency_review.md)** — **READ THIS FIRST of the three.** Verdict = **PARTIAL**: the plan closes the C3 execution-modeling gap and correctly scopes to C3 (C1/C6 stay dead, not ported), but it does **not** address the Phase 4 regime-dependence finding — better execution does not fix C3 being DEAD in trending (W2-class) regimes, and the graduation gate's blended-OOS number can mask it. Q1–Q5 consistency answers + 4 gaps to close are in the doc.
+- [docs/decisions/2026-05-27_c3_nautilus_port_and_graduation_gate.md](2026-05-27_c3_nautilus_port_and_graduation_gate.md) — the C3 pilot plan (B.1.6, ~4 sessions, workstation-only).
+- [docs/decisions/2026-05-27_nt_final_extraction_for_success.md](2026-05-27_nt_final_extraction_for_success.md) — the 8-capability inventory + P0–P4 adoption roadmap.
+
+**Before the NT plan becomes the roadmap, close the regime gap** (consistency review §"Gaps to close"): the graduation gate must not graduate C3 on a blended OOS number that averages over a losing trending window — regime-robustness is a separate, allocator-level requirement per Phase 5. NT validates *execution viability*; it does not make a window-dependent strategy robust. Both are prerequisites for live-flip. The NT docs are workstation/research-only and do not touch the box or the soak.
+
 ---
 
 ## Next autonomous session (mid-soak) — B.1.5 Phase 2
