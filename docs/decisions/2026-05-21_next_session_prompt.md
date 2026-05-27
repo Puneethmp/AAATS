@@ -67,6 +67,37 @@ Session 11 + 12 shipped (REFERENCE — do not redo):
     Rollback baseline: .rollback/2026-05-24_auto_cron_resilience/.
     Old v2 autopush retained at /home/aaats/bin/aaats-autopush.sh.v2.bak.20260524T095413Z.
 
+  Session 13b (2026-05-27, mid-soak — L11 legacy-drift baseline):
+    Closed the recurring L11 "capital invariant warn at -$8.5169" that had
+    fired every cycle since L11 instrumentation shipped 2026-05-26. Drift
+    diagnosed as legacy (constant -$8.5169 across 14+ readings with
+    completely different open_notional/realized_pnl values), probable
+    origin = 2026-05-23 phantom-ENA orphan-debit recovery or the
+    2026-05-26 structural-fix deploy. Strategy code internally symmetric
+    (no active leak). SHIPPED commits dcc6452 + 54117f0 on origin/main:
+      - execution/paper_trader.py: _read_legacy_drift_baseline +
+        raw/baseline/effective fields. Verdict gates on effective; v1
+        delta_usd preserved for readers.
+      - monitoring/metrics_exporter.py: 3 new gauges
+        (aaats_capital_invariant_raw_delta_usd, _baseline_drift_usd,
+        _effective_delta_usd). Existing delta_usd keeps emitting (with
+        effective value).
+      - data/capital_invariant_baseline.json: crypto=-$8.5169 with full
+        audit metadata; india=0 (halted).
+      - docs/known_issues/2026-05-27_l11_legacy_drift_baseline.md: audit
+        + operator runbook for refreshing the baseline.
+      - tools/operator/deploy_l11_baseline_2026_05_27.py: idempotent.
+    Containers aaats-paper-crypto + aaats-metrics rebuilt. Live alert at
+    08:01:50Z post-deploy: verdict=ok, raw=-8.5169, baseline=-8.5169,
+    effective=0.0. All 4 smoke tests green. Rollback baseline at
+    .rollback/2026-05-27_l11_baseline/MANIFEST.txt.
+    Tiny secondary fix: deploy script's first attempt failed because
+    ensure_remote_dirs(...) was passed dir paths instead of file paths
+    (it mkdirs the PARENT of each input). Fixed to pass CHANGED_FILES
+    .values() — pattern note for future deploy scripts.
+    Also added !data/capital_invariant_baseline.json to .gitignore
+    allow-list (matches existing pattern for halt_state.json etc.).
+
 ================================================================
 PHASE 0 — Cron resilience + away-period liveness check (NEW 2026-05-24)
 ================================================================
@@ -222,6 +253,35 @@ Reporting at session end
 ---
 
 ## Status log
+
+- **2026-05-27 (session 13b — mid-soak L11 baseline patch, autonomous):**
+  Closed the recurring L11 capital invariant warn (-$8.5169 every cycle
+  since 2026-05-26 instrumentation). Diagnosed as legacy drift (constant
+  to 4dp across 14+ readings with widely varying open_notional + new
+  trades, including a fresh position opened mid-deploy). Shipped commits
+  dcc6452 (L11 baseline offset mechanism + 3 new Prometheus gauges) and
+  54117f0 (audit memo + idempotent deploy script). aaats-paper-crypto +
+  aaats-metrics rebuilt. Post-rebuild L11 reading 08:01:50Z:
+  verdict=ok, raw=-8.5169, baseline=-8.5169, effective=0.0. All gauges
+  visible at :9091/metrics. Rollback baseline at
+  .rollback/2026-05-27_l11_baseline/MANIFEST.txt. Audit:
+  docs/known_issues/2026-05-27_l11_legacy_drift_baseline.md.
+
+  **Operator action queue (open items as of 2026-05-27):**
+  1. **Rotate Grafana admin password** (open since 2026-05-26):
+     /srv/aaats/secrets/grafana_admin_password is out of sync with the
+     running Grafana instance — admin API auth rejected. Rotate when
+     convenient. Source: CLAUDE.md "Deploy machinery gotchas" section.
+  2. **Retrofit tools/operator/deploy_to_contabo.py to use deploy_lib**
+     (open since 2026-05-26): the older general-purpose deploy script
+     still uses raw tarball and reinvents helpers that deploy_lib now
+     provides. Sprint follow-up. Source: CLAUDE.md gotchas list.
+  3. **Investigate the legacy $8.5169 origin** (deferrable to post-soak):
+     Most likely 2026-05-23T13:29Z phantom-ENA orphan-debit during the
+     crash-loop recovery, or the 2026-05-26 structural-fix deploy. The
+     audit memo (docs/known_issues/2026-05-27_l11_legacy_drift_baseline.md)
+     has the diagnostic queries. Recommendation: forensic SQL pass over
+     paper_trades.db with a "phantom debit" filter after soak closes.
 
 - **2026-05-24 (session 13a — pre-departure cron resilience, autonomous):**
   Track D 4-layer build. False-positive 15h "blackout" investigation
