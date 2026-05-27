@@ -1,0 +1,428 @@
+{
+  "strategy": "c3",
+  "phase": "B.1.5 phase 4 walk-forward",
+  "data_window": "2025-11-28 15:00:00+00:00 to 2026-05-27 14:00:00+00:00 (4320 1h bars, 179d)",
+  "universe": [
+    "AVAX/USDT",
+    "BTC/USDT",
+    "DOT/USDT",
+    "LINK/USDT",
+    "SOL/USDT"
+  ],
+  "n_windows": 5,
+  "window_days": 60,
+  "stride_days": 30,
+  "warmup_bars": 35,
+  "slippage_sweep_bps": [
+    0.0,
+    5.0,
+    10.0,
+    15.0,
+    20.0,
+    25.0,
+    50.0
+  ],
+  "windows": [
+    {
+      "window_id": "W1",
+      "start_idx": 0,
+      "end_idx": 1440,
+      "start_ts": "2025-11-28 15:00:00+00:00",
+      "end_ts": "2026-01-27 14:00:00+00:00",
+      "warmup_bars": 35,
+      "rows": [
+        {
+          "slip_bps": 0.0,
+          "n_trades": 81,
+          "pnl_usd": 3.7437,
+          "sharpe": 1.59,
+          "win_rate": 0.58,
+          "profit_factor": 1.578,
+          "max_drawdown_pct": 0.0211
+        },
+        {
+          "slip_bps": 5.0,
+          "n_trades": 81,
+          "pnl_usd": 2.8422,
+          "sharpe": 1.264,
+          "win_rate": 0.556,
+          "profit_factor": 1.414,
+          "max_drawdown_pct": 0.0224
+        },
+        {
+          "slip_bps": 10.0,
+          "n_trades": 81,
+          "pnl_usd": 1.9524,
+          "sharpe": 0.943,
+          "win_rate": 0.556,
+          "profit_factor": 1.269,
+          "max_drawdown_pct": 0.0246
+        },
+        {
+          "slip_bps": 15.0,
+          "n_trades": 79,
+          "pnl_usd": 0.5909,
+          "sharpe": 0.442,
+          "win_rate": 0.519,
+          "profit_factor": 1.077,
+          "max_drawdown_pct": 0.0286
+        },
+        {
+          "slip_bps": 20.0,
+          "n_trades": 79,
+          "pnl_usd": -0.2777,
+          "sharpe": 0.12,
+          "win_rate": 0.519,
+          "profit_factor": 0.966,
+          "max_drawdown_pct": 0.033
+        },
+        {
+          "slip_bps": 25.0,
+          "n_trades": 77,
+          "pnl_usd": -1.3744,
+          "sharpe": -0.3,
+          "win_rate": 0.481,
+          "profit_factor": 0.839,
+          "max_drawdown_pct": 0.0376
+        },
+        {
+          "slip_bps": 50.0,
+          "n_trades": 75,
+          "pnl_usd": -5.62,
+          "sharpe": -2.016,
+          "win_rate": 0.373,
+          "profit_factor": 0.474,
+          "max_drawdown_pct": 0.0672
+        }
+      ],
+      "breakeven_bps": 18.401450610177296,
+      "sharpe_at_0bps": 1.59,
+      "win_rate_at_0bps": 0.58,
+      "pnl_at_0bps_usd": 3.7437,
+      "n_trades_at_0bps": 81,
+      "verdict": "MARGINAL"
+    },
+    {
+      "window_id": "W2",
+      "start_idx": 720,
+      "end_idx": 2160,
+      "start_ts": "2025-12-28 15:00:00+00:00",
+      "end_ts": "2026-02-26 14:00:00+00:00",
+      "warmup_bars": 35,
+      "rows": [
+        {
+          "slip_bps": 0.0,
+          "n_trades": 74,
+          "pnl_usd": -1.1782,
+          "sharpe": -0.279,
+          "win_rate": 0.432,
+          "profit_factor": 0.858,
+          "max_drawdown_pct": 0.0436
+        },
+        {
+          "slip_bps": 5.0,
+          "n_trades": 73,
+          "pnl_usd": -1.8545,
+          "sharpe": -0.534,
+          "win_rate": 0.397,
+          "profit_factor": 0.785,
+          "max_drawdown_pct": 0.0452
+        },
+        {
+          "slip_bps": 10.0,
+          "n_trades": 73,
+          "pnl_usd": -2.654,
+          "sharpe": -0.828,
+          "win_rate": 0.397,
+          "profit_factor": 0.708,
+          "max_drawdown_pct": 0.0481
+        },
+        {
+          "slip_bps": 15.0,
+          "n_trades": 72,
+          "pnl_usd": -3.566,
+          "sharpe": -1.185,
+          "win_rate": 0.375,
+          "profit_factor": 0.627,
+          "max_drawdown_pct": 0.0528
+        },
+        {
+          "slip_bps": 20.0,
+          "n_trades": 72,
+          "pnl_usd": -4.3549,
+          "sharpe": -1.478,
+          "win_rate": 0.375,
+          "profit_factor": 0.566,
+          "max_drawdown_pct": 0.0578
+        },
+        {
+          "slip_bps": 25.0,
+          "n_trades": 72,
+          "pnl_usd": -5.143,
+          "sharpe": -1.772,
+          "win_rate": 0.361,
+          "profit_factor": 0.512,
+          "max_drawdown_pct": 0.0629
+        },
+        {
+          "slip_bps": 50.0,
+          "n_trades": 71,
+          "pnl_usd": -8.8152,
+          "sharpe": -3.193,
+          "win_rate": 0.254,
+          "profit_factor": 0.319,
+          "max_drawdown_pct": 0.0949
+        }
+      ],
+      "breakeven_bps": 0.0,
+      "sharpe_at_0bps": -0.279,
+      "win_rate_at_0bps": 0.432,
+      "pnl_at_0bps_usd": -1.1782,
+      "n_trades_at_0bps": 74,
+      "verdict": "DEAD"
+    },
+    {
+      "window_id": "W3",
+      "start_idx": 1440,
+      "end_idx": 2880,
+      "start_ts": "2026-01-27 15:00:00+00:00",
+      "end_ts": "2026-03-28 14:00:00+00:00",
+      "warmup_bars": 35,
+      "rows": [
+        {
+          "slip_bps": 0.0,
+          "n_trades": 68,
+          "pnl_usd": 1.5005,
+          "sharpe": 0.721,
+          "win_rate": 0.456,
+          "profit_factor": 1.205,
+          "max_drawdown_pct": 0.0237
+        },
+        {
+          "slip_bps": 5.0,
+          "n_trades": 68,
+          "pnl_usd": 0.8075,
+          "sharpe": 0.462,
+          "win_rate": 0.456,
+          "profit_factor": 1.105,
+          "max_drawdown_pct": 0.0242
+        },
+        {
+          "slip_bps": 10.0,
+          "n_trades": 68,
+          "pnl_usd": 0.1152,
+          "sharpe": 0.203,
+          "win_rate": 0.456,
+          "profit_factor": 1.014,
+          "max_drawdown_pct": 0.0263
+        },
+        {
+          "slip_bps": 15.0,
+          "n_trades": 68,
+          "pnl_usd": -0.5765,
+          "sharpe": -0.057,
+          "win_rate": 0.456,
+          "profit_factor": 0.932,
+          "max_drawdown_pct": 0.0284
+        },
+        {
+          "slip_bps": 20.0,
+          "n_trades": 67,
+          "pnl_usd": -1.076,
+          "sharpe": -0.261,
+          "win_rate": 0.433,
+          "profit_factor": 0.875,
+          "max_drawdown_pct": 0.0305
+        },
+        {
+          "slip_bps": 25.0,
+          "n_trades": 67,
+          "pnl_usd": -1.7538,
+          "sharpe": -0.519,
+          "win_rate": 0.433,
+          "profit_factor": 0.805,
+          "max_drawdown_pct": 0.0327
+        },
+        {
+          "slip_bps": 50.0,
+          "n_trades": 66,
+          "pnl_usd": -5.3018,
+          "sharpe": -1.91,
+          "win_rate": 0.348,
+          "profit_factor": 0.519,
+          "max_drawdown_pct": 0.0556
+        }
+      ],
+      "breakeven_bps": 10.83273095272517,
+      "sharpe_at_0bps": 0.721,
+      "win_rate_at_0bps": 0.456,
+      "pnl_at_0bps_usd": 1.5005,
+      "n_trades_at_0bps": 68,
+      "verdict": "MARGINAL"
+    },
+    {
+      "window_id": "W4",
+      "start_idx": 2160,
+      "end_idx": 3600,
+      "start_ts": "2026-02-26 15:00:00+00:00",
+      "end_ts": "2026-04-27 14:00:00+00:00",
+      "warmup_bars": 35,
+      "rows": [
+        {
+          "slip_bps": 0.0,
+          "n_trades": 89,
+          "pnl_usd": 4.0951,
+          "sharpe": 1.233,
+          "win_rate": 0.438,
+          "profit_factor": 1.579,
+          "max_drawdown_pct": 0.0184
+        },
+        {
+          "slip_bps": 5.0,
+          "n_trades": 89,
+          "pnl_usd": 3.0198,
+          "sharpe": 0.902,
+          "win_rate": 0.438,
+          "profit_factor": 1.393,
+          "max_drawdown_pct": 0.022
+        },
+        {
+          "slip_bps": 10.0,
+          "n_trades": 88,
+          "pnl_usd": 1.9874,
+          "sharpe": 0.586,
+          "win_rate": 0.432,
+          "profit_factor": 1.24,
+          "max_drawdown_pct": 0.0253
+        },
+        {
+          "slip_bps": 15.0,
+          "n_trades": 86,
+          "pnl_usd": 1.0146,
+          "sharpe": 0.286,
+          "win_rate": 0.419,
+          "profit_factor": 1.115,
+          "max_drawdown_pct": 0.028
+        },
+        {
+          "slip_bps": 20.0,
+          "n_trades": 84,
+          "pnl_usd": -0.2199,
+          "sharpe": -0.096,
+          "win_rate": 0.381,
+          "profit_factor": 0.976,
+          "max_drawdown_pct": 0.0314
+        },
+        {
+          "slip_bps": 25.0,
+          "n_trades": 84,
+          "pnl_usd": -1.2266,
+          "sharpe": -0.422,
+          "win_rate": 0.381,
+          "profit_factor": 0.876,
+          "max_drawdown_pct": 0.0348
+        },
+        {
+          "slip_bps": 50.0,
+          "n_trades": 82,
+          "pnl_usd": -6.4174,
+          "sharpe": -2.158,
+          "win_rate": 0.28,
+          "profit_factor": 0.516,
+          "max_drawdown_pct": 0.0769
+        }
+      ],
+      "breakeven_bps": 19.1093560145808,
+      "sharpe_at_0bps": 1.233,
+      "win_rate_at_0bps": 0.438,
+      "pnl_at_0bps_usd": 4.0951,
+      "n_trades_at_0bps": 89,
+      "verdict": "MARGINAL"
+    },
+    {
+      "window_id": "W5",
+      "start_idx": 2880,
+      "end_idx": 4320,
+      "start_ts": "2026-03-28 15:00:00+00:00",
+      "end_ts": "2026-05-27 14:00:00+00:00",
+      "warmup_bars": 35,
+      "rows": [
+        {
+          "slip_bps": 0.0,
+          "n_trades": 86,
+          "pnl_usd": 6.7924,
+          "sharpe": 1.941,
+          "win_rate": 0.5,
+          "profit_factor": 2.055,
+          "max_drawdown_pct": 0.0212
+        },
+        {
+          "slip_bps": 5.0,
+          "n_trades": 86,
+          "pnl_usd": 5.6145,
+          "sharpe": 1.59,
+          "win_rate": 0.5,
+          "profit_factor": 1.801,
+          "max_drawdown_pct": 0.0248
+        },
+        {
+          "slip_bps": 10.0,
+          "n_trades": 84,
+          "pnl_usd": 4.6385,
+          "sharpe": 1.312,
+          "win_rate": 0.488,
+          "profit_factor": 1.624,
+          "max_drawdown_pct": 0.028
+        },
+        {
+          "slip_bps": 15.0,
+          "n_trades": 82,
+          "pnl_usd": 3.5781,
+          "sharpe": 1.006,
+          "win_rate": 0.476,
+          "profit_factor": 1.45,
+          "max_drawdown_pct": 0.0318
+        },
+        {
+          "slip_bps": 20.0,
+          "n_trades": 81,
+          "pnl_usd": 2.0646,
+          "sharpe": 0.546,
+          "win_rate": 0.457,
+          "profit_factor": 1.242,
+          "max_drawdown_pct": 0.0367
+        },
+        {
+          "slip_bps": 25.0,
+          "n_trades": 81,
+          "pnl_usd": 0.9581,
+          "sharpe": 0.2,
+          "win_rate": 0.444,
+          "profit_factor": 1.105,
+          "max_drawdown_pct": 0.0416
+        },
+        {
+          "slip_bps": 50.0,
+          "n_trades": 76,
+          "pnl_usd": -4.2035,
+          "sharpe": -1.492,
+          "win_rate": 0.355,
+          "profit_factor": 0.641,
+          "max_drawdown_pct": 0.075
+        }
+      ],
+      "breakeven_bps": 29.640518443893367,
+      "sharpe_at_0bps": 1.941,
+      "win_rate_at_0bps": 0.5,
+      "pnl_at_0bps_usd": 6.7924,
+      "n_trades_at_0bps": 86,
+      "verdict": "MARGINAL"
+    }
+  ],
+  "aggregate_verdict": "WINDOW-DEPENDENT",
+  "verdict_distribution": {
+    "STRONG": 0,
+    "MARGINAL": 4,
+    "DEAD": 1
+  }
+}

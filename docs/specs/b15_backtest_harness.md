@@ -364,6 +364,66 @@ This re-frames operator option A/B/C from Phase 3:
 
 ---
 
+## Phase 4 — C3 6-month walk-forward validation (2026-05-27)
+
+Phase 3.5 produced a MARGINAL verdict for C3 on a **single 60d window**. Before any live-flip GO/NO-GO discussion, the operator needs to know whether the 22.8 bps break-even is window-dependent or robust across regimes. This phase re-runs the same 7-point slippage sweep across 5 overlapping 60d windows at 30d stride, spanning the full 180d of available Binance 1h history (2025-11-28 to 2026-05-27).
+
+### Method
+
+- Universe: BTC + SOL/LINK/AVAX/DOT (C3 production universe, unchanged).
+- 180d × 5 symbols × 1h bars = 4320 aligned bars per symbol; common-timestamp inner-join.
+- Window size 60d (1440 bars), stride 30d (720 bars). Adjacent windows share 30d of overlap.
+- Per-window warmup = 35 bars (matches Phase 3.5 START); replay_c3 is called fresh per window (no carry-over positions).
+- Same SWEEP = [0, 5, 10, 15, 20, 25, 50] bps per side.
+- Per-window classification thresholds:
+  - **STRONG** = break-even >30 bps AND Sharpe@0 >0.8 AND win@0 >0.45
+  - **MARGINAL** = break-even 10-30 bps AND Sharpe@0 >0.3
+  - **DEAD** = break-even <10 bps OR Sharpe@0 ≤0.3 OR negative pnl@0
+- Cross-window verdict:
+  - **ROBUST** = ≥4/5 windows MARGINAL or STRONG, no DEAD verdict
+  - **WINDOW-DEPENDENT** = 2-3 good, others DEAD
+  - **WINDOW-LUCKY** = ≤1/5 windows good
+- Driver: [tools/backtest/_c3_walkforward_oneoff.py](../../tools/backtest/_c3_walkforward_oneoff.py).
+
+### Per-window results
+
+| Window | Date range | n@0 | PnL@0 | Sharpe@0 | Win@0 | Break-even (bps) | Verdict |
+|---|---|---:|---:|---:|---:|---:|---|
+| W1 | 2025-11-28 → 2026-01-27 | 81 | +3.74 | +1.59 | 58.0% | 18.4 | MARGINAL |
+| W2 | 2025-12-28 → 2026-02-26 | 74 | -1.18 | -0.28 | 43.2% | 0.0 | **DEAD** |
+| W3 | 2026-01-27 → 2026-03-28 | 68 | +1.50 | +0.72 | 45.6% | 10.8 | MARGINAL |
+| W4 | 2026-02-26 → 2026-04-27 | 89 | +4.10 | +1.23 | 43.8% | 19.1 | MARGINAL |
+| W5 | 2026-03-28 → 2026-05-27 | 86 | +6.79 | +1.94 | 50.0% | 29.6 | MARGINAL |
+
+### Cross-window verdict: **WINDOW-DEPENDENT**
+
+4/5 windows MARGINAL, 1/5 DEAD. One regime (W2, mid-Dec to late-Feb) is unprofitable for C3 even at zero friction. The other 4 windows are consistently MARGINAL with break-evens 10.8-29.6 bps (none reach STRONG).
+
+### Interpretation
+
+- **The soak's apparent edge is not a cherry-pick.** W5 (which encompasses the soak window) is the *strongest* window by every metric: break-even 29.6 bps vs. cross-window median 18.4 bps; PnL +$6.79 vs. median +$1.50; Sharpe +1.94 vs. median +0.72. The Phase 3.5 number (22.8 bps) sits between W5 (newer) and W4 (older overlap) — Phase 3.5 was conservative relative to W5.
+- **But ~20% of historical 60d windows are losers.** W2 (centered on a regime where altcoin mean-reversion failed) wiped PnL at zero cost. Without a regime gate, C3's expected behavior across an arbitrary future 60d span includes ~20% probability of an unprofitable window.
+- **MARGINAL standing held.** Per the protocol, WINDOW-DEPENDENT keeps the Phase 3.5 operator framing — C3 remains "MARGINAL, keep with execution discipline focus" rather than reclassified to DEAD.
+- **Phase 3.5 break-even narrowly survives even on worst MARGINAL window.** W3's 10.8 bps is below Binance spot taker (10 bps). Worst-case MARGINAL window is on the wrong side of fee survival; only some windows have execution headroom.
+
+### Doctrine implications
+
+- The live-flip GO/NO-GO for C3 cannot lean purely on the soak (= W5, the best window). Need either:
+  - A regime gate that detects W2-class regimes and pauses C3 (preferred — uses freely-available regime signal).
+  - Or accept that ~20% of 60d periods will be unprofitable and size C3 such that this is tolerable at portfolio level.
+- The Phase 3.5 option A ("keep C3 with execution discipline focus, build C3-class supplements") remains the correct framing. Phase 4 narrows the execution-discipline requirement: clean fills are necessary but not sufficient — without a regime gate, ~20% of windows lose money even at zero cost.
+- Phase 5 candidate (not started): identify the W2 regime signal. Likely candidates: BTC RSI macro guard threshold tighter than current 30; broader regime classifier (trend-vs-range, vol regime); cross-asset signal (BTC dominance, USDT funding).
+
+### Method caveats
+
+- 5 windows is a small sample. Adjacent windows overlap by 30d, so adjacent verdicts are not fully independent.
+- W1 starts at the earliest available data (2025-11-28); no prior bars for indicator warmup beyond the 35-bar pad. W2-W5 have prior data available for z-score history (more apples-to-apples among W2-W5 than W1-W5).
+- No transaction costs in PnL@0 column. Break-even column accounts for slippage but no fee gradient is modeled.
+- All numbers are paper-mode realized PnL on the replay; live execution may diverge per the "Known model gap" section above.
+- Consolidated JSON: `data/backtest_results/c3_walkforward_6mo_2026_05_27.json`.
+
+---
+
 ## Cross-references
 
 - Inventory: [docs/specs/b15_data_inventory.md](b15_data_inventory.md)
