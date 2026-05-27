@@ -1391,7 +1391,7 @@ def collect_oms() -> list[str]:
             rows = conn.execute(
                 f"""
                 SELECT state, COUNT(*) as c FROM oms_orders
-                WHERE state IN ({','.join(['?']*len(non_terminal))})
+                WHERE state IN ({",".join(["?"] * len(non_terminal))})
                 GROUP BY state
             """,
                 non_terminal,
@@ -2205,7 +2205,26 @@ def collect_capital_invariant() -> list[str]:
             (
                 "delta_usd",
                 "aaats_capital_invariant_delta_usd",
-                "Layer L11 capital delta = actual - expected (USD)",
+                "Layer L11 capital delta = actual - expected (USD). Effective "
+                "(baseline-adjusted) since the 2026-05-27 baseline patch.",
+            ),
+            (
+                "raw_delta_usd",
+                "aaats_capital_invariant_raw_delta_usd",
+                "Layer L11 RAW capital delta before legacy-baseline offset. "
+                "Compare against baseline_drift_usd to spot new drift.",
+            ),
+            (
+                "baseline_drift_usd",
+                "aaats_capital_invariant_baseline_drift_usd",
+                "Operator-recorded legacy drift baseline (USD). Subtracted "
+                "from raw delta to produce effective delta_usd.",
+            ),
+            (
+                "effective_delta_usd",
+                "aaats_capital_invariant_effective_delta_usd",
+                "Layer L11 effective delta = raw_delta - baseline. Mirrors "
+                "delta_usd; emitted as a distinct name for explicit dashboards.",
             ),
             (
                 "actual_capital",

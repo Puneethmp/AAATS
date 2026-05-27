@@ -648,6 +648,61 @@ CAPITAL_INVARIANT_WARN_USD = 2.00  # warn at this level
 CAPITAL_INVARIANT_CRITICAL_USD = 10.00  # log critical at this level
 CAPITAL_INVARIANT_ALERT_FILENAME = "capital_invariant_alerts.json"
 
+# Baseline offset for known historical drift. Persisted in
+# data/capital_invariant_baseline.json keyed by market. Subtracted from raw
+# delta BEFORE the threshold comparison so legacy drift doesn't pin L11 in
+# WARN forever — but raw_delta is still surfaced in alert JSON + logs so
+# NEW drift is detectable. Origin: 2026-05-27 baseline recorded $-8.5169 for
+# crypto after multi-snapshot confirmation that the drift is a fixed
+# pre-L11-instrumentation constant, not active leakage. See
+# docs/known_issues/2026-05-27_l11_legacy_drift_baseline.md for the audit
+# trail and instructions for resetting the baseline.
+CAPITAL_INVARIANT_BASELINE_FILENAME = "capital_invariant_baseline.json"
+
+
+def _read_legacy_drift_baseline(market: str, state_dir: Path) -> float:
+    """Return the operator-recorded baseline drift for `market` in USD.
+
+    Baseline file is data/capital_invariant_baseline.json. Schema:
+        {
+          "<market>": {
+            "baseline_usd": <float>,
+            "recorded_at": "<iso-utc>",
+            "reason": "<free text>",
+            "source_alert_file": "<path or commit sha>"
+          },
+          ...
+        }
+
+    Missing file or missing market → 0.0 (no baseline → raw delta governs).
+    The baseline value is what `actual - expected` reads at the moment the
+    baseline was recorded; subsequent checks subtract it before threshold
+    comparison so the verdict reflects ONLY new drift since recording.
+
+    Operator workflow to refresh the baseline:
+      1. `rm data/capital_invariant_baseline.json` to clear.
+      2. Wait one cycle — L11 will re-alert with the new raw delta.
+      3. If the new delta is legitimate (e.g. operator deposit), record it.
+
+    Returning a float (not a dict) keeps the call-site one-liner.
+    """
+    f = state_dir / CAPITAL_INVARIANT_BASELINE_FILENAME
+    if not f.exists():
+        return 0.0
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 0.0
+    if not isinstance(data, dict):
+        return 0.0
+    entry = data.get(market)
+    if not isinstance(entry, dict):
+        return 0.0
+    try:
+        return float(entry.get("baseline_usd", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
 
 def _read_all_open_notional(state_dir: Path) -> float:
     """Sum open-position notional across every strategy state file.
@@ -734,8 +789,7 @@ def compute_capital_invariant(
         try:
             with sqlite3.connect(db_path) as conn:
                 row = conn.execute(
-                    "SELECT COALESCE(SUM(pnl), 0.0) FROM paper_trades "
-                    "WHERE market = ?",
+                    "SELECT COALESCE(SUM(pnl), 0.0) FROM paper_trades WHERE market = ?",
                     (market,),
                 ).fetchone()
                 if row and row[0] is not None:
@@ -750,8 +804,13 @@ def compute_capital_invariant(
     open_notional = strategy_open + directional_open
 
     expected = starting + realized - open_notional
-    delta = actual - expected
-    abs_delta = abs(delta)
+    raw_delta = actual - expected
+    baseline = _read_legacy_drift_baseline(market, state_dir)
+    # Effective delta is what the verdict gates on. Raw delta is preserved
+    # in the return dict + alert JSON so legacy drift remains auditable and
+    # any NEW drift on top of the baseline still trips WARN/CRITICAL.
+    effective_delta = raw_delta - baseline
+    abs_delta = abs(effective_delta)
 
     if abs_delta <= CAPITAL_INVARIANT_TOLERANCE_USD:
         verdict = "ok"
@@ -770,7 +829,14 @@ def compute_capital_invariant(
         "directional_open_notional": round(directional_open, 4),
         "open_notional": round(open_notional, 4),
         "expected_capital": round(expected, 4),
-        "delta_usd": round(delta, 4),
+        # `delta_usd` preserves the v1 contract — readers (alerts, Grafana
+        # panels, daily-digest) that key off this name keep working. It now
+        # carries the baseline-adjusted (effective) value, matching the
+        # verdict. Raw + baseline are exposed alongside for auditability.
+        "delta_usd": round(effective_delta, 4),
+        "raw_delta_usd": round(raw_delta, 4),
+        "baseline_drift_usd": round(baseline, 4),
+        "effective_delta_usd": round(effective_delta, 4),
         "verdict": verdict,
     }
 
@@ -830,10 +896,13 @@ def assert_capital_invariant(
 
     if verdict == "critical":
         _log.error(
-            "[L11] CAPITAL INVARIANT CRITICAL | market=%s | delta=$%.4f | "
-            "actual=$%.2f expected=$%.2f (starting=$%.2f + realized=$%.4f - open=$%.2f)",
+            "[L11] CAPITAL INVARIANT CRITICAL | market=%s | effective_delta=$%.4f "
+            "(raw=$%.4f baseline=$%.4f) | actual=$%.2f expected=$%.2f "
+            "(starting=$%.2f + realized=$%.4f - open=$%.2f)",
             market,
             delta,
+            result["raw_delta_usd"],
+            result["baseline_drift_usd"],
             result["actual_capital"],
             result["expected_capital"],
             result["starting_equity"],
@@ -842,17 +911,23 @@ def assert_capital_invariant(
         )
     elif verdict == "warn":
         _log.warning(
-            "[L11] capital invariant warn | market=%s | delta=$%.4f | actual=$%.2f expected=$%.2f",
+            "[L11] capital invariant warn | market=%s | effective_delta=$%.4f "
+            "(raw=$%.4f baseline=$%.4f) | actual=$%.2f expected=$%.2f",
             market,
             delta,
+            result["raw_delta_usd"],
+            result["baseline_drift_usd"],
             result["actual_capital"],
             result["expected_capital"],
         )
     else:  # watch
         _log.info(
-            "[L11] capital invariant watch | market=%s | delta=$%.4f (within rounding+slip band)",
+            "[L11] capital invariant watch | market=%s | effective_delta=$%.4f "
+            "(raw=$%.4f baseline=$%.4f) — within rounding+slip band",
             market,
             delta,
+            result["raw_delta_usd"],
+            result["baseline_drift_usd"],
         )
 
     return result
