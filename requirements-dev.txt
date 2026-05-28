@@ -1,0 +1,14 @@
+# AAATS development-only dependencies — workstation/research, NEVER deployed to the box.
+#
+# This file is for the NautilusTrader-based research/validation pipeline
+# (tools/nautilus/, tools/graduation/). The Contabo paper-crypto container
+# never imports anything in this list.
+#
+# Pin policy: pin to known-working versions. NT is in active Cython→PyO3
+# migration; do not float to nightly.
+
+# NautilusTrader — the research+validation engine.
+# Used for: realistic backtest with MakerTakerFeeModel + FillModel, the
+# graduation harness in tools/nautilus/run_c3_oos.py, and the future
+# research→live parity path. Verified hands-on 2026-05-27.
+nautilus_trader==1.202.0
