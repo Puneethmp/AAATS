@@ -28,7 +28,8 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 HIST = ROOT / "data" / "historical"
-SYMBOLS = ["BTC", "SOL", "LINK", "AVAX", "DOT"]
+# ETH added 2026-05-28 (B.1.7 Track 5) — C3c-perp anchors the z-score on ETH.
+SYMBOLS = ["BTC", "ETH", "SOL", "LINK", "AVAX", "DOT"]
 
 FAPI = "https://fapi.binance.com"
 # Match the spot cache window (2025-11-28 15:00 -> 2026-05-27 14:00 UTC).
@@ -145,7 +146,7 @@ def main() -> int:
 
         if _covers(kpath, "ts"):
             kdf = pd.read_parquet(kpath)
-            print(f"{sym} klines: cached ({len(kdf)} bars) — skip")
+            print(f"{sym} klines: cached ({len(kdf)} bars) - skip")
         else:
             kdf = fetch_klines(sym)
             kdf.to_parquet(kpath, index=False)
@@ -156,7 +157,7 @@ def main() -> int:
 
         if _covers(fpath, "ts_funding"):
             fdf = pd.read_parquet(fpath)
-            print(f"{sym} funding: cached ({len(fdf)} events) — skip")
+            print(f"{sym} funding: cached ({len(fdf)} events) - skip")
         else:
             fdf = fetch_funding(sym)
             fdf.to_parquet(fpath, index=False)
