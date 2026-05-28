@@ -1,0 +1,69 @@
+{
+  "strategy": "C3_perp_signal_test",
+  "timestamp": "2026-05-28T14:55:46.092630+00:00",
+  "verdict": "PASS",
+  "metrics": {
+    "net_pnl_usd": 9.1618,
+    "sharpe": 1.5982,
+    "max_drawdown_pct": 0.0354,
+    "n_trades": 242,
+    "profit_factor": 1.4143,
+    "in_sample_sharpe": 0.7852,
+    "oos_sharpe": 1.5982,
+    "pnl_at_maker_0_5": 9.1618,
+    "_full_sharpe": 1.0496,
+    "_win_rate": 0.4959,
+    "_is_pnl_usd": 3.2703,
+    "_oos_pnl_usd": 5.8915,
+    "_signal_test": "PERP FEES ONLY \u2014 no funding payments modeled",
+    "_data_proxy": "spot 1h bars fed to perp instruments (no perp parquets)",
+    "_fee_model": "Binance perp VIP-0 maker=2bps/taker=5bps (MakerTakerFeeModel)",
+    "_account": "MARGIN, margin_init=0",
+    "_window": "2025-11-28 to 2026-05-27 (6mo, 1h bars); OOS = last ~60d"
+  },
+  "criteria": {
+    "G1": {
+      "passed": true,
+      "actual": 9.1618,
+      "threshold": 0.0,
+      "detail": "net PnL 9.1618 > 0.0"
+    },
+    "G2": {
+      "passed": true,
+      "actual": 1.5982,
+      "threshold": 1.0,
+      "detail": "Sharpe 1.5982 >= 1.0"
+    },
+    "G3": {
+      "passed": true,
+      "actual": 0.0354,
+      "threshold": 0.2,
+      "detail": "drawdown 0.0354 <= 0.2"
+    },
+    "G4": {
+      "passed": true,
+      "actual": 242,
+      "threshold": 30,
+      "detail": "242 trades >= 30 (significance floor)"
+    },
+    "G5": {
+      "passed": true,
+      "actual": 1.4143,
+      "threshold": 1.3,
+      "detail": "profit factor 1.4143 >= 1.3"
+    },
+    "G6": {
+      "passed": true,
+      "actual": 1.5982,
+      "threshold": 0.3926,
+      "detail": "OOS Sharpe 1.5982 >= 0.5*IS(0.7852)=0.3926"
+    },
+    "G7": {
+      "passed": true,
+      "actual": 9.1618,
+      "threshold": 0.0,
+      "detail": "PnL@fill=0.5 9.1618 > 0.0"
+    }
+  },
+  "failures": []
+}
