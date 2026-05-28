@@ -1,0 +1,73 @@
+{
+  "strategy": "C3c_alt_eth_reversion",
+  "timestamp": "2026-05-28T14:08:31.354270+00:00",
+  "verdict": "FAIL",
+  "metrics": {
+    "net_pnl_usd": -10.0334,
+    "sharpe": -0.5237,
+    "max_drawdown_pct": 0.1204,
+    "n_trades": 253,
+    "profit_factor": 0.6693,
+    "in_sample_sharpe": -1.4885,
+    "oos_sharpe": -0.5237,
+    "pnl_at_maker_0_5": -10.0334,
+    "_full_sharpe": -1.185,
+    "_win_rate": 0.419,
+    "_is_pnl_usd": -8.404,
+    "_oos_pnl_usd": -1.6294,
+    "_reference_asset": "ETH (z-score); BTC (RSI macro gate)",
+    "_fee_model": "Binance VIP-0 maker=taker=10bps (MakerTakerFeeModel)",
+    "_window": "2025-11-28 to 2026-05-27 (6mo, 1h bars); OOS = last ~60d"
+  },
+  "criteria": {
+    "G1": {
+      "passed": false,
+      "actual": -10.0334,
+      "threshold": 0.0,
+      "detail": "net PnL -10.0334 <= 0.0"
+    },
+    "G2": {
+      "passed": false,
+      "actual": -0.5237,
+      "threshold": 1.0,
+      "detail": "Sharpe -0.5237 < 1.0"
+    },
+    "G3": {
+      "passed": true,
+      "actual": 0.1204,
+      "threshold": 0.2,
+      "detail": "drawdown 0.1204 <= 0.2"
+    },
+    "G4": {
+      "passed": true,
+      "actual": 253,
+      "threshold": 30,
+      "detail": "253 trades >= 30 (significance floor)"
+    },
+    "G5": {
+      "passed": false,
+      "actual": 0.6693,
+      "threshold": 1.3,
+      "detail": "profit factor 0.6693 < 1.3"
+    },
+    "G6": {
+      "passed": false,
+      "actual": -0.5237,
+      "threshold": 0.0,
+      "detail": "IS Sharpe -1.4885 <= 0; OOS Sharpe -0.5237 < 0"
+    },
+    "G7": {
+      "passed": false,
+      "actual": -10.0334,
+      "threshold": 0.0,
+      "detail": "PnL@fill=0.5 -10.0334 <= 0.0"
+    }
+  },
+  "failures": [
+    "G1: net PnL -10.0334 <= 0.0",
+    "G2: Sharpe -0.5237 < 1.0",
+    "G5: profit factor 0.6693 < 1.3",
+    "G6: IS Sharpe -1.4885 <= 0; OOS Sharpe -0.5237 < 0",
+    "G7: PnL@fill=0.5 -10.0334 <= 0.0"
+  ]
+}
