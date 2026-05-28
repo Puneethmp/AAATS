@@ -1,0 +1,74 @@
+{
+  "strategy": "C3_perp_funded",
+  "timestamp": "2026-05-28T15:09:15.482282+00:00",
+  "verdict": "PASS",
+  "metrics": {
+    "net_pnl_usd": 9.8239,
+    "sharpe": 1.5488,
+    "max_drawdown_pct": 0.0372,
+    "n_trades": 234,
+    "profit_factor": 1.4529,
+    "in_sample_sharpe": 0.8768,
+    "oos_sharpe": 1.5488,
+    "pnl_at_maker_0_5": 9.8239,
+    "funding_total_usd_paid": -0.3314,
+    "funding_avg_bps_per_trade": -1.2158,
+    "funding_events_count": 335,
+    "_gross_pnl_usd_before_funding": 9.4925,
+    "_full_sharpe": 1.0794,
+    "_win_rate": 0.4957,
+    "_is_pnl_usd": 4.2296,
+    "_oos_pnl_usd": 5.5943,
+    "_total_notional_usd": 2725.82,
+    "_data": "REAL Binance USDT-M perp 1h klines (fetch_perp_data.py)",
+    "_fee_model": "Binance perp VIP-0 maker=2bps/taker=5bps (MakerTakerFeeModel)",
+    "_funding": "real Binance funding-rate history; long pays when rate>0",
+    "_account": "MARGIN, margin_init=0",
+    "_window": "2025-11-28 to 2026-05-27 (6mo, 1h bars); OOS = last ~60d"
+  },
+  "criteria": {
+    "G1": {
+      "passed": true,
+      "actual": 9.8239,
+      "threshold": 0.0,
+      "detail": "net PnL 9.8239 > 0.0"
+    },
+    "G2": {
+      "passed": true,
+      "actual": 1.5488,
+      "threshold": 1.0,
+      "detail": "Sharpe 1.5488 >= 1.0"
+    },
+    "G3": {
+      "passed": true,
+      "actual": 0.0372,
+      "threshold": 0.2,
+      "detail": "drawdown 0.0372 <= 0.2"
+    },
+    "G4": {
+      "passed": true,
+      "actual": 234,
+      "threshold": 30,
+      "detail": "234 trades >= 30 (significance floor)"
+    },
+    "G5": {
+      "passed": true,
+      "actual": 1.4529,
+      "threshold": 1.3,
+      "detail": "profit factor 1.4529 >= 1.3"
+    },
+    "G6": {
+      "passed": true,
+      "actual": 1.5488,
+      "threshold": 0.4384,
+      "detail": "OOS Sharpe 1.5488 >= 0.5*IS(0.8768)=0.4384"
+    },
+    "G7": {
+      "passed": true,
+      "actual": 9.8239,
+      "threshold": 0.0,
+      "detail": "PnL@fill=0.5 9.8239 > 0.0"
+    }
+  },
+  "failures": []
+}
