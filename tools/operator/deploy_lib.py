@@ -37,7 +37,9 @@ Idempotent + safe to re-import. No side effects at import time.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -500,3 +502,136 @@ def send_telegram_message(
     out = stdout.read().decode().strip()
     last = out.splitlines()[-1] if out else ""
     return last == "200"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Grafana "No data" recurrence guards (sprint 2026-05-29)
+# ──────────────────────────────────────────────────────────────────────────
+#
+# The aaats-cmd-center dashboard has gone to "No data" on every panel twice,
+# from two unrelated root causes that look identical to the operator:
+#
+#   1. 2026-05-26 — dashboard JSON hard-coded panel datasource uid "prometheus"
+#      instead of the provisioned uid "aaats-prom" (143 refs). Queries resolved
+#      to a non-existent datasource. Caught at DEPLOY time by
+#      preflight_assert_no_prometheus_uid() below.
+#
+#   2. 2026-05-29 — the single-threaded exporter HTTPServer hung on a blocked
+#      client write, so Prometheus scrapes timed out (context deadline
+#      exceeded), up{job="aaats-metrics"}=0, and every aaats_* series went
+#      stale. The dashboard JSON was perfectly correct. Caught AFTER deploy by
+#      assert_metrics_flowing() below (and prevented from recurring by the
+#      ThreadingHTTPServer fix in monitoring/metrics_exporter.py).
+#
+# A Grafana deploy path should run BOTH guards: the UID guard before pushing,
+# and the flow assertion after rebuilding/pushing — so a dashboard that lands
+# on "No data" can never pass a deploy silently again.
+
+# Prometheus is published only on the container-internal :9090 (no host port),
+# so queries must run inside the prom container.
+PROMETHEUS_CONTAINER: str = "aaats-prometheus"
+METRICS_SCRAPE_JOB: str = "aaats-metrics"
+
+
+def preflight_assert_no_prometheus_uid(paths: Iterable[Path]) -> tuple[bool, str]:
+    """Refuse to deploy any dashboard JSON that still hard-codes the datasource
+    uid ``"prometheus"`` instead of the provisioned ``"aaats-prom"``
+    (PROMETHEUS_DATASOURCE_UID). Mirrors the deploy_lib no-reinvent discipline:
+    the UID should come from grafana_datasource_ref(), never a literal.
+
+    Scans only ``*.json`` files in ``paths``. Returns (ok, detail). ``ok`` is
+    False if any file contains a ``"uid": "prometheus"`` reference, listing the
+    offending files so the caller can SystemExit before the push.
+
+    This is the deploy-time half of the Grafana "No data" guard pair; the
+    runtime half is assert_metrics_flowing().
+    """
+    bad_uid = re.compile(r'"uid"\s*:\s*"prometheus"')
+    offenders: list[str] = []
+    scanned = 0
+    for p in paths:
+        p = Path(p)
+        if p.suffix.lower() != ".json" or not p.exists():
+            continue
+        scanned += 1
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if bad_uid.search(text):
+            offenders.append(p.name)
+    if offenders:
+        return False, (
+            f'datasource uid "prometheus" found in {len(offenders)} dashboard '
+            f"file(s): {', '.join(offenders)}. Use "
+            f"grafana_datasource_ref() -> uid={PROMETHEUS_DATASOURCE_UID!r}. "
+            "This causes 'No data' on every panel (gotcha #10)."
+        )
+    return True, f"UID guard OK ({scanned} dashboard JSON scanned, none stale)"
+
+
+def _prom_query(client, promql: str, prom_container: str = PROMETHEUS_CONTAINER):
+    """Run an instant PromQL query inside the Prometheus container and return
+    the parsed ``data.result`` list (empty list on any failure). POSTs the
+    query as form data via wget so label-matchers/braces need no URL-encoding.
+    """
+    # wget is present in the prom image; POST avoids URL-encoding {job="..."}.
+    cmd = (
+        f"docker exec {prom_container} wget -qO- "
+        f"--post-data={shlex.quote('query=' + promql)} "
+        f"http://localhost:9090/api/v1/query"
+    )
+    _, stdout, _ = client.exec_command(cmd, timeout=20)
+    stdout.channel.recv_exit_status()
+    raw = stdout.read().decode().strip()
+    try:
+        doc = json.loads(raw)
+        if doc.get("status") != "success":
+            return []
+        return doc.get("data", {}).get("result", [])
+    except (ValueError, AttributeError):
+        return []
+
+
+def assert_metrics_flowing(
+    client,
+    job: str = METRICS_SCRAPE_JOB,
+    probe_metric: str = "aaats_portfolio_capital",
+    prom_container: str = PROMETHEUS_CONTAINER,
+) -> tuple[bool, str]:
+    """Post-deploy verification that the exporter is actually being scraped and
+    emitting data — not merely that its container started.
+
+    Asserts, via Prometheus (queried inside ``prom_container`` because :9090 is
+    not host-published):
+      (a) ``up{job=<job>} == 1`` — the target is being scraped successfully, and
+      (b) ``<probe_metric>`` returns at least one sample — real series flowing.
+
+    Returns (ok, detail). On failure the detail names which assertion failed so
+    the caller can SystemExit / send_telegram_message and fail the deploy
+    loudly. A Grafana dashboard that deploys to "No data" because the exporter
+    never came back must NEVER pass a deploy silently (2026-05-29 incident).
+    """
+    up = _prom_query(client, f'up{{job="{job}"}}', prom_container)
+    up_val = None
+    if up:
+        try:
+            up_val = up[0]["value"][1]
+        except (KeyError, IndexError, TypeError):
+            up_val = None
+    if up_val != "1":
+        return False, (
+            f'up{{job="{job}"}} = {up_val!r} (expected "1"). Exporter is not '
+            "being scraped — Grafana will show 'No data'. Check the "
+            f"{job} container health and the aaats network attachment."
+        )
+    series = _prom_query(client, probe_metric, prom_container)
+    if not series:
+        return False, (
+            f"{probe_metric} returned 0 series though up==1. Exporter is up but "
+            "emitting no aaats_* metrics — collectors likely erroring."
+        )
+    return True, (
+        f'up{{job="{job}"}}=1 and {probe_metric} has {len(series)} series — '
+        "metrics flowing."
+    )
