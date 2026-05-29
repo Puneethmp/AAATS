@@ -63,6 +63,7 @@ from nautilus_trader.trading.strategy import Strategy, StrategyConfig
 
 from trading import altcoin_reversion as c3
 from tools.graduation.gate import evaluate_gate, emit_report
+from tools.nautilus.regime_gate import compute_30d_divergence, is_regime_ok
 
 VENUE = Venue("BINANCE")
 UNIVERSE = ["SOL", "LINK", "AVAX", "DOT"]
@@ -148,11 +149,14 @@ class C3PerpFundedStrategy(Strategy):
     self.trades via on_position_closed with funding subtracted.
     """
 
-    def __init__(self, config, instruments, bar_types, maker: bool):
+    def __init__(
+        self, config, instruments, bar_types, maker: bool, use_regime_gate: bool = False
+    ):
         super().__init__(config)
         self.instruments = instruments
         self.bar_types = bar_types
         self.maker = maker
+        self.use_regime_gate = use_regime_gate
         self.closes = {s: [] for s in UNIVERSE + [BTCSYM]}
         self.funding = {s: load_funding(s) for s in UNIVERSE + [BTCSYM]}
         self.meta = {}  # sym -> open-position meta (incl funding_paid_usd)
@@ -164,6 +168,11 @@ class C3PerpFundedStrategy(Strategy):
         self.idx = 0
         self.n_entries = 0
         self.n_exits = 0
+        # allocator-level regime gate diagnostics (Track 9)
+        self.n_gate_eval = 0  # cycles where divergence was computable
+        self.n_gate_blocked = 0  # cycles where the gate blocked entries
+        self.gate_blocked_months = {}  # "YYYY-MM" -> blocked count
+        self.divergences = []  # all computable divergence values (for diagnosis)
 
     def on_start(self):
         for s in UNIVERSE + [BTCSYM]:
@@ -275,6 +284,24 @@ class C3PerpFundedStrategy(Strategy):
                 funding_cost = m["shares"] * m["entry_price"] * float(rate)
                 m["funding_paid_usd"] = m.get("funding_paid_usd", 0.0) + funding_cost
                 self.n_funding_events += 1
+
+        # ---- REGIME GATE (allocator-level; gates NEW exposure, never exits) ----
+        if self.use_regime_gate:
+            divergence = compute_30d_divergence(
+                self.closes[BTCSYM], {a: self.closes[a] for a in UNIVERSE}
+            )
+            if divergence is not None:
+                self.n_gate_eval += 1
+                self.divergences.append(divergence)
+                if not is_regime_ok(divergence):
+                    self.n_gate_blocked += 1
+                    month = pd.Timestamp(bar.ts_event, unit="ns", tz="UTC").strftime(
+                        "%Y-%m"
+                    )
+                    self.gate_blocked_months[month] = (
+                        self.gate_blocked_months.get(month, 0) + 1
+                    )
+                    return  # block all NEW entries this cycle; holds continue
 
         # ---- ENTRY phase ----
         if c3._rsi(btc_df["close"], period=14) < c3.BTC_RSI_MIN:
@@ -395,7 +422,7 @@ def _sharpe_pnl_for_window(rows, oos: bool):
     return round(sh, 4), round(float(sum(r["pnl_net"] for r in sub)), 4)
 
 
-def run_backtest(maker: bool):
+def run_backtest(maker: bool, use_regime_gate: bool = False):
     engine = BacktestEngine(
         config=BacktestEngineConfig(
             trader_id="C3perpFunded-NT-001", logging=LoggingConfig(bypass_logging=True)
@@ -421,27 +448,54 @@ def run_backtest(maker: bool):
             load_perp_df(sym), ts_init_delta=(1 if sym == BTCSYM else 0)
         )
         engine.add_data(bars)
-    strat = C3PerpFundedStrategy(StrategyConfig(), instruments, bar_types, maker)
+    strat = C3PerpFundedStrategy(
+        StrategyConfig(), instruments, bar_types, maker, use_regime_gate
+    )
     engine.add_strategy(strat)
     engine.run()
-    out = {"trades": list(strat.trades), "n_funding_events": strat.n_funding_events}
+    out = {
+        "trades": list(strat.trades),
+        "n_funding_events": strat.n_funding_events,
+        "n_gate_eval": strat.n_gate_eval,
+        "n_gate_blocked": strat.n_gate_blocked,
+        "gate_blocked_months": dict(strat.gate_blocked_months),
+        "divergences": list(strat.divergences),
+    }
     engine.dispose()
     return out
 
 
-def main():
-    print(">>> Run A: MARKET / taker (5bps perp) + FUNDING, 6mo, prob=1.0")
-    taker = run_backtest(maker=False)
+def evaluate(
+    use_regime_gate: bool = False,
+    strategy_name: str = "C3_perp_funded",
+    emit: bool = True,
+    verbose: bool = True,
+):
+    """Run taker + maker backtests and build the gate metrics dict.
+
+    Returns (metrics, result, taker_out, mt, path). Default args reproduce the
+    ungated B.1.6 Track-4b graduation report; the Track-9 driver calls it with
+    use_regime_gate=True and the gated report names.
+    """
+    if verbose:
+        print(
+            f">>> Run A: MARKET / taker (5bps perp) + FUNDING, 6mo, prob=1.0 "
+            f"(regime_gate={use_regime_gate})"
+        )
+    taker = run_backtest(maker=False, use_regime_gate=use_regime_gate)
     mt = _metrics_from_trades(taker["trades"])
     is_sharpe, is_pnl = _sharpe_pnl_for_window(mt["_rows"], oos=False)
     oos_sharpe, oos_pnl = _sharpe_pnl_for_window(mt["_rows"], oos=True)
 
-    print(">>> Run B: LIMIT / maker (2bps perp) + FUNDING, prob=0.5 (G7)")
-    maker = run_backtest(maker=True)
+    if verbose:
+        print(">>> Run B: LIMIT / maker (2bps perp) + FUNDING, prob=0.5 (G7)")
+    maker = run_backtest(maker=True, use_regime_gate=use_regime_gate)
     mm = _metrics_from_trades(maker["trades"])
 
     total_notional = mt["total_notional_usd"] or 1.0
     funding_total = mt["funding_total_usd"]
+    gate_eval = taker.get("n_gate_eval", 0)
+    gate_blocked = taker.get("n_gate_blocked", 0)
     metrics = {
         "net_pnl_usd": mt["net_pnl_usd"],  # after funding
         "sharpe": oos_sharpe,  # gate evaluates OOS Sharpe (after funding)
@@ -455,6 +509,13 @@ def main():
         "funding_total_usd_paid": funding_total,
         "funding_avg_bps_per_trade": round(funding_total / total_notional * 10000, 4),
         "funding_events_count": taker["n_funding_events"],
+        # regime-gate diagnostics (Track 9)
+        "regime_gate_enabled": use_regime_gate,
+        "gate_active_pct": round(100.0 * gate_blocked / gate_eval, 2)
+        if gate_eval
+        else 0.0,
+        "gate_blocked_bars": gate_blocked,
+        "gate_eval_bars": gate_eval,
         # context (not gate inputs)
         "_gross_pnl_usd_before_funding": mt["gross_pnl_usd"],
         "_full_sharpe": mt["sharpe"],
@@ -462,20 +523,27 @@ def main():
         "_is_pnl_usd": is_pnl,
         "_oos_pnl_usd": oos_pnl,
         "_total_notional_usd": mt["total_notional_usd"],
+        "_gate_blocked_months": taker.get("gate_blocked_months", {}),
         "_data": "REAL Binance USDT-M perp 1h klines (fetch_perp_data.py)",
         "_fee_model": "Binance perp VIP-0 maker=2bps/taker=5bps (MakerTakerFeeModel)",
         "_funding": "real Binance funding-rate history; long pays when rate>0",
         "_account": "MARGIN, margin_init=0",
+        "_regime_gate": "30d (BTC - mean-alt) return divergence > 0.08 blocks entries",
         "_window": "2025-11-28 to 2026-05-27 (6mo, 1h bars); OOS = last ~60d",
     }
     result = evaluate_gate(metrics)
-    path = emit_report(
-        "C3_perp_funded",
-        metrics,
-        result,
-        out_dir=str(ROOT / "data" / "graduation"),
+    path = (
+        emit_report(
+            strategy_name, metrics, result, out_dir=str(ROOT / "data" / "graduation")
+        )
+        if emit
+        else None
     )
+    return metrics, result, taker, mt, path
 
+
+def main():
+    metrics, result, taker, mt, path = evaluate()
     print("\n========== C3-PERP FUNDED GRADUATION VERDICT (honest) ==========")
     print(
         json.dumps(
@@ -484,7 +552,7 @@ def main():
     )
     print(
         f"\ngross PnL before funding: {mt['gross_pnl_usd']:+.4f}  "
-        f"funding: {funding_total:+.4f}  -> net {mt['net_pnl_usd']:+.4f}"
+        f"funding: {mt['funding_total_usd']:+.4f}  -> net {mt['net_pnl_usd']:+.4f}"
     )
     print(
         f"VERDICT: {'PASS' if result.passed else 'FAIL'}  (honest -- funding included)"

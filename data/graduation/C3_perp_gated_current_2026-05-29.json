@@ -1,0 +1,87 @@
+{
+  "strategy": "C3_perp_gated_current",
+  "timestamp": "2026-05-29T04:47:54.563808+00:00",
+  "verdict": "PASS",
+  "metrics": {
+    "net_pnl_usd": 8.288,
+    "sharpe": 2.9618,
+    "max_drawdown_pct": 0.0496,
+    "n_trades": 168,
+    "profit_factor": 1.4905,
+    "in_sample_sharpe": 0.6922,
+    "oos_sharpe": 2.9618,
+    "pnl_at_maker_0_5": 8.288,
+    "funding_total_usd_paid": -0.2474,
+    "funding_avg_bps_per_trade": -1.2872,
+    "funding_events_count": 235,
+    "regime_gate_enabled": true,
+    "gate_active_pct": 31.25,
+    "gate_blocked_bars": 1125,
+    "gate_eval_bars": 3600,
+    "_gross_pnl_usd_before_funding": 8.0406,
+    "_full_sharpe": 1.1728,
+    "_win_rate": 0.5179,
+    "_is_pnl_usd": 2.8628,
+    "_oos_pnl_usd": 5.4252,
+    "_total_notional_usd": 1922.07,
+    "_gate_blocked_months": {
+      "2025-12": 39,
+      "2026-01": 10,
+      "2026-02": 361,
+      "2026-03": 39,
+      "2026-04": 514,
+      "2026-05": 162
+    },
+    "_data": "REAL Binance USDT-M perp 1h klines (fetch_perp_data.py)",
+    "_fee_model": "Binance perp VIP-0 maker=2bps/taker=5bps (MakerTakerFeeModel)",
+    "_funding": "real Binance funding-rate history; long pays when rate>0",
+    "_account": "MARGIN, margin_init=0",
+    "_regime_gate": "30d (BTC - mean-alt) return divergence > 0.08 blocks entries",
+    "_window": "2025-11-28 to 2026-05-27 (6mo, 1h bars); OOS = last ~60d"
+  },
+  "criteria": {
+    "G1": {
+      "passed": true,
+      "actual": 8.288,
+      "threshold": 0.0,
+      "detail": "net PnL 8.2880 > 0.0"
+    },
+    "G2": {
+      "passed": true,
+      "actual": 2.9618,
+      "threshold": 1.0,
+      "detail": "Sharpe 2.9618 >= 1.0"
+    },
+    "G3": {
+      "passed": true,
+      "actual": 0.0496,
+      "threshold": 0.2,
+      "detail": "drawdown 0.0496 <= 0.2"
+    },
+    "G4": {
+      "passed": true,
+      "actual": 168,
+      "threshold": 30,
+      "detail": "168 trades >= 30 (significance floor)"
+    },
+    "G5": {
+      "passed": true,
+      "actual": 1.4905,
+      "threshold": 1.3,
+      "detail": "profit factor 1.4905 >= 1.3"
+    },
+    "G6": {
+      "passed": true,
+      "actual": 2.9618,
+      "threshold": 0.3461,
+      "detail": "OOS Sharpe 2.9618 >= 0.5*IS(0.6922)=0.3461"
+    },
+    "G7": {
+      "passed": true,
+      "actual": 8.288,
+      "threshold": 0.0,
+      "detail": "PnL@fill=0.5 8.2880 > 0.0"
+    }
+  },
+  "failures": []
+}
