@@ -1,5 +1,16 @@
 # AAATS Strategy Catalog
 
+> **STATUS 2026-06-01 — ALL STRATEGIES CLOSED-NO-GO FOR LIVE (research-bed mode).**
+> No strategy in this catalog is a live-flip candidate. The directional-crypto edge
+> program is terminally closed: every class tested — C1 stat-arb, C6 bollinger,
+> C3 altcoin-reversion (spot **and** perp), C7 funding-carry, TSMOM momentum, and the
+> C3+TSMOM ensemble — **failed an out-of-sample, null-controlled robustness test**
+> (final arbiter: the 36mo/15-fold walk-forward, [NO-GO verdict](../decisions/2026-05-30_track_f_walk_forward_FINAL_perp_edge_NOGO.md)).
+> These strategies continue to run **paper-only** in the D.5 monitored research bed;
+> none receives real capital. Reactivation of any class requires a NEW pre-registered
+> thesis with its own committed robustness gate — not a re-run of the closed program.
+> (C5b funding-arb remains separately HALTED at source since 2026-05-15.)
+
 Generated 2026-05-24 from `trading/*.py`, `trading/live_paper_runner.py`, and `runtime/paper_trades.db`.
 
 This catalog covers the **direct-execution crypto strategies** (`C1`–`C6`, `C5b`) wired into `trading.live_paper_runner.run_crypto`. The `strategies/` package (momentum/, mean_reversion/, volatility/, regime/, etc.) holds signal-generation libraries used by the ensemble voter — they are not first-class execution strategies and are not enumerated here. The India pair `N1_stat_arb_india` is wired into `run_india` but the India market is currently operator-halted (`data/halt_state.json` → `india: true`).

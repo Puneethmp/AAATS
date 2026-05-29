@@ -7,15 +7,26 @@ snapshot_from_cowork_memory: 2026-05-21
 ---
 # AAATS Doctrine — Locked 2026-05-14
 
+> **AMENDMENT 2026-06-01 — BOT LIVE-FLIP CANCELLED; ALLOCATION IS DCA-ONLY.**
+> The directional-crypto edge program is terminally closed (final-arbiter walk-forward
+> [NO-GO](../decisions/2026-05-30_track_f_walk_forward_FINAL_perp_edge_NOGO.md): no class
+> beat its own sign-shuffle null out-of-sample). The **$25/mo bot-injection half of the
+> capital plan below is cancelled.** Live allocation is now **$25/mo BTC DCA only**; the
+> bot runs paper-only as a monitored research bed (D.5 soak + L1–L10). Phases 0–2, the
+> injection gates, and the "IN (year 1)" strategy sleeves below are all SUSPENDED — they
+> assumed a graduating edge that does not exist. They reactivate ONLY if a NEW
+> pre-registered thesis graduates its own committed robustness gate. Everything below is
+> retained for history; it is not the current plan.
+
 **Supersedes:** `aaats_personal_business_framing.md` (2026-05-10).
 The earlier "one-time $500-2000 injection after 9 proof criteria" framing is OBSOLETE.
 
-## Capital plan (locked)
+## Capital plan (locked — bot half SUSPENDED 2026-06-01, see top banner)
 
 - Total monthly capital available to allocate: **$50/mo**
-- Recommended split: **$25/mo BTC DCA + $25/mo bot injection** (hybrid)
-- Bot starting capital: **$110** (already committed paper)
-- Initial live capital after Phase 0 passes: **$100**
+- ~~Recommended split: **$25/mo BTC DCA + $25/mo bot injection** (hybrid)~~ → **DCA-only: $25/mo BTC DCA. Bot injection cancelled 2026-06-01.**
+- Bot starting capital: **$110** (already committed paper) — stays paper.
+- ~~Initial live capital after Phase 0 passes: **$100**~~ → not happening; live-flip off.
 
 ## Phase 0 — Foundation (PREREQUISITE, NOT OPTIONAL)
 

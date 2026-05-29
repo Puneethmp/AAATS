@@ -1,5 +1,15 @@
 # AAATS — Operator Notes for Claude Code
 
+> ## ⛔ PROGRAM STATUS: MAINTENANCE / RESEARCH-BED MODE (2026-06-01)
+>
+> **The directional-crypto edge program is TERMINALLY CLOSED. Live-flip is permanently OFF. There is NO active sprint.**
+>
+> Every strategy class tried (C1, C6, C3 spot/perp, C7 funding-carry, TSMOM momentum, and the C3+TSMOM ensemble) failed an honest, out-of-sample, null-controlled robustness test. The 36-month / 15-fold walk-forward was the operator-approved **final arbiter** and returned **NO-GO** — the ensemble's OOS performance is statistically indistinguishable from randomly-signed trades. Verdict: [docs/decisions/2026-05-30_track_f_walk_forward_FINAL_perp_edge_NOGO.md](docs/decisions/2026-05-30_track_f_walk_forward_FINAL_perp_edge_NOGO.md).
+>
+> **What AAATS is now:** an unattended, monitored **research bed** — the D.5 paper soak + the L1–L10 monitoring stack keep running; the only live money is the **$25/mo BTC DCA** (bot-half live-flip cancelled). Maintenance runbook: [docs/runbooks/research_bed_maintenance.md](docs/runbooks/research_bed_maintenance.md).
+>
+> **Do NOT** reopen the strategy hunt, scope a new strategy, build infra, or flip anything live. **Reactivation requires a NEW pre-registered thesis with its own committed robustness gate** — not a continuation of the closed program. Won't-do (unless they break the alert chain): Grafana admin-pw rotation, `deploy_to_contabo.py` retrofit, stale `/srv/aaats/secrets/telegram_bot_token`.
+
 Deploy discipline rules: see docs/conventions/deploy_discipline.md (canonical).
 
 ## Deploy machinery gotchas (canonical 2026-05-26)
