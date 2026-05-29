@@ -44,6 +44,37 @@ with a recent `last_tick` means cron is pushing.
 - **Anything else** — it can wait. Nothing here risks real money beyond the DCA, which is on the
   exchange, not the bot.
 
+## Grafana shows "No data" on every panel
+
+**This is not a safety-net failure.** Grafana is a *convenience* view; the real monitoring is the
+Telegram / L1 (GitHub Actions) / L3 (heartbeat) chain, which is **completely independent of Grafana,
+Prometheus, and the exporter**. If Grafana is blank but Telegram is alive and
+`auto_cron_heartbeat.json` is fresh, the bed is still monitored — fix Grafana at leisure.
+
+There are exactly two root causes seen for blanket "No data", and both are now guarded at deploy time:
+
+1. **Datasource UID mismatch** (gotcha #10). The provisioned datasource uid is `aaats-prom`, not
+   `prometheus`. A dashboard JSON that hard-codes `"uid": "prometheus"` renders "No data" on every
+   panel. Check: `grep -o '"uid": "[a-z-]*"' /srv/aaats/compose/grafana/dashboards/*v3*.json | sort | uniq -c`
+   — all refs must be `aaats-prom`. Guarded by `deploy_lib.preflight_assert_no_prometheus_uid()`
+   (refuses to deploy a stale dashboard) and `grafana_datasource_ref()` (uid right by construction).
+
+2. **Exporter hung** (2026-05-29 incident). `aaats-metrics` served metrics from a single-threaded
+   `HTTPServer` with no socket timeout; one blocked client write wedged the only worker thread, so
+   Prometheus scrapes timed out (`context deadline exceeded`), `up{job="aaats-metrics"}=0`, every
+   `aaats_*` series went stale → dashboard "No data". The dashboard JSON was correct. **Fixed
+   permanently**: `metrics_exporter.py` now uses `ThreadingHTTPServer` + a 15s per-request handler
+   timeout, so one slow client can no longer wedge the server. Guarded post-deploy by
+   `deploy_lib.assert_metrics_flowing()` (asserts `up==1` + a probe metric returns, fails the deploy
+   loudly via Telegram otherwise).
+
+   Diagnose fast: `docker ps | grep aaats-metrics` (healthy?), `curl -sS -m8 -w '%{http_code} %{time_total}\n' -o /dev/null localhost:9091/metrics`
+   (200 in ~ms = serving; timeout/000 = hung), `docker exec aaats-prometheus wget -qO- --post-data='query=up{job="aaats-metrics"}' http://localhost:9090/api/v1/query`
+   (`up=1`?). Recovery: `cd /home/aaats/aaats && docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-metrics`
+   — or re-run `tools/operator/deploy_exporter_threading_fix_2026_05_29.py` which does the rebuild +
+   verification + Telegram alerting in one shot. Prometheus is reachable only inside the
+   `aaats-prometheus` container (`:9090` is not host-published) — query it via `docker exec`, not host curl.
+
 ## Reactivation
 
 Reactivating the bot for live trading requires a **NEW pre-registered thesis** with its own
