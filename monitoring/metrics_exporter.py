@@ -13,7 +13,7 @@ import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import psutil
 
@@ -2336,6 +2336,16 @@ def _refresh_loop():
 
 
 class MetricsHandler(BaseHTTPRequestHandler):
+    # Per-request socket timeout. Without this, a single slow/half-open client
+    # (e.g. a Prometheus scrape whose connection dies mid-write) blocks the
+    # worker on self.wfile.write() indefinitely. Combined with the
+    # single-threaded HTTPServer this previously used, ONE such hang wedged the
+    # entire exporter -> every subsequent scrape timed out -> Prometheus marked
+    # the target down -> all aaats_* series went stale -> Grafana "No data" on
+    # every panel. Root-caused 2026-05-29 (healthcheck FailingStreak 3055,
+    # BrokenPipe at do_GET wfile.write). See docs/runbooks/research_bed_maintenance.md.
+    timeout = 15
+
     def do_GET(self):
         if self.path == "/metrics":
             with _lock:
@@ -2377,7 +2387,14 @@ def main():
     t = threading.Thread(target=_refresh_loop, daemon=True)
     t.start()
     log.info(f"AAATS Prometheus exporter on :{PORT}/metrics")
-    HTTPServer(("0.0.0.0", PORT), MetricsHandler).serve_forever()
+    # ThreadingHTTPServer (not the bare single-threaded HTTPServer): each
+    # request gets its own thread, so one blocked/slow client write can no
+    # longer wedge the whole exporter. daemon_threads=True lets those worker
+    # threads die with the process instead of blocking shutdown. This is the
+    # permanent fix for the 2026-05-29 "No data" incident (see MetricsHandler).
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), MetricsHandler)
+    server.daemon_threads = True
+    server.serve_forever()
 
 
 if __name__ == "__main__":
