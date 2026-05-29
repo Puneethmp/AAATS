@@ -36,11 +36,12 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 HIST = ROOT / "data" / "historical"
-# Current window carries ETH (B.1.7 Track 5 — C3c-perp anchors the z-score on
-# ETH). The earlier robustness window only needs C3-perp's universe (BTC + 4
-# alts), so it skips ETH to shorten the fetch.
+# Both windows carry ETH as of B.1.7 Track F (2026-05-30): the C7 funding-arb
+# candidate and any majors-based perp edge need ETH on BOTH windows for the
+# dual-window graduation gate. (Earlier window originally skipped ETH to shorten
+# the C3-perp robustness fetch; that universe is now BTC + ETH + 4 alts.)
 SYMBOLS_CURRENT = ["BTC", "ETH", "SOL", "LINK", "AVAX", "DOT"]
-SYMBOLS_EARLIER = ["BTC", "SOL", "LINK", "AVAX", "DOT"]
+SYMBOLS_EARLIER = ["BTC", "ETH", "SOL", "LINK", "AVAX", "DOT"]
 
 FAPI = "https://fapi.binance.com"
 

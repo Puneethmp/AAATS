@@ -1,0 +1,79 @@
+{
+  "strategy": "Perp_TSMOM_earlier",
+  "timestamp": "2026-05-29T08:32:39.485160+00:00",
+  "verdict": "FAIL",
+  "metrics": {
+    "net_pnl_usd": 20.3007,
+    "sharpe": -0.9165,
+    "max_drawdown_pct": 0.125,
+    "n_trades": 104,
+    "profit_factor": 1.4231,
+    "in_sample_sharpe": 1.829,
+    "oos_sharpe": -0.9165,
+    "pnl_at_maker_0_5": 21.2283,
+    "price_gross_usd": 21.8331,
+    "funding_total_usd": 0.0136,
+    "fees_total_usd": 1.546,
+    "funding_events_count": 2250,
+    "n_open_at_end": 6,
+    "_full_sharpe": 0.8473,
+    "_win_rate": 0.375,
+    "_is_pnl_usd": 28.0116,
+    "_oos_pnl_usd": -7.711,
+    "_n_long": 53,
+    "_n_short": 51,
+    "_avg_hold_h": 218.1,
+    "_params": "LOOKBACK_H=336 REBAL_H=24 NOTIONAL=15.0 taker=0.0005 maker=0.0002 (sign-only, no threshold, not swept)",
+    "_data": "REAL Binance USDT-M perp 1h klines + funding (fetch_perp_data.py)",
+    "_method": "direct market-order daily-rebalance backtest, fills at bar close, 0 slippage; G7 = maker-fee rerun (generous lower-fee bound for a trend-chaser)",
+    "_window": "current 2025-11-28..2026-05-27 (OOS>=2026-03-28); earlier 2024-11-28..2025-05-27 (OOS>=2025-03-28)"
+  },
+  "criteria": {
+    "G1": {
+      "passed": true,
+      "actual": 20.3007,
+      "threshold": 0.0,
+      "detail": "net PnL 20.3007 > 0.0"
+    },
+    "G2": {
+      "passed": false,
+      "actual": -0.9165,
+      "threshold": 1.0,
+      "detail": "Sharpe -0.9165 < 1.0"
+    },
+    "G3": {
+      "passed": true,
+      "actual": 0.125,
+      "threshold": 0.2,
+      "detail": "drawdown 0.1250 <= 0.2"
+    },
+    "G4": {
+      "passed": true,
+      "actual": 104,
+      "threshold": 30,
+      "detail": "104 trades >= 30 (significance floor)"
+    },
+    "G5": {
+      "passed": true,
+      "actual": 1.4231,
+      "threshold": 1.3,
+      "detail": "profit factor 1.4231 >= 1.3"
+    },
+    "G6": {
+      "passed": false,
+      "actual": -0.9165,
+      "threshold": 0.9145,
+      "detail": "OOS Sharpe -0.9165 < 0.5*IS(1.8290)=0.9145"
+    },
+    "G7": {
+      "passed": true,
+      "actual": 21.2283,
+      "threshold": 0.0,
+      "detail": "PnL@fill=0.5 21.2283 > 0.0"
+    }
+  },
+  "failures": [
+    "G2: Sharpe -0.9165 < 1.0",
+    "G6: OOS Sharpe -0.9165 < 0.5*IS(1.8290)=0.9145"
+  ]
+}
