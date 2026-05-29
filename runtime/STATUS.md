@@ -1,6 +1,6 @@
 # AAATS runtime snapshot
 
-Last update: 2026-05-29T08:45:08Z
+Last update: 2026-05-29T09:00:10Z
 
 ## Container heartbeats
 - aaats-alloy: Up 3 weeks
@@ -9,7 +9,7 @@ Last update: 2026-05-29T08:45:08Z
 - aaats-cloudflared: Up 3 weeks
 - aaats-engine: Up 2 weeks (healthy)
 - aaats-grafana: Up 4 days (healthy)
-- aaats-metrics: Up 47 hours (unhealthy)
+- aaats-metrics: Up 2 days (unhealthy)
 - aaats-node-exporter: Up 3 weeks
 - aaats-paper-crypto: Up 2 days (healthy)
 - aaats-postgres-exporter: Up 3 weeks
