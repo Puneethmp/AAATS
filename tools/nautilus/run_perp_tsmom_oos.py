@@ -76,6 +76,9 @@ WINDOWS = {
         "suffix": "_earlier",
         "oos_cutoff": pd.Timestamp("2025-03-28", tz="UTC"),
     },
+    # Track F walk-forward: full contiguous history; OOS folds are assigned by the
+    # walk-forward driver (this cutoff is unused — _backtest does not read it).
+    "contig": {"suffix": "_contig", "oos_cutoff": pd.Timestamp("2099-01-01", tz="UTC")},
 }
 
 

@@ -59,6 +59,17 @@ WINDOWS = {
         "_earlier",
         SYMBOLS_EARLIER,
     ),
+    # Track F walk-forward (2026-05-30): MAXIMUM contiguous history for the
+    # rolling-origin robustness test. Target ~36mo back from the current-window
+    # end; all 6 perps listed well before 2023-05 so the floor (24mo) is cleared.
+    # If fetch_klines returns fewer bars (later listing), the actual ts.min() is
+    # the listing date — recorded by the caller, flagged for survivorship bias.
+    "contig": (
+        pd.Timestamp("2023-05-28T00:00:00Z"),
+        pd.Timestamp("2026-05-27T15:00:00Z"),  # = current-window end
+        "_contig",
+        SYMBOLS_CURRENT,  # all 6: BTC ETH SOL LINK AVAX DOT
+    ),
 }
 
 
@@ -206,9 +217,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Fetch Binance perp klines + funding")
     parser.add_argument(
         "--window",
-        choices=["current", "earlier", "both"],
+        choices=["current", "earlier", "both", "contig"],
         default="both",
-        help="which 6mo window to fetch (default: both)",
+        help="which window to fetch (default: both; 'contig' = max-contiguous walk-forward history)",
     )
     args = parser.parse_args(argv)
     HIST.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,48 @@
+contiguous span: 2023-05-28 -> 2026-05-27  (~36.0 mo)
+per-symbol contiguous coverage (earliest bar = listing-or-floor):
+   BTC   2023-05-28 -> 2026-05-27  (26295 bars)
+   ETH   2023-05-28 -> 2026-05-27  (26295 bars)
+   SOL   2023-05-28 -> 2026-05-27  (26295 bars)
+   LINK  2023-05-28 -> 2026-05-27  (26295 bars)
+   AVAX  2023-05-28 -> 2026-05-27  (26295 bars)
+   DOT   2023-05-28 -> 2026-05-27  (26295 bars)
+
+15 non-overlapping 2mo OOS folds (4mo train, step 2mo)
+
+running C3 (NT, taker) + TSMOM (taker) once over contiguous history...
+
+fold | OOS window              |  ntr |      net | fold Shrp |  maxDD | regime
+--------------------------------------------------------------------------------------------
+   0 | 2023-09-28->2023-11-28 |   97 |   +11.91 |     +0.86 |   5.5% | BTC60d -10% vol1.92%
+   1 | 2023-11-28->2024-01-28 |  118 |   +14.19 |     +0.70 |   3.8% | BTC60d +38% vol2.08%
+   2 | 2024-01-28->2024-03-28 |   88 |    +4.49 |     +0.80 |   6.7% | BTC60d +11% vol2.84%
+   3 | 2024-03-28->2024-05-28 |  130 |    +3.34 |     +0.30 |   7.2% | BTC60d +66% vol3.66%
+   4 | 2024-05-28->2024-07-28 |  104 |    -1.38 |     -0.21 |   6.0% | BTC60d -2% vol2.59%
+   5 | 2024-07-28->2024-09-28 |   91 |    -2.39 |     -0.51 |   9.5% | BTC60d -1% vol2.62%
+   6 | 2024-09-28->2024-11-28 |   84 |   -13.80 |     -4.62 |  13.8% | BTC60d -1% vol2.37%
+   7 | 2024-11-28->2025-01-28 |   96 |   +26.94 |     +1.54 |   1.7% | BTC60d +46% vol2.93%
+   8 | 2025-01-28->2025-03-28 |   43 |   +14.02 |     +2.61 |   4.2% | BTC60d +7% vol2.90%
+   9 | 2025-03-28->2025-05-28 |   93 |    -5.18 |     -0.91 |   8.5% | BTC60d -14% vol3.51%
+  10 | 2025-05-28->2025-07-28 |   58 |    -1.79 |     -0.59 |   5.3% | BTC60d +29% vol1.98%
+  11 | 2025-07-28->2025-09-28 |  112 |    -1.87 |     -0.27 |   9.5% | BTC60d +10% vol1.60%
+  12 | 2025-09-28->2025-11-28 |   84 |   -11.45 |     -2.19 |  12.5% | BTC60d -7% vol1.50%
+  13 | 2025-11-28->2026-01-28 |   88 |    +5.66 |     +0.80 |   4.7% | BTC60d -19% vol2.71%
+  14 | 2026-01-28->2026-03-28 |  112 |    +4.59 |     +0.45 |   9.1% | BTC60d -2% vol1.80%
+
+============================================================================================
+PRE-REGISTERED 5-PART CRITERION (frozen; no tuning to results)
+============================================================================================
+  (1) folds OOS net>0 fraction : 53.3%  (>=60%)        -> FAIL
+  (2) median per-fold OOS Shrp : +0.304  (>=0.50)      -> FAIL
+  (3) pooled-OOS daily Sharpe  : +0.818  (>=1.0; sqrt365; daily mean +0.00052 std 0.01211) -> FAIL
+  (4) worst single-fold maxDD  : 13.8%  (<=20%)         -> PASS
+  (5) null control: real +0.818 vs sign-shuffle p95 +1.097 -> FAIL
+
+  DIAGNOSTIC (not gated): C3-only pooled daily Sharpe -1.279 | TSMOM-only +1.003
+  DIAGNOSTIC inverse-vol weights (C3,TSMOM)=(0.82,0.18) pooled-OOS net +4.37
+  ensemble pooled-OOS net (equal-weight): +47.29 over 1398 trades
+
+============================================================================================
+TERMINAL VERDICT: NO-GO — edge not robust
+  criteria missed: 1, 2, 3, 5
+  => STOP the strategy hunt. Do NOT iterate/re-spec. Escalate the doctrine fork to operator.
