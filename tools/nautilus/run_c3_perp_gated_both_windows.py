@@ -62,10 +62,10 @@ def _divergence_summary(taker):
 def main():
     print(">>> CURRENT window (Nov25->May26): ungated baseline + gated")
     cu_m, cu_r, _cu_t, _cu_mt, _ = cur.evaluate(
-        use_regime_gate=False, emit=False, verbose=False
+        gate_version=0, emit=False, verbose=False
     )
     cg_m, cg_r, cg_t, _cg_mt, cg_path = cur.evaluate(
-        use_regime_gate=True,
+        gate_version=1,
         strategy_name="C3_perp_gated_current",
         emit=True,
         verbose=False,
@@ -73,10 +73,10 @@ def main():
 
     print(">>> EARLIER window (Nov24->May25): ungated baseline + gated")
     eu_m, eu_r, _eu_t, _eu_mt, _ = earl.evaluate(
-        use_regime_gate=False, emit=False, verbose=False
+        gate_version=0, emit=False, verbose=False
     )
     eg_m, eg_r, eg_t, _eg_mt, eg_path = earl.evaluate(
-        use_regime_gate=True,
+        gate_version=1,
         strategy_name="C3_perp_gated_earlier",
         emit=True,
         verbose=False,
