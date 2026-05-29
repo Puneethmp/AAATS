@@ -1,0 +1,100 @@
+{
+  "strategy": "C3_perp_gated_v3_earlier",
+  "timestamp": "2026-05-29T07:04:49.488052+00:00",
+  "verdict": "FAIL",
+  "metrics": {
+    "net_pnl_usd": -5.3085,
+    "sharpe": -3.5618,
+    "max_drawdown_pct": 0.0605,
+    "n_trades": 65,
+    "profit_factor": 0.4111,
+    "in_sample_sharpe": -2.5196,
+    "oos_sharpe": -3.5618,
+    "pnl_at_maker_0_5": -5.3085,
+    "funding_total_usd_paid": 0.0788,
+    "funding_avg_bps_per_trade": 1.6052,
+    "funding_events_count": 123,
+    "gate_version": 3,
+    "gate_active_pct": 83.28,
+    "gate_blocked_bars": 3018,
+    "gate_eval_bars": 3624,
+    "gate_block_div_only": 468,
+    "gate_block_corr_only": 0,
+    "gate_block_drift_only": 1127,
+    "gate_block_both": 1423,
+    "mean_correlation_30d": null,
+    "mean_drift_60d": -0.2378,
+    "drift_eval_bars": 2905,
+    "_gross_pnl_usd_before_funding": -5.2297,
+    "_full_sharpe": -2.6754,
+    "_win_rate": 0.4462,
+    "_is_pnl_usd": -3.6171,
+    "_oos_pnl_usd": -1.6914,
+    "_total_notional_usd": 490.91,
+    "_gate_blocked_months": {
+      "2024-12": 49,
+      "2025-01": 498,
+      "2025-02": 672,
+      "2025-03": 744,
+      "2025-04": 720,
+      "2025-05": 335
+    },
+    "_data": "REAL Binance USDT-M perp 1h klines (fetch_perp_data.py)",
+    "_fee_model": "Binance perp VIP-0 maker=2bps/taker=5bps (MakerTakerFeeModel)",
+    "_funding": "real Binance funding-rate history; long pays when rate>0",
+    "_account": "MARGIN, margin_init=0",
+    "_regime_gate": "v1: 30d div>0.08 blocks; v2: AND 30d corr<0.5; v3: AND |60d log-RS drift|>=0.08",
+    "_window": "2024-11-28 to 2025-05-27 (EARLIER 6mo, 1h bars); OOS = last ~60d"
+  },
+  "criteria": {
+    "G1": {
+      "passed": false,
+      "actual": -5.3085,
+      "threshold": 0.0,
+      "detail": "net PnL -5.3085 <= 0.0"
+    },
+    "G2": {
+      "passed": false,
+      "actual": -3.5618,
+      "threshold": 1.0,
+      "detail": "Sharpe -3.5618 < 1.0"
+    },
+    "G3": {
+      "passed": true,
+      "actual": 0.0605,
+      "threshold": 0.2,
+      "detail": "drawdown 0.0605 <= 0.2"
+    },
+    "G4": {
+      "passed": true,
+      "actual": 65,
+      "threshold": 30,
+      "detail": "65 trades >= 30 (significance floor)"
+    },
+    "G5": {
+      "passed": false,
+      "actual": 0.4111,
+      "threshold": 1.3,
+      "detail": "profit factor 0.4111 < 1.3"
+    },
+    "G6": {
+      "passed": false,
+      "actual": -3.5618,
+      "threshold": 0.0,
+      "detail": "IS Sharpe -2.5196 <= 0; OOS Sharpe -3.5618 < 0"
+    },
+    "G7": {
+      "passed": false,
+      "actual": -5.3085,
+      "threshold": 0.0,
+      "detail": "PnL@fill=0.5 -5.3085 <= 0.0"
+    }
+  },
+  "failures": [
+    "G1: net PnL -5.3085 <= 0.0",
+    "G2: Sharpe -3.5618 < 1.0",
+    "G5: profit factor 0.4111 < 1.3",
+    "G6: IS Sharpe -2.5196 <= 0; OOS Sharpe -3.5618 < 0",
+    "G7: PnL@fill=0.5 -5.3085 <= 0.0"
+  ]
+}
