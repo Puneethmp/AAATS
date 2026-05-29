@@ -1,0 +1,72 @@
+{
+  "strategy": "Ensemble_EW_current",
+  "timestamp": "2026-05-29T08:50:12.756260+00:00",
+  "verdict": "FAIL",
+  "metrics": {
+    "net_pnl_usd": 1.5651,
+    "sharpe": -1.6465,
+    "oos_sharpe": -1.6465,
+    "in_sample_sharpe": 0.5486,
+    "max_drawdown_pct": 0.1466,
+    "n_trades": 294,
+    "profit_factor": 1.0481,
+    "pnl_at_maker_0_5": 2.1286,
+    "_full_sharpe": 0.173,
+    "_oos_mean_ret": -0.007635,
+    "_is_mean_ret": 0.004601,
+    "_weights_c3_tsmom": [
+      0.5,
+      0.5
+    ],
+    "_construction": "50/50 capital sleeves on $100 book; pooled per-trade sqrt(60) Sharpe (sleeve-invariant); UNCHANGED G1-G7"
+  },
+  "criteria": {
+    "G1": {
+      "passed": true,
+      "actual": 1.5651,
+      "threshold": 0.0,
+      "detail": "net PnL 1.5651 > 0.0"
+    },
+    "G2": {
+      "passed": false,
+      "actual": -1.6465,
+      "threshold": 1.0,
+      "detail": "Sharpe -1.6465 < 1.0"
+    },
+    "G3": {
+      "passed": true,
+      "actual": 0.1466,
+      "threshold": 0.2,
+      "detail": "drawdown 0.1466 <= 0.2"
+    },
+    "G4": {
+      "passed": true,
+      "actual": 294,
+      "threshold": 30,
+      "detail": "294 trades >= 30 (significance floor)"
+    },
+    "G5": {
+      "passed": false,
+      "actual": 1.0481,
+      "threshold": 1.3,
+      "detail": "profit factor 1.0481 < 1.3"
+    },
+    "G6": {
+      "passed": false,
+      "actual": -1.6465,
+      "threshold": 0.2743,
+      "detail": "OOS Sharpe -1.6465 < 0.5*IS(0.5486)=0.2743"
+    },
+    "G7": {
+      "passed": "True",
+      "actual": 2.1286,
+      "threshold": 0.0,
+      "detail": "PnL@fill=0.5 2.1286 > 0.0"
+    }
+  },
+  "failures": [
+    "G2: Sharpe -1.6465 < 1.0",
+    "G5: profit factor 1.0481 < 1.3",
+    "G6: OOS Sharpe -1.6465 < 0.5*IS(0.5486)=0.2743"
+  ]
+}
