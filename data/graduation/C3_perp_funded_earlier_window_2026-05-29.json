@@ -1,0 +1,80 @@
+{
+  "strategy": "C3_perp_funded_earlier_window",
+  "timestamp": "2026-05-29T04:07:59.880978+00:00",
+  "verdict": "FAIL",
+  "metrics": {
+    "net_pnl_usd": -8.1686,
+    "sharpe": -0.4099,
+    "max_drawdown_pct": 0.1,
+    "n_trades": 212,
+    "profit_factor": 0.7098,
+    "in_sample_sharpe": -1.2647,
+    "oos_sharpe": -0.4099,
+    "pnl_at_maker_0_5": -8.1686,
+    "funding_total_usd_paid": 0.018,
+    "funding_avg_bps_per_trade": 0.105,
+    "funding_events_count": 354,
+    "_gross_pnl_usd_before_funding": -8.1506,
+    "_full_sharpe": -0.9914,
+    "_win_rate": 0.4528,
+    "_is_pnl_usd": -6.6627,
+    "_oos_pnl_usd": -1.5059,
+    "_total_notional_usd": 1713.67,
+    "_data": "REAL Binance USDT-M perp 1h klines (fetch_perp_data.py)",
+    "_fee_model": "Binance perp VIP-0 maker=2bps/taker=5bps (MakerTakerFeeModel)",
+    "_funding": "real Binance funding-rate history; long pays when rate>0",
+    "_account": "MARGIN, margin_init=0",
+    "_window": "2024-11-28 to 2025-05-27 (EARLIER 6mo, 1h bars); OOS = last ~60d"
+  },
+  "criteria": {
+    "G1": {
+      "passed": false,
+      "actual": -8.1686,
+      "threshold": 0.0,
+      "detail": "net PnL -8.1686 <= 0.0"
+    },
+    "G2": {
+      "passed": false,
+      "actual": -0.4099,
+      "threshold": 1.0,
+      "detail": "Sharpe -0.4099 < 1.0"
+    },
+    "G3": {
+      "passed": true,
+      "actual": 0.1,
+      "threshold": 0.2,
+      "detail": "drawdown 0.1000 <= 0.2"
+    },
+    "G4": {
+      "passed": true,
+      "actual": 212,
+      "threshold": 30,
+      "detail": "212 trades >= 30 (significance floor)"
+    },
+    "G5": {
+      "passed": false,
+      "actual": 0.7098,
+      "threshold": 1.3,
+      "detail": "profit factor 0.7098 < 1.3"
+    },
+    "G6": {
+      "passed": false,
+      "actual": -0.4099,
+      "threshold": 0.0,
+      "detail": "IS Sharpe -1.2647 <= 0; OOS Sharpe -0.4099 < 0"
+    },
+    "G7": {
+      "passed": false,
+      "actual": -8.1686,
+      "threshold": 0.0,
+      "detail": "PnL@fill=0.5 -8.1686 <= 0.0"
+    }
+  },
+  "failures": [
+    "G1: net PnL -8.1686 <= 0.0",
+    "G2: Sharpe -0.4099 < 1.0",
+    "G5: profit factor 0.7098 < 1.3",
+    "G6: IS Sharpe -1.2647 <= 0; OOS Sharpe -0.4099 < 0",
+    "G7: PnL@fill=0.5 -8.1686 <= 0.0"
+  ]
+}

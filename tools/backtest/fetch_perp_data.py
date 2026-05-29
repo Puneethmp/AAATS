@@ -4,21 +4,29 @@ Public Binance futures endpoints (no auth, free, rate-limited at 2400 req/min):
   - klines:  GET https://fapi.binance.com/fapi/v1/klines
   - funding: GET https://fapi.binance.com/fapi/v1/fundingRate
 
-For each of [BTC, SOL, LINK, AVAX, DOT] over 2025-11-28 -> 2026-05-27, writes:
-  data/historical/{SYM}_USDT_1h_perp.parquet   (ts, open, high, low, close, volume)
-  data/historical/{SYM}_USDT_funding.parquet   (ts_funding, funding_rate)
+Two windows are supported (B.1.7 Track 8 added the earlier window for the
+C3-perp window-robustness test):
+  - current  (2025-11-28 -> 2026-05-27): the B.1.6/Track-4b graduation window.
+      data/historical/{SYM}_USDT_1h_perp.parquet
+      data/historical/{SYM}_USDT_funding.parquet
+  - earlier  (2024-11-28 -> 2025-05-27): the prior-year robustness window.
+      data/historical/{SYM}_USDT_1h_perp_earlier.parquet
+      data/historical/{SYM}_USDT_funding_earlier.parquet
 
 Idempotent: skips a symbol whose parquets already exist and cover the window.
 
-Used by tools/nautilus/run_c3_perp_funded_oos.py — the HONEST C3-perp
-graduation test (real perp prices + funding payments, no spot proxy).
+Used by tools/nautilus/run_c3_perp_funded_oos.py (current) and
+run_c3_perp_funded_earlier_oos.py (earlier) — the HONEST C3-perp graduation +
+robustness tests (real perp prices + funding payments, no spot proxy).
 Workstation research only; the box never imports this.
 
-    python tools/backtest/fetch_perp_data.py
+    python tools/backtest/fetch_perp_data.py --window both      # default
+    python tools/backtest/fetch_perp_data.py --window earlier
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import time
 import urllib.request
@@ -28,15 +36,29 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 HIST = ROOT / "data" / "historical"
-# ETH added 2026-05-28 (B.1.7 Track 5) — C3c-perp anchors the z-score on ETH.
-SYMBOLS = ["BTC", "ETH", "SOL", "LINK", "AVAX", "DOT"]
+# Current window carries ETH (B.1.7 Track 5 — C3c-perp anchors the z-score on
+# ETH). The earlier robustness window only needs C3-perp's universe (BTC + 4
+# alts), so it skips ETH to shorten the fetch.
+SYMBOLS_CURRENT = ["BTC", "ETH", "SOL", "LINK", "AVAX", "DOT"]
+SYMBOLS_EARLIER = ["BTC", "SOL", "LINK", "AVAX", "DOT"]
 
 FAPI = "https://fapi.binance.com"
-# Match the spot cache window (2025-11-28 15:00 -> 2026-05-27 14:00 UTC).
-WIN_START = pd.Timestamp("2025-11-28T15:00:00Z")
-WIN_END = pd.Timestamp("2026-05-27T15:00:00Z")  # exclusive upper bound
-START_MS = int(WIN_START.timestamp() * 1000)
-END_MS = int(WIN_END.timestamp() * 1000)
+
+# Window registry: name -> (start, end_exclusive, file_suffix, symbols).
+WINDOWS = {
+    "current": (
+        pd.Timestamp("2025-11-28T15:00:00Z"),
+        pd.Timestamp("2026-05-27T15:00:00Z"),
+        "",
+        SYMBOLS_CURRENT,
+    ),
+    "earlier": (
+        pd.Timestamp("2024-11-28T00:00:00Z"),
+        pd.Timestamp("2025-05-28T00:00:00Z"),  # exclusive -> last bar 2025-05-27 23:00
+        "_earlier",
+        SYMBOLS_EARLIER,
+    ),
+}
 
 
 def _get(url: str) -> list:
@@ -45,15 +67,19 @@ def _get(url: str) -> list:
         return json.loads(resp.read().decode())
 
 
-def fetch_klines(sym: str) -> pd.DataFrame:
+def fetch_klines(
+    sym: str, win_start: pd.Timestamp, win_end: pd.Timestamp
+) -> pd.DataFrame:
     """Paginate 1h klines for {sym}USDT perp over the window (limit=1000)."""
     pair = f"{sym}USDT"
+    start_ms = int(win_start.timestamp() * 1000)
+    end_ms = int(win_end.timestamp() * 1000)
     rows: list[list] = []
-    cursor = START_MS
-    while cursor < END_MS:
+    cursor = start_ms
+    while cursor < end_ms:
         url = (
             f"{FAPI}/fapi/v1/klines?symbol={pair}&interval=1h"
-            f"&startTime={cursor}&endTime={END_MS}&limit=1000"
+            f"&startTime={cursor}&endTime={end_ms}&limit=1000"
         )
         batch = _get(url)
         if not batch:
@@ -85,21 +111,25 @@ def fetch_klines(sym: str) -> pd.DataFrame:
         return df
     df["ts"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
     df = df.drop_duplicates(subset="ts").sort_values("ts").reset_index(drop=True)
-    df = df[(df["ts"] >= WIN_START) & (df["ts"] < WIN_END)]
+    df = df[(df["ts"] >= win_start) & (df["ts"] < win_end)]
     for c in ("open", "high", "low", "close", "volume"):
         df[c] = df[c].astype(float)
     return df[["ts", "open", "high", "low", "close", "volume"]].reset_index(drop=True)
 
 
-def fetch_funding(sym: str) -> pd.DataFrame:
+def fetch_funding(
+    sym: str, win_start: pd.Timestamp, win_end: pd.Timestamp
+) -> pd.DataFrame:
     """Funding-rate history for {sym}USDT perp over the window (8h cadence)."""
     pair = f"{sym}USDT"
+    start_ms = int(win_start.timestamp() * 1000)
+    end_ms = int(win_end.timestamp() * 1000)
     rows: list[dict] = []
-    cursor = START_MS
-    while cursor < END_MS:
+    cursor = start_ms
+    while cursor < end_ms:
         url = (
             f"{FAPI}/fapi/v1/fundingRate?symbol={pair}"
-            f"&startTime={cursor}&endTime={END_MS}&limit=1000"
+            f"&startTime={cursor}&endTime={end_ms}&limit=1000"
         )
         batch = _get(url)
         if not batch:
@@ -120,52 +150,70 @@ def fetch_funding(sym: str) -> pd.DataFrame:
         .sort_values("ts_funding")
         .reset_index(drop=True)
     )
-    df = df[(df["ts_funding"] >= WIN_START) & (df["ts_funding"] < WIN_END)]
+    df = df[(df["ts_funding"] >= win_start) & (df["ts_funding"] < win_end)]
     return df[["ts_funding", "funding_rate"]].reset_index(drop=True)
 
 
-def _covers(parquet: Path, ts_col: str) -> bool:
+def _covers(
+    parquet: Path, ts_col: str, win_start: pd.Timestamp, win_end: pd.Timestamp
+) -> bool:
     if not parquet.exists():
         return False
     try:
         df = pd.read_parquet(parquet)
         ts = pd.to_datetime(df[ts_col], utc=True)
         # klines: require near-full window. funding: just require it spans the window.
-        return ts.min() <= WIN_START + pd.Timedelta(
+        return ts.min() <= win_start + pd.Timedelta(
             hours=2
-        ) and ts.max() >= WIN_END - pd.Timedelta(days=2)
+        ) and ts.max() >= win_end - pd.Timedelta(days=2)
     except Exception:
         return False
 
 
-def main() -> int:
-    HIST.mkdir(parents=True, exist_ok=True)
-    for sym in SYMBOLS:
-        kpath = HIST / f"{sym}_USDT_1h_perp.parquet"
-        fpath = HIST / f"{sym}_USDT_funding.parquet"
+def _run_window(name: str) -> None:
+    win_start, win_end, suffix, symbols = WINDOWS[name]
+    print(f"\n=== window '{name}': {win_start} -> {win_end} (suffix '{suffix}') ===")
+    for sym in symbols:
+        kpath = HIST / f"{sym}_USDT_1h_perp{suffix}.parquet"
+        fpath = HIST / f"{sym}_USDT_funding{suffix}.parquet"
 
-        if _covers(kpath, "ts"):
+        if _covers(kpath, "ts", win_start, win_end):
             kdf = pd.read_parquet(kpath)
             print(f"{sym} klines: cached ({len(kdf)} bars) - skip")
         else:
-            kdf = fetch_klines(sym)
+            kdf = fetch_klines(sym, win_start, win_end)
             kdf.to_parquet(kpath, index=False)
             print(
                 f"{sym} klines: fetched {len(kdf)} bars "
                 f"{kdf['ts'].min()} -> {kdf['ts'].max()}"
             )
 
-        if _covers(fpath, "ts_funding"):
+        if _covers(fpath, "ts_funding", win_start, win_end):
             fdf = pd.read_parquet(fpath)
             print(f"{sym} funding: cached ({len(fdf)} events) - skip")
         else:
-            fdf = fetch_funding(sym)
+            fdf = fetch_funding(sym, win_start, win_end)
             fdf.to_parquet(fpath, index=False)
             mean_bps = fdf["funding_rate"].mean() * 10000 if len(fdf) else 0.0
             print(
                 f"{sym} funding: fetched {len(fdf)} events "
                 f"(mean {mean_bps:+.3f} bps/8h)"
             )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Fetch Binance perp klines + funding")
+    parser.add_argument(
+        "--window",
+        choices=["current", "earlier", "both"],
+        default="both",
+        help="which 6mo window to fetch (default: both)",
+    )
+    args = parser.parse_args(argv)
+    HIST.mkdir(parents=True, exist_ok=True)
+    names = ["current", "earlier"] if args.window == "both" else [args.window]
+    for name in names:
+        _run_window(name)
     print("\nperp data fetch complete.")
     return 0
 
