@@ -105,3 +105,57 @@ The 2026-05-16 synthetic test recipe (write `{"_TEST_|_TEST_": <n>}` twice,
 30 seconds apart, to give `increase()[1h]` a delta) should be re-run
 quarterly. Not blocking; logged here so the recipe doesn't drift out of
 operator memory.
+
+## 2026-05-30 — stale C1 counter reset (digest false "action needed")
+
+During the D.5 soak the daily digest began re-surfacing
+"Action needed: share-equality mismatch counter non-zero" every day.
+Investigation (Cowork session 2026-05-30):
+
+- Counter held a single stale entry: `{"C1_stat_arb|ETH/USDT": 1}`,
+  file last written **2026-05-27** (3 days stale at time of review).
+- C1 (pair strategy) had not traded since 2026-05-28 14:31 UTC, so nothing
+  new was triggering it — it was the documented C1 pair-leg asymmetry
+  artifact, the same known class as the TON/FET entries above.
+- Crucially, the actual money reconciled clean throughout: live ledger
+  divergence `{}` and the capital-invariant verdict `ok` (delta $0). No
+  capital leak — purely cosmetic.
+- Root cause of the recurring nag: the digest re-flags on *any* non-empty
+  `share_equality_mismatches.json`, and the counter never auto-resets, so a
+  single stale WARN nags daily until manually cleared. The substantive cost
+  is alert-fatigue eroding trust in the L1–L10 digest, not the count itself.
+
+**Action:** reset the counter to `{}` (the documented reset from
+`docs/runbooks/2026-05-22_live_capital_go.md:59`). The box is Tailscale-only
+and the Cowork sandbox has no route to it, so this is run operator-side from
+the workstation.
+
+**VERIFIED executed 2026-05-31T12:57Z** (Claude Code session over the
+workstation Tailscale route): file now reads `{}` and the exporter gauge
+cleared — the `C1_stat_arb|ETH/USDT` series is gone and only the
+`{strategy="_none",symbol="_none"} 0` sentinel remains after the next scrape.
+
+Gotcha caught during execution: the host file
+`/home/aaats/aaats/data/share_equality_mismatches.json` is **root-owned**
+(written by `aaats-paper-crypto`, which runs as `uid=0` inside the container),
+so the documented one-liner below fails with `Permission denied` when run as
+the `aaats` SSH user. Reset via the container that owns the bind mount instead:
+
+```bash
+# does NOT work — host file is root-owned, aaats user gets Permission denied:
+#   ssh aaats@100.95.126.39 'echo "{}" > /home/aaats/aaats/data/share_equality_mismatches.json'
+# working route — write through the container (root) onto the bind mount:
+ssh aaats@100.95.126.39 'docker exec aaats-paper-crypto sh -c "echo {} > /app/data/share_equality_mismatches.json"'
+```
+
+Touches `data/` only (live bind mount, no rebuild), fully reversible, no
+strategy logic affected. The writer (`paper_trader._bump_share_mismatch_counter`)
+restarts from zero on the next genuine WARN; exporter gauge clears on the next
+30s scrape; the next day's digest should come up clean. If the digest still
+flags after this, the file was not actually reset — re-run the one-liner and
+confirm with `ssh … 'cat …/share_equality_mismatches.json'` → expect `{}`.
+
+Durable fix (deferred — infra, out of scope under maintenance/research-bed
+mode): have the digest distinguish *fresh* WARNs (mtime within the digest
+window) from stale cumulative counts, so a 3-day-old artifact stops nagging
+without a manual reset.
