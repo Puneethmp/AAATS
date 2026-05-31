@@ -49,14 +49,21 @@ ssh aaats@100.95.126.39 'docker exec aaats-paper-crypto python -m scripts.reconc
 
 Per CLAUDE.md recipe — fire `_TEST_LIVE_2026_05_22_` synthetic WARN and confirm Telegram delivery:
 
+> **NOTE: the host file is root-owned; write via `docker exec`, not host `echo >`.**
+> `data/` state files are written by `aaats-paper-crypto` running as uid=0, so a
+> host-side `ssh ... 'echo ... > /home/aaats/aaats/data/<file>'` fails with
+> `Permission denied`. Pipe the payload into the owning container instead
+> (`/app/data` is the same bind mount; the container is root so the write lands).
+> See CLAUDE.md gotcha #12 and docs/known_issues/2026-05-22_share_equality_alert_chain.md (2026-05-31).
+
 ```bash
-ssh aaats@100.95.126.39 'echo "{\"_TEST_LIVE_2026_05_22_|_TEST_LIVE_2026_05_22_\": 1}" > /home/aaats/aaats/data/share_equality_mismatches.json'
+ssh aaats@100.95.126.39 'echo "{\"_TEST_LIVE_2026_05_22_|_TEST_LIVE_2026_05_22_\": 1}" | docker exec -i aaats-paper-crypto sh -c "cat > /app/data/share_equality_mismatches.json"'
 sleep 65  # one scrape cycle
-ssh aaats@100.95.126.39 'echo "{\"_TEST_LIVE_2026_05_22_|_TEST_LIVE_2026_05_22_\": 2}" > /home/aaats/aaats/data/share_equality_mismatches.json'
+ssh aaats@100.95.126.39 'echo "{\"_TEST_LIVE_2026_05_22_|_TEST_LIVE_2026_05_22_\": 2}" | docker exec -i aaats-paper-crypto sh -c "cat > /app/data/share_equality_mismatches.json"'
 sleep 120  # alert evaluation
 # CHECK TELEGRAM CHAT 1946109268 for delivery
 # Then revert:
-ssh aaats@100.95.126.39 'echo "{}" > /home/aaats/aaats/data/share_equality_mismatches.json'
+ssh aaats@100.95.126.39 'echo "{}" | docker exec -i aaats-paper-crypto sh -c "cat > /app/data/share_equality_mismatches.json"'
 ```
 
 **Pass criteria:**
