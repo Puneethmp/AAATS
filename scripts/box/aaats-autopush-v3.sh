@@ -134,6 +134,21 @@ cp_state() {
   fi
 }
 
+# 2026-06-02 WAL-CHECKPOINT FIX (false DB-FREEZE alerts).
+# The paper trader opens paper_trades.db in SQLite WAL mode: new trades land in
+# paper_trades.db-wal and the main .db file's bytes (hence its sha256) do NOT
+# change until a checkpoint folds the WAL back in. A plain `docker cp` of the
+# main file therefore (a) snapshots a stale DB into origin/main — anything that
+# reads runtime/paper_trades.db from origin (e.g. the L7 activity-floor monitor)
+# sees old data — and (b) makes the freshness hash below look frozen for hours
+# even while the bot trades normally. That produced 152 spurious "DB-FREEZE"
+# Telegram alerts between 2026-05-26 and 2026-06-02 (WAL grew to ~4MB before the
+# next auto-checkpoint). Force a TRUNCATE checkpoint inside the container FIRST
+# so the cp'd file is current and the freshness hash is meaningful. Safe and
+# idempotent: if another connection holds the write lock the checkpoint is a
+# no-op and simply retries next tick. Reversible (data/-only, no rebuild).
+timeout 10 docker exec aaats-paper-crypto python3 -c "import sqlite3; sqlite3.connect('/app/data/paper_trades.db').execute('PRAGMA wal_checkpoint(TRUNCATE)')" 2>>"$LOG" || true
+
 # Core 4 (existing) — hard-required: the bot's ledger + cash + position book.
 cp_state /app/data/paper_trades.db      "$RUNTIME_DIR/paper_trades.db"      hard
 cp_state /app/data/paper_positions.json "$RUNTIME_DIR/paper_positions.json" hard
