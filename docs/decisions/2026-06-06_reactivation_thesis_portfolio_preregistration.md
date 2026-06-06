@@ -1,6 +1,11 @@
 # 2026-06-06 — Reactivation Research Program: Pre-Registered Thesis Portfolio
 
-> **STATUS: PRE-REGISTRATION DRAFT — NOT YET COMMITTED.**
+> **REGISTERED — commit `5a2c33664c1687b711827b3c57d4c1df4fabdfce` (2026-06-06) is the
+> pre-registration timestamp.** All frozen parameters in §3 are sealed as of that commit.
+> Any data, signal, or PnL work in this program post-dates it. (Header recorded in this
+> follow-up commit per §7.)
+>
+> **STATUS: REGISTERED (committed `5a2c3366`).**
 > Per the reactivation clause in CLAUDE.md, this document is the NEW pre-registered thesis
 > (portfolio) required to reopen any strategy research. **Pre-registration integrity rule:
 > this file must be committed to origin/main BEFORE any backtest, data exploration beyond
