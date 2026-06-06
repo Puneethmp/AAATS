@@ -200,10 +200,12 @@ and the research bed continues with its conclusion strengthened.
 
 ## 7. Registration checklist (next Claude Code session, in order)
 
-- [ ] Commit this file unmodified to origin/main (auto-rebase first; commit SHA = registration).
-- [ ] Build §5 infrastructure (no signal computation).
-- [ ] Run T1 economics pre-check; commit its output verbatim.
-- [ ] If pre-check passes: run T1 harness once; commit verdict.
-- [ ] Run T2 harness once; commit verdict.
-- [ ] Deploy T3 collector to box (deploy_lib discipline).
-- [ ] Write decision memo(s); update CLAUDE.md program status ONLY if a PASS occurs.
+**COMPLETED 2026-06-06.** Verdict: [2026-06-06_reactivation_T1_T2_verdict_portfolio_FAIL.md](2026-06-06_reactivation_T1_T2_verdict_portfolio_FAIL.md) — full-portfolio FAIL (T1 void, T2 1/5).
+
+- [x] Commit this file unmodified to origin/main (commit SHA `5a2c3366` = registration).
+- [x] Build §5 infrastructure (no signal computation). — basket_ledger / xsect_signals / xsect_walkforward / null_engines / u30_data + extended fetch_perp_data.
+- [x] Run T1 economics pre-check; commit its output verbatim. — median funding income 8.68bps < 10bps ⇒ **ECONOMICALLY VOID**.
+- [x] ~~If pre-check passes: run T1 harness once~~ — N/A, pre-check VOID, harness correctly skipped per §3 T1.
+- [x] Run T2 harness once; commit verdict. — **FAIL 1/5** (raw in `data/graduation/`).
+- [x] Deploy T3 collector to box (deploy_lib discipline). — hourly cron live; first tick 30/30.
+- [x] Write decision memo(s); update CLAUDE.md program status ONLY if a PASS occurs. — memo written; **no PASS ⇒ CLAUDE.md unchanged**.
