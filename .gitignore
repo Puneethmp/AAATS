@@ -46,6 +46,11 @@ logs/
 # Track F walk-forward 36mo contiguous data is large (>500KB) + fully regenerable
 # via `python tools/backtest/fetch_perp_data.py --window contig`; keep it out of git.
 data/historical/*_contig.parquet
+# Reactivation T1/T2 cross-sectional U30 data: ~171 symbols x 36mo of 1h klines +
+# funding is large + fully regenerable via `fetch_perp_data.py --window u30`.
+# (the small u30_universe_daily.parquet membership artifact IS tracked, below.)
+data/historical/*_u30.parquet
+!data/historical/u30_universe_daily.parquet
 # B.1.5 backtest outputs are deliverables, not transient state
 !data/backtest_results/
 !data/backtest_results/*.json
