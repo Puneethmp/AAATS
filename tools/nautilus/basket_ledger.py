@@ -64,23 +64,36 @@ def build_daily_close(hourly_close: pd.DataFrame) -> pd.DataFrame:
 def _funding_daily_matrix(
     funding: dict[str, pd.Series], days: pd.DatetimeIndex, symbols: list[str]
 ) -> np.ndarray:
-    """Sum of funding RATES settled in (day-1, day] per (day, symbol). Multiplying
-    later by signed notional gives the funding cashflow."""
+    """Sum of funding RATES settled on each calendar day per (day, symbol).
+    Multiplying later by signed notional gives the funding cashflow. Vectorized
+    per symbol (no per-settlement Python loop) — `days` must be sorted ascending.
+
+    Schedule-INDEPENDENT: depends only on funding/days/symbols, so compute it ONCE
+    and reuse across the real run + all null draws (see precompute_funding_matrix)."""
     n, m = len(days), len(symbols)
     out = np.zeros((n, m))
-    day_floor = days  # already normalized midnights
-    pos = {d: i for i, d in enumerate(day_floor)}
+    days_i8 = days.normalize().asi8
     for j, s in enumerate(symbols):
         ser = funding.get(s)
         if ser is None or len(ser) == 0:
             continue
-        # bucket each settlement into the day that contains it (its calendar day)
-        fdays = ser.index.normalize()
-        for ts_day, rate in zip(fdays, ser.to_numpy()):
-            i = pos.get(ts_day)
-            if i is not None:
-                out[i, j] += float(rate)
+        fdays = ser.index.normalize().asi8
+        pos = np.searchsorted(days_i8, fdays)
+        valid = (pos >= 0) & (pos < n)
+        pos_v = pos[valid]
+        rates = ser.to_numpy()[valid]
+        match = days_i8[pos_v] == fdays[valid]
+        np.add.at(out[:, j], pos_v[match], rates[match])
     return out
+
+
+def precompute_funding_matrix(
+    daily_close: pd.DataFrame, funding: dict[str, pd.Series]
+) -> np.ndarray:
+    """Public wrapper: funding-rate daily matrix aligned to daily_close's (days x
+    symbols). Pass the result to simulate_basket(funding_rate_mat=...) to avoid
+    recomputing it on every null draw."""
+    return _funding_daily_matrix(funding, daily_close.index, list(daily_close.columns))
 
 
 def simulate_basket(
@@ -90,6 +103,8 @@ def simulate_basket(
     book: float = 100.0,
     fee_rate: float = 0.0005,
     liquidate_at_end: bool = True,
+    funding_rate_mat: np.ndarray | None = None,
+    compute_trades: bool = True,
 ) -> BasketResult:
     """Simulate a dollar-neutral basket.
 
@@ -102,6 +117,11 @@ def simulate_basket(
                   portfolio is held constant (in entry-units) until the next entry.
     book        : capital base for return normalization.
     fee_rate    : taker fee fraction per side, charged on |Δnotional| turnover.
+    funding_rate_mat : optional precomputed daily funding-rate matrix (from
+                  precompute_funding_matrix); pass it to skip the per-call rebuild
+                  in null loops. If None it is computed from `funding`.
+    compute_trades : when False, skip the per-symbol round-trip ledger (nulls only
+                  need daily_pnl for the pooled-OOS Sharpe) — a big speedup.
     """
     days = daily_close.index
     symbols = list(daily_close.columns)
@@ -147,9 +167,10 @@ def simulate_basket(
     price_pnl[1:, :] = units[:-1, :] * dp
 
     # --- funding PnL: -(signed units) * mark * rate, per settlement-day ---
-    fund_rate_mat = _funding_daily_matrix(funding, days, symbols)
+    if funding_rate_mat is None:
+        funding_rate_mat = _funding_daily_matrix(funding, days, symbols)
     mark = np.nan_to_num(price, nan=0.0)
-    funding_pnl = -(units * mark) * fund_rate_mat
+    funding_pnl = -(units * mark) * funding_rate_mat
 
     # --- fees: fee_rate * |Δ notional| at each rebalance (+ final liquidation) ---
     fee = np.zeros((n, m))
@@ -173,8 +194,9 @@ def simulate_basket(
     daily_pnl = pd.Series(net_per_day_sym.sum(axis=1), index=days)
 
     # --- per round-trip ledger: segment each symbol's signed-hold into runs ---
+    # (skipped for null draws, which only need daily_pnl for the pooled Sharpe)
     trades = []
-    sign = np.sign(units)
+    sign = np.sign(units) if compute_trades else np.zeros_like(units)
     for j, s in enumerate(symbols):
         col_sign = sign[:, j]
         d = 0

@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tools.nautilus import u30_data, xsect_signals
-from tools.nautilus.basket_ledger import simulate_basket
+from tools.nautilus.basket_ledger import precompute_funding_matrix, simulate_basket
 from tools.nautilus.null_engines import null_distribution
 from tools.nautilus.xsect_walkforward import evaluate, make_folds
 
@@ -52,9 +52,23 @@ def run_harness(null_n: int = N_NULL) -> dict:
 
     rebal_dates = _mondays(WIN_START, WIN_END, daily_close.index)
     folds = make_folds(WIN_START, WIN_END)
+    fund_mat = precompute_funding_matrix(daily_close, funding)
 
     def simulate(schedule):
-        return simulate_basket(daily_close, funding, schedule, BOOK, FEE_RATE)
+        return simulate_basket(
+            daily_close, funding, schedule, BOOK, FEE_RATE, funding_rate_mat=fund_mat
+        )
+
+    def simulate_null(schedule):
+        return simulate_basket(
+            daily_close,
+            funding,
+            schedule,
+            BOOK,
+            FEE_RATE,
+            funding_rate_mat=fund_mat,
+            compute_trades=False,
+        )
 
     def builder(scores):
         return xsect_signals.build_t2_schedule(scores, membership, rebal_dates, BOOK)
@@ -64,7 +78,7 @@ def run_harness(null_n: int = N_NULL) -> dict:
     real_result = simulate(real_schedule)
 
     null_sharpes = null_distribution(
-        builder, simulate, rebal_dates, symbols, folds, BOOK, n=null_n, seed=SEED
+        builder, simulate_null, rebal_dates, symbols, folds, BOOK, n=null_n, seed=SEED
     )
 
     verdict = evaluate(real_result, folds, null_sharpes)
