@@ -41,6 +41,10 @@ class BasketResult:
     gross_turnover_usd: float = 0.0
     fees_total_usd: float = 0.0
     funding_total_usd: float = 0.0
+    slippage_total_usd: float = 0.0  # realistic fill model: spread + impact on turnover
+    max_participation: float = (
+        0.0  # worst turn/ADV across all fills (capacity diagnostic)
+    )
 
     @property
     def daily_returns(self) -> pd.Series:
@@ -59,6 +63,20 @@ def build_daily_close(hourly_close: pd.DataFrame) -> pd.DataFrame:
     midnights.index = midnights.index.normalize()
     midnights = midnights[~midnights.index.duplicated(keep="last")].sort_index()
     return midnights
+
+
+def build_daily_dollar_volume(
+    hourly_close: pd.DataFrame, hourly_volume: pd.DataFrame
+) -> pd.DataFrame:
+    """Daily dollar-volume (ADV) panel from hourly perp close + base-unit volume.
+
+    dollar_volume_hour = close * volume(base); summed per UTC day. Index is
+    normalized midnights to align with build_daily_close. Feeds the fill model's
+    participation/impact term — uses ONLY price*volume (no OI/liquidation/depth,
+    which do not exist in the historical store)."""
+    dv = hourly_close * hourly_volume
+    daily = dv.groupby(dv.index.normalize()).sum()
+    return daily.sort_index()
 
 
 def _funding_daily_matrix(
@@ -105,6 +123,9 @@ def simulate_basket(
     liquidate_at_end: bool = True,
     funding_rate_mat: np.ndarray | None = None,
     compute_trades: bool = True,
+    half_spread_bps: float = 0.0,
+    impact_coef_bps: float = 0.0,
+    daily_dollar_volume: pd.DataFrame | None = None,
 ) -> BasketResult:
     """Simulate a dollar-neutral basket.
 
@@ -122,6 +143,19 @@ def simulate_basket(
                   in null loops. If None it is computed from `funding`.
     compute_trades : when False, skip the per-symbol round-trip ledger (nulls only
                   need daily_pnl for the pooled-OOS Sharpe) — a big speedup.
+    half_spread_bps : realistic fill model — half the bid/ask spread (bps) crossed
+                  per side, charged on |Δnotional| turnover. The binding friction at
+                  small book size. Default 0.0 = legacy behaviour (no spread).
+    impact_coef_bps : realistic fill model — square-root market-impact coefficient
+                  (bps): impact_bps = impact_coef_bps * sqrt(turn/ADV). Requires
+                  daily_dollar_volume. Default 0.0 = no impact term.
+    daily_dollar_volume : days x symbols ADV panel (build_daily_dollar_volume) used
+                  only for the impact participation ratio. None disables impact.
+
+    The fill model is STRICTLY ADDITIVE: spread+impact are non-negative costs on the
+    SAME turnover the fee uses, so positions are unchanged and total cost can only
+    rise vs the legacy flat-fee model. With both bps args at 0.0 the result is
+    byte-identical to the legacy model.
     """
     days = daily_close.index
     symbols = list(daily_close.columns)
@@ -172,8 +206,32 @@ def simulate_basket(
     mark = np.nan_to_num(price, nan=0.0)
     funding_pnl = -(units * mark) * funding_rate_mat
 
-    # --- fees: fee_rate * |Δ notional| at each rebalance (+ final liquidation) ---
+    # --- fees + realistic fill model on |Δ notional| at each rebalance (+ final) ---
+    # fee  = fee_rate * turn  (legacy taker)
+    # slip = half_spread * turn + impact_coef * sqrt(turn/ADV) * turn  (new, additive)
     fee = np.zeros((n, m))
+    slip = np.zeros((n, m))
+    adv = (
+        daily_dollar_volume.reindex(index=days, columns=symbols).to_numpy(dtype=float)
+        if daily_dollar_volume is not None
+        else None
+    )
+    half_spread = half_spread_bps * 1e-4
+    impact_c = impact_coef_bps * 1e-4
+    max_participation = 0.0
+
+    def _slip_for(di: int, turn: np.ndarray) -> np.ndarray:
+        nonlocal max_participation
+        cost = half_spread * turn  # half-spread crossed per side on |Δnotional|
+        if adv is not None and impact_c > 0.0:
+            a = adv[di, :]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                part = np.where((a > 0) & np.isfinite(a), turn / a, 0.0)
+            if part.size:
+                max_participation = max(max_participation, float(np.nanmax(part)))
+            cost = cost + impact_c * np.sqrt(part) * turn  # sqrt market-impact law
+        return cost
+
     for di, weights in rebal_rows:
         # drifted value of the previous position at THIS rebalance's price
         p = price[di, :]
@@ -183,14 +241,17 @@ def simulate_basket(
         new_notional = target[di, :]
         turn = np.abs(new_notional - drifted_prev)
         fee[di, :] += fee_rate * turn
+        slip[di, :] += _slip_for(di, turn)
     if liquidate_at_end and rebal_rows:
         last_di = n - 1
         p = price[last_di, :]
         final_u = units[last_di, :]
         final_notional = np.where(np.isfinite(p), final_u * p, 0.0)
-        fee[last_di, :] += fee_rate * np.abs(final_notional)
+        final_turn = np.abs(final_notional)
+        fee[last_di, :] += fee_rate * final_turn
+        slip[last_di, :] += _slip_for(last_di, final_turn)
 
-    net_per_day_sym = price_pnl + funding_pnl - fee
+    net_per_day_sym = price_pnl + funding_pnl - fee - slip
     daily_pnl = pd.Series(net_per_day_sym.sum(axis=1), index=days)
 
     # --- per round-trip ledger: segment each symbol's signed-hold into runs ---
@@ -211,7 +272,10 @@ def simulate_basket(
             end = d - 1  # inclusive last day of the hold
             seg = slice(start, end + 1)
             pnl = float(
-                price_pnl[seg, j].sum() + funding_pnl[seg, j].sum() - fee[seg, j].sum()
+                price_pnl[seg, j].sum()
+                + funding_pnl[seg, j].sum()
+                - fee[seg, j].sum()
+                - slip[seg, j].sum()
             )
             notionals = np.abs(target[seg, j])
             notionals = notionals[notionals > 0]
@@ -226,6 +290,7 @@ def simulate_basket(
                     "notional": notional,
                     "funding": float(funding_pnl[seg, j].sum()),
                     "fees": float(fee[seg, j].sum()),
+                    "slippage": float(slip[seg, j].sum()),
                     "entry_ts": int(days[start].value),
                     "ts": int(days[end].value),  # close ts -> fold bucketing
                     "hold_days": int(end - start + 1),
@@ -239,4 +304,6 @@ def simulate_basket(
         gross_turnover_usd=float(fee.sum() / fee_rate) if fee_rate else 0.0,
         fees_total_usd=float(fee.sum()),
         funding_total_usd=float(funding_pnl.sum()),
+        slippage_total_usd=float(slip.sum()),
+        max_participation=max_participation,
     )
