@@ -47,49 +47,55 @@ _ROOT = pathlib.Path(__file__).resolve().parents[1]
 #     Captures overshoot in bull regimes AND protects winners that revert before
 #     fully mean-reverting. Z_TARGET kept as catch-all for extreme overshoot.
 #   • 24h cooldown after stop-out — prevents LUNC-LUNC re-entry pattern.
-SYMBOLS         = ["SOL/USDT", "LINK/USDT", "AVAX/USDT", "DOT/USDT"]
-BTC_SYMBOL      = "BTC/USDT"
+SYMBOLS = ["SOL/USDT", "LINK/USDT", "AVAX/USDT", "DOT/USDT"]
+BTC_SYMBOL = "BTC/USDT"
 
 # ── Sizing (v2: vol-adjusted) ─────────────────────────────────────────────────
 # SIZING_MODE  "FIXED": vol-adjusted base POSITION_USD.
 #              "PCT":   CAPITAL_PCT × portfolio_capital  (legacy, no vol adj).
-SIZING_MODE     = "FIXED"
-POSITION_USD    = 10.0       # base USD per C3 position (pre-vol-adjustment)
-CAPITAL_PCT     = 0.04       # used only when SIZING_MODE=PCT
-MIN_TRADE_USD   = 5.0        # below this, fees dominate — refuse to size
-MAX_CONCURRENT  = 11         # max simultaneous C3 positions (Phase 1 = 11 at $110)
+SIZING_MODE = "FIXED"
+POSITION_USD = 10.0  # base USD per C3 position (pre-vol-adjustment)
+CAPITAL_PCT = 0.04  # used only when SIZING_MODE=PCT
+MIN_TRADE_USD = 5.0  # below this, fees dominate — refuse to size
+MAX_CONCURRENT = 11  # max simultaneous C3 positions (Phase 1 = 11 at $110)
 
 # Vol-adjustment parameters.
 # Target: equalize per-position daily PnL variance across the universe.
 # size = POSITION_USD × (VOL_REF / symbol_daily_vol), clamped to scale bounds.
 # Effect: BNB at 2.5% daily vol gets larger size; FIL at 6% gets smaller size.
-VOL_REF             = 0.04   # 4% daily — reference vol that anchors POSITION_USD
-VOL_LOOKBACK_HOURS  = 336    # 14 days × 24h for realized-vol estimate
-MIN_SIZE_SCALE      = 0.5    # never go below 0.5× POSITION_USD ($5)
-MAX_SIZE_SCALE      = 1.5    # never go above 1.5× POSITION_USD ($15)
+VOL_REF = 0.04  # 4% daily — reference vol that anchors POSITION_USD
+VOL_LOOKBACK_HOURS = 336  # 14 days × 24h for realized-vol estimate
+MIN_SIZE_SCALE = 0.5  # never go below 0.5× POSITION_USD ($5)
+MAX_SIZE_SCALE = 1.5  # never go above 1.5× POSITION_USD ($15)
 
 # ── Entry / exit thresholds ───────────────────────────────────────────────────
-Z_ENTRY         = -1.6       # entry: alt/BTC spread σ below mean  (was -2.0)
-Z_HARD_STOP     = -2.6       # hard stop: spread diverging further  (was -3.0)
-LOOKBACK_BARS   = 60         # bars for rolling z-score (60H = 2.5 days on 1H bars)
-TIME_STOP_HOURS = 24         # max hold time regardless of z-score
-BTC_RSI_MIN     = 35         # BTC RSI floor — skip entries in BTC freefall
-BTC_DOM_FAST_RISE = 0.008    # skip if BTC dominance rising >0.8% since last cycle
-                             # (units: fraction, NOT percentage points — 0.008 == 0.8%-pt
-                             #  jump in BTC.D since the previous cycle's cached reading).
+Z_ENTRY = -1.6  # entry: alt/BTC spread σ below mean  (was -2.0)
+Z_HARD_STOP = -2.6  # hard stop: spread diverging further  (was -3.0)
+LOOKBACK_BARS = 60  # bars for rolling z-score (60H = 2.5 days on 1H bars)
+TIME_STOP_HOURS = 24  # max hold time regardless of z-score
+BTC_RSI_MIN = 35  # BTC RSI floor — skip entries in BTC freefall
+BTC_DOM_FAST_RISE = 0.008  # skip if BTC dominance rising >0.8% since last cycle
+# (units: fraction, NOT percentage points — 0.008 == 0.8%-pt
+#  jump in BTC.D since the previous cycle's cached reading).
 
 # Persistent loss-leader denylist (B.2 patch, 2026-05-22).
 # Top-5 worst-PNL C3 symbols over the 9-day diagnostic window
 # (docs/known_issues/2026-05-21_strategy_c3_altcoin_reversion_diagnostic.md §5).
 # 0/8 SELL win rate combined; account for -$4.42 / -$5.63 = ~78% of total C3 loss.
 # Skip applies to ENTRY only — held positions can still exit cleanly.
-DENYLIST_SYMBOLS = frozenset({
-    "OP/USDT", "ARB/USDT", "PUMP/USDT", "FET/USDT", "LUNC/USDT",
-})
+DENYLIST_SYMBOLS = frozenset(
+    {
+        "OP/USDT",
+        "ARB/USDT",
+        "PUMP/USDT",
+        "FET/USDT",
+        "LUNC/USDT",
+    }
+)
 
 # Z_TARGET as a hard-cap for extreme overshoot. Most exits happen via trailing.
 # Set high enough that it rarely fires; primary exit is now trailing logic below.
-Z_TARGET        = 0.5        # extreme overshoot: take profit immediately
+Z_TARGET = 0.5  # extreme overshoot: take profit immediately
 
 # Trailing exit (v2 — replaces fixed-target exit):
 #   Track max_z during the hold. When max_z reaches Z_TRAILING_MIN (we've
@@ -100,22 +106,35 @@ Z_TARGET        = 0.5        # extreme overshoot: take profit immediately
 #   • Captures overshoots: max_z=+0.3, exit at -0.1 → 1.7z gross vs 1.6z fixed.
 #   • Protects partial wins: max_z=-0.2, exit at -0.6 → 1.0z vs 0 (never reverts to 0).
 #   • Reduces "almost-hit-target-then-reverted-to-stop" outcomes.
-Z_TRAILING_MIN  = -0.3       # arm trailing once max_z reaches this (80%+ reversion)
-Z_TRAILING_DROP = 0.4        # exit when current_z drops this much from max_z
+Z_TRAILING_MIN = -0.3  # arm trailing once max_z reaches this (80%+ reversion)
+Z_TRAILING_DROP = 0.4  # exit when current_z drops this much from max_z
 
 # Cooldown — after a stop-out (z_hard_stop or time_stop with negative pnl) the
 # symbol is benched for COOLDOWN_HOURS. Stops the LUNC→LUNC re-entry pattern.
-COOLDOWN_HOURS  = 24
+COOLDOWN_HOURS = 24
 # A win-exit (z_target or z_trailing) does NOT trigger cooldown.
 
 STATE_FILE = _ROOT / "data" / "altcoin_reversion_state.json"
 COOLDOWN_FILE = _ROOT / "data" / "altcoin_reversion_cooldown.json"
 BTC_DOM_CACHE_FILE = _ROOT / "data" / "c3_btc_dom_cache.json"
-DB_PATH    = str(_ROOT / "data" / "paper_trades.db")
+DB_PATH = str(_ROOT / "data" / "paper_trades.db")
+
+# ── Research-bed demotion (2026-06-10) ────────────────────────────────────────
+# C3 has NO validated edge (AUDIT/loss_attribution.md; program closed per
+# CLAUDE.md). Entries are permanently disabled; the manage-open branch still
+# runs so held positions exit cleanly and the book winds down to flat.
+# Module retained (not deleted) because backtest tooling + research provenance
+# import it. Tests may flip this attribute.
+ENTRIES_DISABLED = True
+
+# Honest-PnL cost layer (2026-06-10, AUDIT/structural_fixes.md FIX 1):
+# C3 fills are raw prices, so realized PnL is written net of fees + modeled
+# slippage on both legs (spot taker, analytics/cost_model.py rates).
+from analytics.cost_model import round_trip_cost as _round_trip_cost  # noqa: E402
 
 # Unified positions ledger wiring (Q1-Q4=A, ledger commit 3/3 2026-05-21).
 # Flag is read ONCE at module import per Q4=A; flips require container restart.
-from foundation import state_bridge as _state_bridge
+from foundation import state_bridge as _state_bridge  # noqa: E402
 
 STRATEGY_ID = "C3_altcoin_reversion"
 MARKET = "crypto"
@@ -125,8 +144,9 @@ _USE_UNIFIED_LEDGER = _state_bridge.is_unified_ledger_enabled()
 # ── State helpers ─────────────────────────────────────────────────────────────
 def _load_state() -> dict[str, Any]:
     if _USE_UNIFIED_LEDGER:
-        return _state_bridge.load_state(STRATEGY_ID, MARKET, STATE_FILE,
-                                        use_unified=True)
+        return _state_bridge.load_state(
+            STRATEGY_ID, MARKET, STATE_FILE, use_unified=True
+        )
     try:
         if STATE_FILE.exists():
             raw = STATE_FILE.read_text(encoding="utf-8")
@@ -138,8 +158,9 @@ def _load_state() -> dict[str, Any]:
 
 def _save_state(state: dict[str, Any]) -> None:
     if _USE_UNIFIED_LEDGER:
-        _state_bridge.save_state(STRATEGY_ID, MARKET, state, STATE_FILE,
-                                 use_unified=True)
+        _state_bridge.save_state(
+            STRATEGY_ID, MARKET, state, STATE_FILE, use_unified=True
+        )
         return
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE_FILE.with_suffix(".tmp")
@@ -190,7 +211,9 @@ def _is_cooling_down(symbol: str, cooldown: dict[str, str]) -> tuple[bool, float
         return False, 0.0
 
 
-def _set_cooldown(symbol: str, cooldown: dict[str, str], hours: float = COOLDOWN_HOURS) -> None:
+def _set_cooldown(
+    symbol: str, cooldown: dict[str, str], hours: float = COOLDOWN_HOURS
+) -> None:
     """Place symbol on the bench for `hours`. Modifies cooldown dict in place."""
     until = datetime.now(timezone.utc) + timedelta(hours=hours)
     cooldown[symbol] = until.isoformat()
@@ -238,7 +261,9 @@ def _prune_cooldown(cooldown: dict[str, str]) -> bool:
 
 
 # ── Vol estimation helper (2026-05-13 v2) ─────────────────────────────────────
-def _realized_daily_vol(df: pd.DataFrame, lookback_hours: int = VOL_LOOKBACK_HOURS) -> float | None:
+def _realized_daily_vol(
+    df: pd.DataFrame, lookback_hours: int = VOL_LOOKBACK_HOURS
+) -> float | None:
     """
     Estimate symbol's annualized-to-daily realized vol from 1H bars.
 
@@ -247,14 +272,14 @@ def _realized_daily_vol(df: pd.DataFrame, lookback_hours: int = VOL_LOOKBACK_HOU
     to no-adjustment.
     """
     try:
-        closes = df["close"].values[-(lookback_hours + 5):]
+        closes = df["close"].values[-(lookback_hours + 5) :]
         if len(closes) < 50:
             return None
         log_ret = np.diff(np.log(closes))
         hourly_std = float(np.std(log_ret, ddof=1))
         if hourly_std <= 0 or not np.isfinite(hourly_std):
             return None
-        return hourly_std * float(np.sqrt(24))   # scale hourly → daily
+        return hourly_std * float(np.sqrt(24))  # scale hourly → daily
     except Exception as exc:
         log.debug("[c3] realized_vol error: %s", exc)
         return None
@@ -287,7 +312,7 @@ def _compute_trade_size(
             scale = max(MIN_SIZE_SCALE, min(MAX_SIZE_SCALE, scale))
             size = base * scale
         else:
-            size = base   # no-adjustment fallback
+            size = base  # no-adjustment fallback
     else:  # PCT mode (legacy, no vol adjustment)
         size = capital * CAPITAL_PCT
 
@@ -313,16 +338,17 @@ def _rsi(series: pd.Series, period: int = 14) -> float:
     return float(100 - 100 / (1 + rs))
 
 
-def _compute_z_score(alt_df: pd.DataFrame, btc_df: pd.DataFrame,
-                     lookback: int = LOOKBACK_BARS) -> float | None:
+def _compute_z_score(
+    alt_df: pd.DataFrame, btc_df: pd.DataFrame, lookback: int = LOOKBACK_BARS
+) -> float | None:
     """
     Compute z-score of log(ALT_close / BTC_close) over the last `lookback` bars.
     Returns None if insufficient data.
     """
     try:
         # Align on timestamps
-        alt_closes = alt_df["close"].values[-lookback - 10:]
-        btc_closes = btc_df["close"].values[-lookback - 10:]
+        alt_closes = alt_df["close"].values[-lookback - 10 :]
+        btc_closes = btc_df["close"].values[-lookback - 10 :]
         n = min(len(alt_closes), len(btc_closes))
         if n < lookback:
             return None
@@ -335,8 +361,8 @@ def _compute_z_score(alt_df: pd.DataFrame, btc_df: pd.DataFrame,
 
         # Rolling z-score using last `lookback` bars
         window = ratio[-lookback:]
-        mean   = window.mean()
-        std    = window.std(ddof=1)
+        mean = window.mean()
+        std = window.std(ddof=1)
         if std < 1e-8:
             return None
 
@@ -383,7 +409,8 @@ def _entry_allowed(
     if btc_dom_delta is not None and btc_dom_delta >= (BTC_DOM_FAST_RISE * 100):
         log.info(
             "[c3] BTC.D rising fast (+%.3f pp >= %.3f pp) — skip entry",
-            btc_dom_delta, BTC_DOM_FAST_RISE * 100,
+            btc_dom_delta,
+            BTC_DOM_FAST_RISE * 100,
         )
         return False
 
@@ -426,14 +453,19 @@ def _should_exit(pos: dict, current_z: float) -> tuple[bool, str]:
 
 # ── DB record helper ──────────────────────────────────────────────────────────
 def _record(
-    symbol: str, action: str, price: float,
-    size_usd: float, pnl: float = 0.0,
+    symbol: str,
+    action: str,
+    price: float,
+    size_usd: float,
+    pnl: float = 0.0,
     entry_time: str | None = None,
     exit_time: str | None = None,
     pnl_pct: float | None = None,
     z_score: float = 0.0,
     exit_reason: str = "",
     shares: float | None = None,
+    gross_pnl: float | None = None,
+    costs: float | None = None,
 ) -> None:
     """Persist the trade row to paper_trades.db.
 
@@ -445,21 +477,24 @@ def _record(
     tests/test_orphan_position_prevention.py for the regression pin.
     """
     from execution.paper_trader import record_trade
+
     # SELL must record the same shares that the BUY row stored, otherwise
     # paper_trades SUM(BUY) - SUM(SELL) leaves residual dust per closed
     # position. Caller passes the entry-derived shares for SELL. BUY path
     # falls back to size_usd/price (price IS entry price there, correct).
     recorded_shares = (
-        float(shares)
-        if shares is not None
-        else round(size_usd / max(price, 1e-9), 8)
+        float(shares) if shares is not None else round(size_usd / max(price, 1e-9), 8)
     )
     record_trade(
-        db_path=DB_PATH, market="crypto", symbol=symbol,
+        db_path=DB_PATH,
+        market="crypto",
+        symbol=symbol,
         action=action,
         shares=recorded_shares,
-        price=price, signal="C3_ALT_REVERSION",
-        regime="RANGE_OR_BULL", risk_action="ALLOW",
+        price=price,
+        signal="C3_ALT_REVERSION",
+        regime="RANGE_OR_BULL",
+        risk_action="ALLOW",
         pnl=pnl,
         note=f"C3 {action} z={z_score:.3f}",
         strategy="C3_altcoin_reversion",
@@ -468,9 +503,15 @@ def _record(
         pnl_pct=pnl_pct,
         size_usd=round(size_usd, 4),
         notes={
-            "z_score":     round(z_score, 4),
+            "z_score": round(z_score, 4),
             "exit_reason": exit_reason,
-            "confidence":  0.70,   # C3 has no ML gate yet; fixed prior
+            "confidence": 0.70,  # C3 has no ML gate yet; fixed prior
+            # Honest-PnL audit trail: pnl column is NET; gross + costs here.
+            **(
+                {"gross_pnl": round(gross_pnl, 6), "costs": round(costs, 6)}
+                if gross_pnl is not None and costs is not None
+                else {}
+            ),
         },
     )
 
@@ -517,14 +558,23 @@ def run_altcoin_reversion_crypto(
                 apply_kill_switch_exit_gate as _exit_gate_check,
             )
         except Exception as exc:
-            log.warning("[c3] kill-switch helper unavailable (%s) — proceeding ungated", exc)
+            log.warning(
+                "[c3] kill-switch helper unavailable (%s) — proceeding ungated", exc
+            )
             _gate_check = None
             _exit_gate_check = None
-    state    = _load_state()
+    state = _load_state()
     cooldown = _load_cooldown()
-    changed  = False
+    changed = False
     cooldown_changed = _prune_cooldown(cooldown)
-    capital  = portfolio.get("capital", 0.0)
+    capital = portfolio.get("capital", 0.0)
+
+    if ENTRIES_DISABLED:
+        log.info(
+            "[c3] DEMOTED (research-bed 2026-06-10): entries disabled — "
+            "exit-only wind-down, %d open",
+            len(state),
+        )
 
     # BTC.D delta vs previous cycle (B.2 patch, 2026-05-22).
     # None semantics: first cycle after a (re)deploy, no cache → no delta →
@@ -546,6 +596,7 @@ def run_altcoin_reversion_crypto(
     # Detect BTC regime from live_paper_runner cache
     try:
         from trading.live_paper_runner import detect_regime
+
         btc_regime, _ = detect_regime(BTC_SYMBOL, btc_df)
     except Exception:
         btc_regime = "RANGE_BOUND"
@@ -563,7 +614,8 @@ def run_altcoin_reversion_crypto(
     if held_outside:
         log.info(
             "[c3] also evaluating %d held position(s) outside picks: %s",
-            len(held_outside), held_outside,
+            len(held_outside),
+            held_outside,
         )
     to_evaluate = list(universe) + held_outside
 
@@ -580,7 +632,7 @@ def run_altcoin_reversion_crypto(
                 continue
 
             current_price = float(alt_df["close"].iloc[-1])
-            current_z     = _compute_z_score(alt_df, btc_df)
+            current_z = _compute_z_score(alt_df, btc_df)
 
             if current_z is None:
                 log.debug("[c3] %s: z-score unavailable", sym)
@@ -610,19 +662,29 @@ def run_altcoin_reversion_crypto(
                     # docs/known_issues/2026-05-23_kill_trigger_investigation.md.
                     if _exit_gate_check is not None:
                         _allowed, _kill_reason = _exit_gate_check(
-                            "crypto", sym, current_price,
-                            full_positions, full_portfolio,
+                            "crypto",
+                            sym,
+                            current_price,
+                            full_positions,
+                            full_portfolio,
                         )
                         if not _allowed:
                             log.info(
                                 "[c3] %s: SKIP SELL — HALT_ALL active (%s)",
-                                sym, _kill_reason,
+                                sym,
+                                _kill_reason,
                             )
                             continue
 
-                    entry   = pos["entry_price"]
-                    size    = pos["size_usd"]
-                    pnl     = size * (current_price - entry) / entry
+                    entry = pos["entry_price"]
+                    size = pos["size_usd"]
+                    # Honest-PnL (2026-06-10, AUDIT/structural_fixes.md FIX 1):
+                    # the ledger row is NET of round-trip costs. C3 fills are
+                    # raw prices, so both fees AND modeled slippage apply.
+                    gross = size * (current_price - entry) / entry
+                    _exit_notional = size * current_price / max(entry, 1e-9)
+                    _costs = _round_trip_cost(size, _exit_notional).total
+                    pnl = gross - _costs
                     pnl_pct = round(pnl / size * 100, 4) if size else None
                     exit_ts = datetime.now(timezone.utc).isoformat()
 
@@ -633,20 +695,28 @@ def run_altcoin_reversion_crypto(
                     # than to lose track of it.
                     try:
                         _record(
-                            symbol=sym, action="SELL",
-                            price=current_price, size_usd=size,
-                            pnl=pnl, entry_time=pos["entry_ts"],
-                            exit_time=exit_ts, pnl_pct=pnl_pct,
-                            z_score=current_z, exit_reason=reason,
+                            symbol=sym,
+                            action="SELL",
+                            price=current_price,
+                            size_usd=size,
+                            pnl=pnl,
+                            entry_time=pos["entry_ts"],
+                            exit_time=exit_ts,
+                            pnl_pct=pnl_pct,
+                            z_score=current_z,
+                            exit_reason=reason,
                             shares=round(
                                 pos["size_usd"] / max(pos["entry_price"], 1e-9), 8
                             ),
+                            gross_pnl=gross,
+                            costs=_costs,
                         )
                     except Exception as exc:
                         log.error(
                             "[c3] %s: SELL ABORTED — record_trade failed (%s); "
                             "position held, will retry next cycle",
-                            sym, exc,
+                            sym,
+                            exc,
                         )
                         continue
 
@@ -655,8 +725,12 @@ def run_altcoin_reversion_crypto(
                     log.info(
                         "[c3] EXIT  %s  reason=%s  z=%.3f  "
                         "pnl=$%.4f (%.2f%%)  portfolio=$%.2f",
-                        sym, reason, current_z, pnl,
-                        pnl_pct or 0.0, capital,
+                        sym,
+                        reason,
+                        current_z,
+                        pnl,
+                        pnl_pct or 0.0,
+                        capital,
                     )
                     del state[sym]
                     open_count -= 1
@@ -665,27 +739,37 @@ def run_altcoin_reversion_crypto(
                     # 2026-05-13 v2: cooldown after stop-out (hard stop or
                     # money-losing time stop). Win exits (z_overshoot,
                     # z_trailing) do NOT cool the symbol down.
-                    is_stop_out = (
-                        reason == "z_hard_stop"
-                        or (reason.startswith("time_stop") and pnl < 0)
+                    is_stop_out = reason == "z_hard_stop" or (
+                        reason.startswith("time_stop") and pnl < 0
                     )
                     if is_stop_out:
                         _set_cooldown(sym, cooldown)
                         cooldown_changed = True
                         log.info(
                             "[c3] cooldown %s for %.0fh after %s (pnl=%.2f%%)",
-                            sym, COOLDOWN_HOURS, reason, pnl_pct or 0.0,
+                            sym,
+                            COOLDOWN_HOURS,
+                            reason,
+                            pnl_pct or 0.0,
                         )
                 else:
                     age_h = _age_hours(pos["entry_ts"])
-                    pct   = (current_price - pos["entry_price"]) / pos["entry_price"]
+                    pct = (current_price - pos["entry_price"]) / pos["entry_price"]
                     log.info(
                         "[c3] HOLD  %s  z=%.3f  pct=%+.2f%%  age=%.1fh",
-                        sym, current_z, pct * 100, age_h,
+                        sym,
+                        current_z,
+                        pct * 100,
+                        age_h,
                     )
 
             # ── Check entry ───────────────────────────────────────────────────
             else:
+                # Research-bed demotion (2026-06-10): no new entries, ever.
+                # Logged once per cycle above; skip silently per-symbol.
+                if ENTRIES_DISABLED:
+                    continue
+
                 # Persistent denylist (B.2 patch, 2026-05-22). Skip ENTRY
                 # only — already-open positions still take the manage-open
                 # branch above, so SELLs are unimpeded.
@@ -694,13 +778,22 @@ def run_altcoin_reversion_crypto(
                     continue
 
                 if current_z > Z_ENTRY:
-                    log.debug("[c3] %s: z=%.3f > %.1f threshold — no entry", sym, current_z, Z_ENTRY)
+                    log.debug(
+                        "[c3] %s: z=%.3f > %.1f threshold — no entry",
+                        sym,
+                        current_z,
+                        Z_ENTRY,
+                    )
                     continue
 
                 # 2026-05-13: cooldown check — skip symbols recently stopped out.
                 cooling, hours_left = _is_cooling_down(sym, cooldown)
                 if cooling:
-                    log.info("[c3] %s: SKIP entry — cooldown %.1fh remaining", sym, hours_left)
+                    log.info(
+                        "[c3] %s: SKIP entry — cooldown %.1fh remaining",
+                        sym,
+                        hours_left,
+                    )
                     continue
 
                 if not _entry_allowed(btc_df, btc_regime, btc_dom_delta=btc_dom_delta):
@@ -720,13 +813,17 @@ def run_altcoin_reversion_crypto(
                 # entry is skipped this cycle (re-evaluated next cycle).
                 if _gate_check is not None:
                     _allowed, _kill_reason = _gate_check(
-                        "crypto", sym, current_price,
-                        full_positions, full_portfolio,
+                        "crypto",
+                        sym,
+                        current_price,
+                        full_positions,
+                        full_portfolio,
                     )
                     if not _allowed:
                         log.info(
                             "[c3] %s: SKIP BUY — kill switch active (%s)",
-                            sym, _kill_reason,
+                            sym,
+                            _kill_reason,
                         )
                         continue
 
@@ -738,16 +835,20 @@ def run_altcoin_reversion_crypto(
                 # orphan position in altcoin_reversion_state.json.
                 try:
                     _record(
-                        symbol=sym, action="BUY",
-                        price=current_price, size_usd=trade_usd,
+                        symbol=sym,
+                        action="BUY",
+                        price=current_price,
+                        size_usd=trade_usd,
                         entry_time=entry_ts,
-                        z_score=current_z, exit_reason="",
+                        z_score=current_z,
+                        exit_reason="",
                     )
                 except Exception as exc:
                     log.error(
                         "[c3] %s: BUY ABORTED — record_trade failed (%s); "
                         "no state mutation, no capital deduction",
-                        sym, exc,
+                        sym,
+                        exc,
                     )
                     continue
 
@@ -755,11 +856,11 @@ def run_altcoin_reversion_crypto(
                 portfolio["capital"] = capital
                 state[sym] = {
                     "entry_price": current_price,
-                    "entry_ts":    entry_ts,
-                    "size_usd":    trade_usd,
-                    "entry_z":     current_z,
-                    "max_z":       current_z,        # v2: trailing-exit seed
-                    "symbol_vol":  symbol_vol,       # v2: stored for observability
+                    "entry_ts": entry_ts,
+                    "size_usd": trade_usd,
+                    "entry_z": current_z,
+                    "max_z": current_z,  # v2: trailing-exit seed
+                    "symbol_vol": symbol_vol,  # v2: stored for observability
                 }
                 open_count += 1
                 changed = True
@@ -768,8 +869,14 @@ def run_altcoin_reversion_crypto(
                 log.info(
                     "[c3] ENTRY %s  z=%.3f  price=%.4f  vol=%s  "
                     "size=$%.2f  open=%d/%d  portfolio=$%.2f",
-                    sym, current_z, current_price, vol_str, trade_usd,
-                    open_count, MAX_CONCURRENT, capital,
+                    sym,
+                    current_z,
+                    current_price,
+                    vol_str,
+                    trade_usd,
+                    open_count,
+                    MAX_CONCURRENT,
+                    capital,
                 )
 
         except Exception as exc:

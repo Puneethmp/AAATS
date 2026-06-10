@@ -28,26 +28,27 @@ from typing import NamedTuple
 import numpy as np
 import pandas as pd
 
-_ROOT        = Path(__file__).resolve().parent.parent
-_STATE_FILE  = _ROOT / "data" / "stat_arb_state.json"
+_ROOT = Path(__file__).resolve().parent.parent
+_STATE_FILE = _ROOT / "data" / "stat_arb_state.json"
 _HEALTH_FILE = _ROOT / "data" / "stat_arb_health.json"
-_DB_PATH     = str(_ROOT / "data" / "paper_trades.db")
+_DB_PATH = str(_ROOT / "data" / "paper_trades.db")
 
 log = logging.getLogger("trading.stat_arb")
 
 
 # == Pair definitions ==========================================================
 
+
 class Pair(NamedTuple):
-    long_sym:            str    # symbol to BUY when spread is low
-    short_sym:           str    # symbol to SELL when spread is low
-    market:              str    # "crypto" or "india"
-    window:              int    # rolling z-score window (bars)
-    entry_z:             float  # open position when |z| > this
-    exit_z:              float  # close position when |z| < this
-    alloc_pct:           float  # fraction of market capital per leg
-    time_stop_hours:     int    # max hours to hold before forced exit
-    hard_stop_z:         float  # force exit if |z| reaches this (spread blowout)
+    long_sym: str  # symbol to BUY when spread is low
+    short_sym: str  # symbol to SELL when spread is low
+    market: str  # "crypto" or "india"
+    window: int  # rolling z-score window (bars)
+    entry_z: float  # open position when |z| > this
+    exit_z: float  # close position when |z| < this
+    alloc_pct: float  # fraction of market capital per leg
+    time_stop_hours: int  # max hours to hold before forced exit
+    hard_stop_z: float  # force exit if |z| reaches this (spread blowout)
     min_correlation_14d: float  # skip entry if 14-day rolling corr < this
     cointegration_p_max: float  # skip entry if Engle-Granger p-value > this
 
@@ -55,15 +56,29 @@ class Pair(NamedTuple):
 PAIRS = [
     Pair("BTC/USDT", "ETH/USDT", "crypto", 30, 1.8, 0.35, 0.08, 48, 2.8, 0.80, 0.05),
     # India dormant until week 7+ (NSE module not live yet)
-    Pair("HDFCBANK", "ICICIBANK", "india",  40, 1.7, 0.30, 0.05,  5, 2.8, 0.70, 0.05),
+    Pair("HDFCBANK", "ICICIBANK", "india", 40, 1.7, 0.30, 0.05, 5, 2.8, 0.70, 0.05),
 ]
+
+
+# ── Research-bed demotion (2026-06-10) ────────────────────────────────────────
+# C1 has NO validated edge (AUDIT/loss_attribution.md; program closed per
+# CLAUDE.md). Entries are permanently disabled; exit paths (converge /
+# hard-stop / time-stop) still run so open pairs wind down to flat.
+# Module retained for backtest tooling + research provenance. Tests may
+# flip this attribute.
+ENTRIES_DISABLED = True
+
+# Honest-PnL cost layer (2026-06-10, AUDIT/structural_fixes.md FIX 1):
+# C1 legs fill at raw prices, so each leg's realized PnL is written net of
+# fees + modeled slippage (spot taker, analytics/cost_model.py rates).
+from analytics.cost_model import round_trip_cost as _round_trip_cost  # noqa: E402
 
 
 # == State management ==========================================================
 
 # Unified positions ledger wiring (Q1-Q4=A, ledger commit 3/3 2026-05-21).
 # Flag is read ONCE at module import per Q4=A; flips require container restart.
-from foundation import state_bridge as _state_bridge
+from foundation import state_bridge as _state_bridge  # noqa: E402
 
 STRATEGY_ID = "C1_stat_arb"
 MARKET = "crypto"
@@ -72,8 +87,9 @@ _USE_UNIFIED_LEDGER = _state_bridge.is_unified_ledger_enabled()
 
 def _load_state() -> dict:
     if _USE_UNIFIED_LEDGER:
-        return _state_bridge.load_state(STRATEGY_ID, MARKET, _STATE_FILE,
-                                        use_unified=True)
+        return _state_bridge.load_state(
+            STRATEGY_ID, MARKET, _STATE_FILE, use_unified=True
+        )
     if _STATE_FILE.exists():
         try:
             return json.loads(_STATE_FILE.read_text())
@@ -84,14 +100,16 @@ def _load_state() -> dict:
 
 def _save_state(state: dict) -> None:
     if _USE_UNIFIED_LEDGER:
-        _state_bridge.save_state(STRATEGY_ID, MARKET, state, _STATE_FILE,
-                                 use_unified=True)
+        _state_bridge.save_state(
+            STRATEGY_ID, MARKET, state, _STATE_FILE, use_unified=True
+        )
         return
     _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     _STATE_FILE.write_text(json.dumps(state, indent=2))
 
 
 # == Pair health cache (weekly Engle-Granger cadence) ==========================
+
 
 def _load_pair_health() -> dict:
     """Load cached pair health checks. Returns {} if missing or corrupt."""
@@ -123,6 +141,7 @@ def _is_health_stale(health_entry: dict, max_age_days: int = 7) -> bool:
 
 # == Statistical helpers ========================================================
 
+
 def _engle_granger_pvalue(a: pd.Series, b: pd.Series) -> float:
     """
     Run Engle-Granger cointegration test on series a and b.
@@ -131,10 +150,13 @@ def _engle_granger_pvalue(a: pd.Series, b: pd.Series) -> float:
     """
     try:
         from statsmodels.tsa.stattools import coint
+
         _, pvalue, _ = coint(a.dropna().values, b.dropna().values)
         return float(pvalue)
     except ImportError:
-        log.warning("statsmodels not installed -- cointegration check bypassed (p=0.0 assumed)")
+        log.warning(
+            "statsmodels not installed -- cointegration check bypassed (p=0.0 assumed)"
+        )
         return 0.0
     except Exception as exc:
         log.warning(f"Engle-Granger test failed: {exc} -- assuming p=0.0")
@@ -162,6 +184,7 @@ def _rolling_correlation(a: pd.Series, b: pd.Series, n: int) -> float | None:
 
 # == Spread computation =========================================================
 
+
 def _compute_spread_zscore(
     prices_a: pd.Series, prices_b: pd.Series, window: int
 ) -> tuple[float, float]:
@@ -180,16 +203,16 @@ def _compute_spread_zscore(
     if len(combined) < window + 2:
         return 0.0, 0.0
 
-    log_a  = np.log(combined["a"].clip(lower=1e-9))
-    log_b  = np.log(combined["b"].clip(lower=1e-9))
+    log_a = np.log(combined["a"].clip(lower=1e-9))
+    log_b = np.log(combined["b"].clip(lower=1e-9))
     spread = log_a - log_b
 
     rolling_mean = spread.rolling(window).mean()
-    rolling_std  = spread.rolling(window).std().clip(lower=1e-9)
+    rolling_std = spread.rolling(window).std().clip(lower=1e-9)
 
     spread_now = float(spread.iloc[-1])
-    mean_now   = float(rolling_mean.iloc[-1])
-    std_now    = float(rolling_std.iloc[-1])
+    mean_now = float(rolling_mean.iloc[-1])
+    std_now = float(rolling_std.iloc[-1])
 
     z = (spread_now - mean_now) / std_now
     return spread_now, z
@@ -197,11 +220,21 @@ def _compute_spread_zscore(
 
 # == Execution helpers ==========================================================
 
+
 def _record_stat_arb_trade(
-    market: str, symbol: str, action: str, shares: float,
-    price: float, pnl: float = 0.0, note: str = "",
-    confidence: float = 0.0, exit_reason: str = "",
-    entry_time: str | None = None, exit_time: str | None = None,
+    market: str,
+    symbol: str,
+    action: str,
+    shares: float,
+    price: float,
+    pnl: float = 0.0,
+    note: str = "",
+    confidence: float = 0.0,
+    exit_reason: str = "",
+    entry_time: str | None = None,
+    exit_time: str | None = None,
+    gross_pnl: float | None = None,
+    costs: float | None = None,
 ) -> None:
     """Write a stat-arb trade to the main paper_trades.db.
 
@@ -217,31 +250,48 @@ def _record_stat_arb_trade(
     needs a transaction wrapping both INSERTs, which requires a wider
     paper_trader API change."""
     from execution.paper_trader import record_trade
+
     size_usd = round(shares * price, 4)
-    pnl_pct  = round(pnl / size_usd * 100, 4) if size_usd and action == "SELL" else None
-    notes_d  = {"confidence": confidence}
+    pnl_pct = round(pnl / size_usd * 100, 4) if size_usd and action == "SELL" else None
+    notes_d = {"confidence": confidence}
     if exit_reason:
         notes_d["exit_reason"] = exit_reason
+    if gross_pnl is not None and costs is not None:
+        # Honest-PnL audit trail: pnl column is NET; gross + costs here.
+        notes_d["gross_pnl"] = round(gross_pnl, 6)
+        notes_d["costs"] = round(costs, 6)
     record_trade(
-        db_path=_DB_PATH, market=market, symbol=symbol,
-        action=action, shares=shares, price=price,
-        signal="STAT_ARB", regime="PAIRS", risk_action="ALLOW",
-        pnl=pnl if pnl != 0.0 else 0.0, note=note,
+        db_path=_DB_PATH,
+        market=market,
+        symbol=symbol,
+        action=action,
+        shares=shares,
+        price=price,
+        signal="STAT_ARB",
+        regime="PAIRS",
+        risk_action="ALLOW",
+        pnl=pnl if pnl != 0.0 else 0.0,
+        note=note,
         strategy="C1_stat_arb",
-        entry_time=entry_time, exit_time=exit_time,
-        pnl_pct=pnl_pct, notes=notes_d, size_usd=size_usd,
+        entry_time=entry_time,
+        exit_time=exit_time,
+        pnl_pct=pnl_pct,
+        notes=notes_d,
+        size_usd=size_usd,
     )
 
 
 def _send(msg: str, market: str) -> None:
     try:
         from observability.alerts import send_alert
+
         send_alert(msg, market=market)
     except Exception:
         pass
 
 
 # == Close helper (shared by converge / hard-stop / time-stop exits) ===========
+
 
 def _close_position(
     pair: Pair,
@@ -256,34 +306,62 @@ def _close_position(
     reason: str = "CONVERGE",
 ) -> tuple[dict, dict]:
     """Unified exit logic for all three exit conditions."""
-    side     = position["side"]
+    side = position["side"]
     shares_a = position["shares_a"]
     shares_b = position["shares_b"]
-    entry_a  = position["entry_price_a"]
-    entry_b  = position["entry_price_b"]
-    entry_z  = position["entry_z"]
+    entry_a = position["entry_price_a"]
+    entry_b = position["entry_price_b"]
+    entry_z = position["entry_z"]
 
     if side == "LONG_A":
-        pnl_a = (price_a - entry_a) * shares_a
-        pnl_b = (entry_b - price_b) * shares_b
+        gross_a = (price_a - entry_a) * shares_a
+        gross_b = (entry_b - price_b) * shares_b
     else:
-        pnl_a = (entry_a - price_a) * shares_a
-        pnl_b = (price_b - entry_b) * shares_b
+        gross_a = (entry_a - price_a) * shares_a
+        gross_b = (price_b - entry_b) * shares_b
 
-    total_pnl   = pnl_a + pnl_b
+    # Honest-PnL (2026-06-10, AUDIT/structural_fixes.md FIX 1): each leg is
+    # written net of its own round-trip costs (raw-price fills, so fees +
+    # modeled slippage on entry and exit notionals).
+    costs_a = _round_trip_cost(shares_a * entry_a, shares_a * price_a).total
+    costs_b = _round_trip_cost(shares_b * entry_b, shares_b * price_b).total
+    pnl_a = gross_a - costs_a
+    pnl_b = gross_b - costs_b
+
+    total_pnl = pnl_a + pnl_b
     entry_alloc = position.get("entry_alloc") or (shares_a * entry_a)
 
-    mkt_port["capital"]      += entry_alloc * 2 + total_pnl
+    mkt_port["capital"] += entry_alloc * 2 + total_pnl
     mkt_port["realized_pnl"] += total_pnl
     mkt_port["total_trades"] += 2
     if total_pnl >= 0:
-        mkt_port["wins"]   += 1
+        mkt_port["wins"] += 1
     else:
         mkt_port["losses"] += 1
 
     note = f"stat_arb EXIT {reason} {side} | z={z:.3f} | entry_z={entry_z:.3f}"
-    _record_stat_arb_trade(pair.market, pair.long_sym, "SELL", shares_a, price_a, pnl=pnl_a, note=note)
-    _record_stat_arb_trade(pair.market, pair.short_sym, "BUY",  shares_b, price_b, pnl=pnl_b, note=note)
+    _record_stat_arb_trade(
+        pair.market,
+        pair.long_sym,
+        "SELL",
+        shares_a,
+        price_a,
+        pnl=pnl_a,
+        note=note,
+        gross_pnl=gross_a,
+        costs=costs_a,
+    )
+    _record_stat_arb_trade(
+        pair.market,
+        pair.short_sym,
+        "BUY",
+        shares_b,
+        price_b,
+        pnl=pnl_b,
+        note=note,
+        gross_pnl=gross_b,
+        costs=costs_b,
+    )
 
     icon = "GREEN" if total_pnl >= 0 else "RED"
     log.info(
@@ -300,6 +378,7 @@ def _close_position(
 
 
 # == Core pair runner ===========================================================
+
 
 def _run_pair(
     pair: Pair,
@@ -331,13 +410,13 @@ def _run_pair(
         Parity with C3 (altcoin_reversion.py) and C6 (bollinger_range.py).
         See docs/known_issues/2026-05-23_kill_trigger_investigation.md.
     """
-    key      = f"{pair.long_sym}_{pair.short_sym}"
+    key = f"{pair.long_sym}_{pair.short_sym}"
     mkt_port = portfolio[pair.market]
-    capital  = mkt_port["capital"]
+    capital = mkt_port["capital"]
 
     spread, z = _compute_spread_zscore(prices_a, prices_b, pair.window)
-    price_a   = float(prices_a.iloc[-1])
-    price_b   = float(prices_b.iloc[-1])
+    price_a = float(prices_a.iloc[-1])
+    price_b = float(prices_b.iloc[-1])
 
     log.info(
         f"  [{pair.long_sym}/{pair.short_sym}] "
@@ -346,7 +425,7 @@ def _run_pair(
     )
 
     position = state.get(key)
-    alloc    = capital * pair.alloc_pct
+    alloc = capital * pair.alloc_pct
 
     # -- HEALTH GATE: refresh weekly Engle-Granger + correlation cache --------
     health_entry = health.get(key, {})
@@ -364,12 +443,14 @@ def _run_pair(
                 f"Retry next cycle."
             )
         else:
-            eg_p    = _engle_granger_pvalue(prices_a, prices_b)
-            healthy = eg_p < pair.cointegration_p_max and corr14 >= pair.min_correlation_14d
+            eg_p = _engle_granger_pvalue(prices_a, prices_b)
+            healthy = (
+                eg_p < pair.cointegration_p_max and corr14 >= pair.min_correlation_14d
+            )
             health[key] = {
-                "eg_pvalue":    eg_p,
-                "corr_14d":     corr14,
-                "checked_at":   datetime.now(timezone.utc).isoformat(),
+                "eg_pvalue": eg_p,
+                "corr_14d": corr14,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
                 "pair_healthy": healthy,
             }
             log.info(
@@ -378,8 +459,8 @@ def _run_pair(
             )
             health_entry = health[key]
 
-    pair_healthy  = health_entry.get("pair_healthy", True)
-    cached_eg_p   = health_entry.get("eg_pvalue", 0.0)
+    pair_healthy = health_entry.get("pair_healthy", True)
+    cached_eg_p = health_entry.get("eg_pvalue", 0.0)
     cached_corr14 = health_entry.get("corr_14d", 1.0)
 
     # -- Kill-switch EXIT gate (session 8, 2026-05-23) ------------------------
@@ -391,8 +472,11 @@ def _run_pair(
         if exit_gate_check is None:
             return True
         _allowed, _kill_reason = exit_gate_check(
-            pair.market, pair.long_sym, price_a,
-            full_positions, full_portfolio,
+            pair.market,
+            pair.long_sym,
+            price_a,
+            full_positions,
+            full_portfolio,
         )
         if not _allowed:
             log.info(f"[c1] {key}: SKIP EXIT — HALT_ALL active ({_kill_reason})")
@@ -402,29 +486,70 @@ def _run_pair(
     if position and abs(z) < pair.exit_z:
         if not _exit_gate_ok():
             return state, health
-        return _close_position(pair, key, z, price_a, price_b, position, mkt_port, state, health, reason="CONVERGE")
+        return _close_position(
+            pair,
+            key,
+            z,
+            price_a,
+            price_b,
+            position,
+            mkt_port,
+            state,
+            health,
+            reason="CONVERGE",
+        )
 
     # -- EXIT: hard stop (spread blowing out) ---------------------------------
     if position and abs(z) >= pair.hard_stop_z:
         log.warning(f"  HARD_STOP {key}: |z|={abs(z):.3f} >= {pair.hard_stop_z}")
         if not _exit_gate_ok():
             return state, health
-        return _close_position(pair, key, z, price_a, price_b, position, mkt_port, state, health, reason="HARD_STOP")
+        return _close_position(
+            pair,
+            key,
+            z,
+            price_a,
+            price_b,
+            position,
+            mkt_port,
+            state,
+            health,
+            reason="HARD_STOP",
+        )
 
     # -- EXIT: time stop (max hold exceeded) ----------------------------------
     if position:
         entry_time = datetime.fromisoformat(position["entry_time"])
-        age_hours  = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
+        age_hours = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
         if age_hours >= pair.time_stop_hours:
             log.warning(
                 f"  TIME_STOP {key}: held {age_hours:.1f}H >= {pair.time_stop_hours}H"
             )
             if not _exit_gate_ok():
                 return state, health
-            return _close_position(pair, key, z, price_a, price_b, position, mkt_port, state, health, reason="TIME_STOP")
+            return _close_position(
+                pair,
+                key,
+                z,
+                price_a,
+                price_b,
+                position,
+                mkt_port,
+                state,
+                health,
+                reason="TIME_STOP",
+            )
 
     # -- ENTRY: no position, spread stretched, health gate passes -------------
     if not position and abs(z) > pair.entry_z:
+        # Research-bed demotion (2026-06-10): no new pair entries, ever.
+        if ENTRIES_DISABLED:
+            log.info(
+                f"  [c1] {key}: SKIP ENTRY — demoted to no-trade "
+                f"(research-bed 2026-06-10), z={z:.3f}"
+            )
+            return state, health
+
         if not pair_healthy:
             log.info(
                 f"  SKIP ENTRY {key}: health gate failed "
@@ -440,40 +565,49 @@ def _run_pair(
         # mutation, DB write, or capital adjustment. Parity with C3/C6.
         if gate_check is not None:
             _allowed, _kill_reason = gate_check(
-                pair.market, pair.long_sym, price_a,
-                full_positions, full_portfolio,
+                pair.market,
+                pair.long_sym,
+                price_a,
+                full_positions,
+                full_portfolio,
             )
             if not _allowed:
-                log.info(f"[c1] {key}: SKIP ENTRY — kill switch active ({_kill_reason})")
+                log.info(
+                    f"[c1] {key}: SKIP ENTRY — kill switch active ({_kill_reason})"
+                )
                 return state, health
 
         shares_a = alloc / max(price_a, 1e-9)
         shares_b = alloc / max(price_b, 1e-9)
-        side     = "SHORT_A" if z > 0 else "LONG_A"
+        side = "SHORT_A" if z > 0 else "LONG_A"
 
         state[key] = {
-            "side":          side,
-            "shares_a":      shares_a,
-            "shares_b":      shares_b,
+            "side": side,
+            "shares_a": shares_a,
+            "shares_b": shares_b,
             "entry_price_a": price_a,
             "entry_price_b": price_b,
-            "entry_z":       z,
-            "entry_time":    datetime.now(timezone.utc).isoformat(),
-            "entry_alloc":   alloc,
+            "entry_z": z,
+            "entry_time": datetime.now(timezone.utc).isoformat(),
+            "entry_alloc": alloc,
         }
-        mkt_port["capital"]      -= alloc * 2
+        mkt_port["capital"] -= alloc * 2
         mkt_port["total_trades"] += 2
 
         _record_stat_arb_trade(
-            pair.market, pair.long_sym,
+            pair.market,
+            pair.long_sym,
             "BUY" if side == "LONG_A" else "SELL",
-            shares_a, price_a,
+            shares_a,
+            price_a,
             note=f"stat_arb ENTRY {side} | z={z:.3f} | alloc={alloc:.2f}",
         )
         _record_stat_arb_trade(
-            pair.market, pair.short_sym,
+            pair.market,
+            pair.short_sym,
             "SELL" if side == "LONG_A" else "BUY",
-            shares_b, price_b,
+            shares_b,
+            price_b,
             note=f"stat_arb ENTRY {side} | z={z:.3f} | alloc={alloc:.2f}",
         )
 
@@ -494,6 +628,7 @@ def _run_pair(
 
 
 # == Public runners =============================================================
+
 
 def run_stat_arb_crypto(
     portfolio: dict,
@@ -521,12 +656,14 @@ def run_stat_arb_crypto(
                 apply_kill_switch_exit_gate as _exit_gate_check,
             )
         except Exception as exc:
-            log.warning(f"[c1] kill-switch helper unavailable ({exc}) — proceeding ungated")
+            log.warning(
+                f"[c1] kill-switch helper unavailable ({exc}) — proceeding ungated"
+            )
             _gate_check = None
             _exit_gate_check = None
 
-    state        = _load_state()
-    health       = _load_pair_health()
+    state = _load_state()
+    health = _load_pair_health()
     crypto_pairs = [p for p in PAIRS if p.market == "crypto"]
 
     for pair in crypto_pairs:
@@ -540,18 +677,34 @@ def run_stat_arb_crypto(
                 log.debug(f"  Insufficient bars for {pair.long_sym}/{pair.short_sym}")
                 continue
 
-            prices_a = df_a.set_index("timestamp")["close"] if "timestamp" in df_a.columns else df_a["close"]
-            prices_b = df_b.set_index("timestamp")["close"] if "timestamp" in df_b.columns else df_b["close"]
+            prices_a = (
+                df_a.set_index("timestamp")["close"]
+                if "timestamp" in df_a.columns
+                else df_a["close"]
+            )
+            prices_b = (
+                df_b.set_index("timestamp")["close"]
+                if "timestamp" in df_b.columns
+                else df_b["close"]
+            )
 
             state, health = _run_pair(
-                pair, prices_a, prices_b, portfolio, state, health,
+                pair,
+                prices_a,
+                prices_b,
+                portfolio,
+                state,
+                health,
                 gate_check=_gate_check,
                 exit_gate_check=_exit_gate_check,
                 full_positions=full_positions,
                 full_portfolio=full_portfolio,
             )
         except Exception as exc:
-            log.error(f"  Stat-arb crypto {pair.long_sym}/{pair.short_sym}: {exc}", exc_info=True)
+            log.error(
+                f"  Stat-arb crypto {pair.long_sym}/{pair.short_sym}: {exc}",
+                exc_info=True,
+            )
 
     _save_state(state)
     _save_pair_health(health)
@@ -569,24 +722,24 @@ def run_stat_arb_india(
         fetch_hourly_fn: Callable(symbol, token, exchange) -> pd.DataFrame | None
     """
     _TOKEN_MAP = {
-        "HDFCBANK":  ("1333", "NSE"),
+        "HDFCBANK": ("1333", "NSE"),
         "ICICIBANK": ("4963", "NSE"),
     }
 
-    state       = _load_state()
-    health      = _load_pair_health()
+    state = _load_state()
+    health = _load_pair_health()
     india_pairs = [p for p in PAIRS if p.market == "india"]
 
     for pair in india_pairs:
         try:
-            token_a, exch_a = _TOKEN_MAP.get(pair.long_sym,  ("", "NSE"))
+            token_a, exch_a = _TOKEN_MAP.get(pair.long_sym, ("", "NSE"))
             token_b, exch_b = _TOKEN_MAP.get(pair.short_sym, ("", "NSE"))
 
             if not token_a or not token_b:
                 log.warning(f"  Missing token for {pair.long_sym} or {pair.short_sym}")
                 continue
 
-            df_a = fetch_hourly_fn(pair.long_sym,  token_a, exch_a)
+            df_a = fetch_hourly_fn(pair.long_sym, token_a, exch_a)
             df_b = fetch_hourly_fn(pair.short_sym, token_b, exch_b)
 
             if df_a is None or df_b is None:
@@ -599,15 +752,21 @@ def run_stat_arb_india(
             prices_a = df_a["close"] if "close" in df_a.columns else df_a.iloc[:, 4]
             prices_b = df_b["close"] if "close" in df_b.columns else df_b.iloc[:, 4]
 
-            state, health = _run_pair(pair, prices_a, prices_b, portfolio, state, health)
+            state, health = _run_pair(
+                pair, prices_a, prices_b, portfolio, state, health
+            )
         except Exception as exc:
-            log.error(f"  Stat-arb India {pair.long_sym}/{pair.short_sym}: {exc}", exc_info=True)
+            log.error(
+                f"  Stat-arb India {pair.long_sym}/{pair.short_sym}: {exc}",
+                exc_info=True,
+            )
 
     _save_state(state)
     _save_pair_health(health)
 
 
 # == Reporting ==================================================================
+
 
 def get_open_stat_arb_positions() -> dict:
     """Return current open stat-arb positions for reporting."""
@@ -616,22 +775,24 @@ def get_open_stat_arb_positions() -> dict:
 
 def get_stat_arb_summary(portfolio: dict) -> dict:
     """Return position count, unrealized P&L, and health metadata for dashboard."""
-    state  = _load_state()
+    state = _load_state()
     health = _load_pair_health()
     summary = {
-        "open_pairs":     len(state),
+        "open_pairs": len(state),
         "unrealized_pnl": 0.0,
-        "positions":      [],
+        "positions": [],
     }
     for key, pos in state.items():
         h = health.get(key, {})
-        summary["positions"].append({
-            "pair":       key,
-            "side":       pos.get("side"),
-            "entry_z":    pos.get("entry_z"),
-            "entry_time": pos.get("entry_time"),
-            "eg_pvalue":  h.get("eg_pvalue"),
-            "corr_14d":   h.get("corr_14d"),
-            "pair_healthy": h.get("pair_healthy"),
-        })
+        summary["positions"].append(
+            {
+                "pair": key,
+                "side": pos.get("side"),
+                "entry_z": pos.get("entry_z"),
+                "entry_time": pos.get("entry_time"),
+                "eg_pvalue": h.get("eg_pvalue"),
+                "corr_14d": h.get("corr_14d"),
+                "pair_healthy": h.get("pair_healthy"),
+            }
+        )
     return summary

@@ -123,6 +123,16 @@ INITIAL_CAPITAL = {
     "crypto": 110.0,
 }  # India halted (capital=0); Crypto budget=$110
 
+# ── Research-bed posture: NO NEW ENTRIES (2026-06-10 audit deploy) ───────────
+# The directional-crypto edge program is terminally closed (CLAUDE.md; final
+# arbiter: docs/decisions/2026-05-30_track_f_walk_forward_FINAL_perp_edge_NOGO.md).
+# Per AUDIT/structural_fixes.md [STAGED], every strategy is demoted to
+# no-trade: BUY emissions are blocked here (execute() entry branch) and in
+# C1/C3/C6 (each module has its own ENTRIES_DISABLED guard). Open positions
+# still mark-to-market and EXIT via SELL signals / ATR stops / per-trade
+# stops so the book winds down to flat. Tests may flip this attribute.
+ENTRIES_DISABLED = True
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
@@ -1220,7 +1230,6 @@ def execute(
     positions: dict,
     portfolio: dict,
     sector: str = "",
-    ml_size_scale: float = 1.0,  # XGBoost confidence multiplier (0.5 or 1.0)
     strategy: str = "",  # AAATS strategy ID for observability
 ) -> None:
     mkt_pos = positions[market]
@@ -1240,6 +1249,12 @@ def execute(
     # and SELL signals even during a market-level drawdown halt or operator
     # halt.
     if signal == "BUY":
+        # Research-bed demotion (2026-06-10): block ALL new entries before
+        # any gate/sizing work. SELLs and MTM continue below so the open
+        # book winds down. See ENTRIES_DISABLED docstring at module top.
+        if ENTRIES_DISABLED and symbol not in mkt_pos:
+            log.info(f"    ⛔ ENTRIES_DISABLED — skip BUY {symbol} (research-bed)")
+            return
         allowed, _halt_reason = apply_kill_switch_gate(
             market,
             symbol,
@@ -1305,11 +1320,6 @@ def execute(
             log.warning(f"    🛑 Risk gate blocked {symbol}: {gate.reason}")
             return
 
-        # ML confidence scaling (0.5 = half size when model is uncertain)
-        if ml_size_scale < 1.0:
-            shares *= ml_size_scale
-            log.info(f"    🤖 ML scale={ml_size_scale:.1f} → {shares:.6f} sh")
-
         fill = _fill_price(last_price, "BUY", market, features)
         value = shares * fill
 
@@ -1324,13 +1334,12 @@ def execute(
             signal=signal,
             regime=regime,
             risk_action="ALLOW",
-            note=f"atr={atr:.4f} kelly_w={win_rate:.2f} ml_scale={ml_size_scale:.1f}",
+            note=f"atr={atr:.4f} kelly_w={win_rate:.2f}",
             strategy=strategy or f"{market}_directional",
             entry_time=_entry_ts,
             size_usd=round(value, 4),
             notes={
                 "confidence": round(confidence, 4),
-                "ml_scale": ml_size_scale,
                 "atr_entry": round(atr, 6),
                 "risk_pct": round(size_res.risk_pct, 4),
             },
@@ -1364,11 +1373,20 @@ def execute(
         pos = mkt_pos.pop(symbol)
         sh = pos["shares"]
         fill = _fill_price(last_price, "SELL", market, features)
-        pnl = (fill - pos["entry_price"]) * sh
+        gross_pnl = (fill - pos["entry_price"]) * sh
         value = fill * sh
 
+        # Honest-PnL (2026-06-10): ledger writes are net of exchange fees on
+        # BOTH legs. Slippage is already in the fill via _fill_price(), so
+        # only fees are added here (slippage_bps would double-count).
+        from analytics.cost_model import fee_usd as _fee_usd
+
+        _entry_notional = pos["entry_price"] * sh
+        _fees = _fee_usd(_entry_notional) + _fee_usd(value)
+        pnl = gross_pnl - _fees
+
         _exit_ts = datetime.now(timezone.utc).isoformat()
-        _pnl_pct = round(pnl / max(pos["entry_price"] * sh, 1e-9) * 100, 4)
+        _pnl_pct = round(pnl / max(_entry_notional, 1e-9) * 100, 4)
         record_trade(
             db_path=DB_PATH,
             market=market,
@@ -1389,6 +1407,8 @@ def execute(
             notes={
                 "confidence": round(confidence, 4),
                 "exit_reason": "signal",
+                "gross_pnl": round(gross_pnl, 6),
+                "costs": round(_fees, 6),
                 "r_multiple": round(
                     _pnl_pct / max(pos.get("risk_pct", 0.01) * 100, 0.01), 2
                 ),
@@ -1397,11 +1417,13 @@ def execute(
         sizer.remove_position_heat(pos.get("risk_pct", 0.01))
 
         # T+1 settlement: lock proceeds for next trading day (India NSE only)
+        # Proceeds are net of round-trip fees so capital stays consistent
+        # with the net `pnl` booked to the ledger (L11 invariant).
         if market == "india":
-            _queue_settlement(portfolio, market, value)
+            _queue_settlement(portfolio, market, value - _fees)
             # realized PnL is booked now; only capital availability is deferred
         else:
-            mkt_port["capital"] += value
+            mkt_port["capital"] += value - _fees
 
         mkt_port["realized_pnl"] += pnl
         mkt_port["total_trades"] += 1
@@ -1417,10 +1439,10 @@ def execute(
         icon = "🟢" if pnl >= 0 else "🔴"
         log.info(
             f"  {icon} SELL {symbol} @ {fill:.4f} "
-            f"| PnL={pnl:+.4f} ({pnl/(pos['entry_price']*sh)*100:+.2f}%)"
+            f"| PnL={pnl:+.4f} ({pnl / (pos['entry_price'] * sh) * 100:+.2f}%)"
         )
         send_alert(
-            f"{icon} SELL {symbol} @ {fill:.4f} " f"| PnL={pnl:+.4f} | regime={regime}",
+            f"{icon} SELL {symbol} @ {fill:.4f} | PnL={pnl:+.4f} | regime={regime}",
             market=market,
         )
 
@@ -1492,143 +1514,12 @@ def _binance_healthy() -> bool:
         return False
 
 
-# ── ML confidence scoring (XGBoost) ──────────────────────────────────────────
-
-_ml_ensemble: dict | None = None
-
-
-def _init_ml_ensemble() -> dict | None:
-    """
-    Load or train the XGBoost ensemble.
-    Order of preference:
-      1. Load saved models from data/ml/ if present and < 7 days old (real-bar trained)
-      2. Train fresh from real history via ml.train_from_history (writes saved models)
-      3. Synthetic warm-start fallback (lets the engine still run if 1+2 fail)
-    Returns None only if xgboost itself is unavailable.
-    """
-    # ── 1. Try loading saved real-bar models ──────────────────────────────────
-    try:
-        from ml.train_from_history import load_saved_models
-
-        saved = load_saved_models(max_age_days=7)
-        if saved:
-            import json as _json
-            from pathlib import Path as _Path
-
-            meta_path = _Path(DB_PATH).parent / "ml" / "training_meta.json"
-            try:
-                meta = _json.loads(meta_path.read_text())
-                trained_at = meta.get("trained_at", "?")
-                log.info(
-                    f"✅ Loaded saved XGBoost models (trained: {trained_at}) — "
-                    f"val_acc india={meta.get('val_acc_india')} crypto={meta.get('val_acc_crypto')}"
-                )
-            except Exception:
-                log.info("✅ Loaded saved XGBoost models")
-            return saved
-    except Exception as exc:
-        log.warning(f"saved-model load skipped: {exc}")
-
-    # ── 2. Train fresh from real history (writes saved models for next time) ──
-    try:
-        from ml.train_from_history import train_all_markets, load_saved_models
-
-        log.info("Training new XGBoost models from history (real bars)...")
-        meta = train_all_markets(min_samples=500)
-        # Reload from disk so we get the persisted version
-        saved = load_saved_models(max_age_days=7)
-        if saved:
-            log.info(
-                f"✅ Real-history training complete — "
-                f"val_acc india={meta.get('val_acc_india')} crypto={meta.get('val_acc_crypto')}"
-            )
-            return saved
-    except Exception as exc:
-        log.warning(f"real-history training failed (will fall back): {exc}")
-
-    # ── 3. Synthetic fallback (last resort) ───────────────────────────────────
-    try:
-        from ml.xgboost_ensemble import build_ensemble, train_all
-
-        ensemble = build_ensemble()
-        train_all(ensemble)
-        log.info("⚠️  XGBoost ensemble ready (SYNTHETIC fallback — not predictive)")
-        return ensemble
-    except Exception as exc:
-        log.warning(f"XGBoost ensemble unavailable (non-fatal): {exc}")
-        return None
-
-
-def _score_ml(features: pd.DataFrame, market: str) -> float:
-    """
-    Return ML confidence [0, 1] for the latest bar.
-    Maps feature names to what XGBoost was trained on.
-    Returns 0.55 (neutral pass-through) if model not available.
-    """
-    global _ml_ensemble
-    if _ml_ensemble is None:
-        return 0.55  # neutral — don't block trades when model missing
-
-    try:
-        from ml.xgboost_ensemble import score_signal
-
-        last = features.iloc[-1]
-
-        # Build feature row — map compute_features() names to model feature names
-        row: dict[str, float] = {}
-        col = lambda k, d=0.0: float(last.get(k, d) or d)  # noqa: E731
-
-        # Returns (compute_features uses "returns", model expects "return_Nd")
-        close_arr = features["close"].values
-        if len(close_arr) >= 2:
-            row["returns_1d"] = row["return_1d"] = float(
-                (close_arr[-1] - close_arr[-2]) / max(close_arr[-2], 1e-9)
-            )
-        if len(close_arr) >= 6:
-            row["returns_5d"] = row["return_5d"] = float(
-                (close_arr[-1] - close_arr[-6]) / max(close_arr[-6], 1e-9)
-            )
-        if len(close_arr) >= 21:
-            row["returns_20d"] = row["return_20d"] = float(
-                (close_arr[-1] - close_arr[-21]) / max(close_arr[-21], 1e-9)
-            )
-
-        row["rsi_14"] = col("rsi_14", 50.0)
-        row["macd"] = col("macd", 0.0)
-        row["adx_14"] = col("adx_14", 25.0)
-        row["atr_14"] = col("atr_14", 0.01)
-        row["atr_pct"] = col("atr_14", 0.01) / max(float(last.get("close", 1)), 1e-9)
-        row["india_vix"] = col("india_vix", 15.0)
-        row["vol_ratio"] = row["vol_ratio_20"] = col("vol_ratio_20", 1.0)
-
-        # EMA spread %  = (close - ema50) / ema50
-        ema50 = col("ema_50", float(last.get("close", 1)))
-        price = col("close", 1.0)
-        row["ema_spread_pct"] = (price - ema50) / max(ema50, 1e-9)
-
-        row["hist_vol_20"] = (
-            float(features["close"].pct_change().dropna().tail(20).std())
-            if len(features) >= 20
-            else 0.02
-        )
-
-        confidence = score_signal(market, row, _ml_ensemble)
-        log.debug(f"    🤖 ML confidence={confidence:.3f} (market={market})")
-        return confidence
-
-    except Exception as exc:
-        log.debug(f"    ML scoring failed (non-fatal): {exc}")
-        return 0.55
-
-
-def _ml_position_scale(confidence: float) -> float:
-    """Map ML confidence to position size multiplier (1.0 / 0.5 / 0.0)."""
-    try:
-        from ml.xgboost_ensemble import position_scale_from_confidence
-
-        return position_scale_from_confidence(confidence)
-    except Exception:
-        return 1.0  # pass-through if model unavailable
+# ── ML confidence scoring — REMOVED 2026-06-10 ─────────────────────────────────────────
+# The XGBoost confidence gate (_score_ml/_ml_position_scale/_init_ml_ensemble)
+# was removed per AUDIT/structural_fixes.md FIX 2: the model was stale
+# (33.9d old), near-random (val_acc 0.5508) and bypassed by C3/C6 — the
+# strategies producing nearly all trades. ml/model_health.py remains the
+# guard that would catch a silently-stale model if the gate ever returns.
 
 
 # ── Sentiment: Fear & Greed index (crypto only) ───────────────────────────────
@@ -1742,11 +1633,19 @@ def _check_trailing_stops(
         price = last_prices[sym]
         feat = features_map.get(sym)
         fill = _fill_price(price, "SELL", market, feat)
-        pnl = (fill - pos["entry_price"]) * sh
+        gross_pnl = (fill - pos["entry_price"]) * sh
         value = fill * sh
 
+        # Honest-PnL (2026-06-10): net of round-trip exchange fees; slippage
+        # already modeled in the fill (see execute() SELL branch).
+        from analytics.cost_model import fee_usd as _fee_usd
+
+        _entry_notional = pos["entry_price"] * sh
+        _fees = _fee_usd(_entry_notional) + _fee_usd(value)
+        pnl = gross_pnl - _fees
+
         _atr_exit_ts = datetime.now(timezone.utc).isoformat()
-        _atr_pnl_pct = round(pnl / max(pos["entry_price"] * sh, 1e-9) * 100, 4)
+        _atr_pnl_pct = round(pnl / max(_entry_notional, 1e-9) * 100, 4)
         record_trade(
             db_path=DB_PATH,
             market=market,
@@ -1767,6 +1666,8 @@ def _check_trailing_stops(
             notes={
                 "exit_reason": "atr_trailing_stop",
                 "confidence": 0.0,
+                "gross_pnl": round(gross_pnl, 6),
+                "costs": round(_fees, 6),
                 "r_multiple": round(
                     _atr_pnl_pct / max(pos.get("risk_pct", 0.01) * 100, 0.01), 2
                 ),
@@ -1775,9 +1676,9 @@ def _check_trailing_stops(
         sizer.remove_position_heat(pos.get("risk_pct", 0.01))
 
         if market == "india":
-            _queue_settlement(portfolio, market, value)
+            _queue_settlement(portfolio, market, value - _fees)
         else:
-            mkt_port["capital"] += value
+            mkt_port["capital"] += value - _fees
 
         mkt_port["realized_pnl"] += pnl
         mkt_port["total_trades"] += 1
@@ -1886,12 +1787,9 @@ def run_india(positions: dict, portfolio: dict) -> None:
             log.info("  [%s] price=%.2f", sym, price)
             signal, regime, conf = generate_signal(sym, feat, "india")
 
-            # ML confidence gate
-            ml_conf = _score_ml(feat, "india")
-            ml_scale = _ml_position_scale(ml_conf)
-            if ml_scale == 0.0:
-                log.info("    ML gate: conf=%.3f -> SKIP %s", ml_conf, signal)
-                continue
+            # ML gate REMOVED 2026-06-10 (AUDIT/structural_fixes.md FIX 2):
+            # model was stale (33.9d) + near-random (val_acc 0.55) and the
+            # gate never covered C3/C6 anyway. Dead weight per mandate.
 
             execute(
                 market="india",
@@ -1904,7 +1802,6 @@ def run_india(positions: dict, portfolio: dict) -> None:
                 positions=positions,
                 portfolio=portfolio,
                 sector=sector,
-                ml_size_scale=ml_scale,
             )
         except Exception as exc:
             log.error("  NSE %s error: %s", sym, exc, exc_info=True)
@@ -2072,12 +1969,9 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
             # Fear & Greed sentiment gate
             signal = _crypto_sentiment_gate(signal)
 
-            # ML confidence gate
-            ml_conf = _score_ml(feat, "crypto")
-            ml_scale = _ml_position_scale(ml_conf)
-            if ml_scale == 0.0:
-                log.info("    ML gate: conf=%.3f -> SKIP %s", ml_conf, signal)
-                continue
+            # ML gate REMOVED 2026-06-10 (AUDIT/structural_fixes.md FIX 2):
+            # model was stale (33.9d) + near-random (val_acc 0.55) and the
+            # gate never covered C3/C6 anyway. Dead weight per mandate.
 
             execute(
                 market="crypto",
@@ -2089,7 +1983,6 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
                 features=feat,
                 positions=positions,
                 portfolio=portfolio,
-                ml_size_scale=ml_scale,
             )
         except Exception as exc:
             log.error("  Crypto %s error: %s", sym, exc, exc_info=True)
@@ -2106,26 +1999,12 @@ def run_crypto(positions: dict, portfolio: dict) -> None:
         full_portfolio=portfolio,
     )
 
-    # Funding rate arbitrage: BTC/ETH delta-neutral (C5b)
-    # HALTED 2026-05-15: see docs/known_issues/2026-05-15_c5b_halt.md
-    # Schema delta ($25 per-leg BUY vs $50 round-trip SELL) would fire the
-    # share-equality assertion as $25 WARN on every close. Re-enable only after
-    # unified-ledger spec Q1-Q4 resolves dual-leg accounting.
-    # try:
-    #     from trading.funding_arb import run_funding_arb_crypto
-    #     run_funding_arb_crypto(portfolio["crypto"])
-    # except Exception as exc:
-    #     log.error("  Funding arb error: %s", exc, exc_info=True)
-
-    # 4H Momentum Breakout: BTC/ETH only (C2)
-    from trading.momentum_breakout import run_momentum_breakout_crypto
-
-    run_strategy_with_isolation(
-        "C2_momentum_breakout",
-        run_momentum_breakout_crypto,
-        portfolio["crypto"],
-        fetch_crypto_hourly,
-    )
+    # C5b funding-arb + C2 momentum-breakout REMOVED 2026-06-10
+    # (AUDIT/prune_log.md): C5b was halted-at-source since 2026-05-15 with a
+    # known $25/$50 ledger asymmetry; C2 failed validation (B.1.7 Track 7)
+    # and produced zero trades in the audit window. Modules deleted from the
+    # repo and the box in the same deploy. Historical DB rows retain the
+    # C5b_funding_arb / C2_momentum_breakout strategy names.
 
     # ──────────────────────────────────────────────────────────────────
     # SCANNER-FIRST PIPELINE (2026-05-12)
@@ -2296,14 +2175,14 @@ def main(market: str = "crypto") -> None:
         market: "crypto" | "india" | "both"
                 Passed from paper_loop.py --market flag.
     """
-    global _ml_ensemble
     log.info("=" * 60)
     log.info("AAATS Live Paper Trader v2.1 starting  [market=%s]", market)
     log.info("  Cycle    : %d seconds (15 min)", CYCLE_INTERVAL_SEC)
-    log.info("  ML       : XGBoost confidence gating")
     log.info(
-        "  Strategies: C1 stat-arb, C2 momentum, C3 alt-reversion, C5b funding-arb"
+        "  Posture  : RESEARCH BED — entries disabled (%s), exit-only wind-down",
+        ENTRIES_DISABLED,
     )
+    log.info("  Strategies: C1/C3/C6 demoted to no-trade; C2 + C5b removed 2026-06-10")
 
     # D.3 — Schema-drift smoke at startup. Refuse-to-start on INVALID; tolerate
     # MISSING / MISSING_OPTIONAL because the runner is the writer for several
@@ -2353,12 +2232,7 @@ def main(market: str = "crypto") -> None:
         except Exception as exc:
             log.warning("India warmup error: %s", exc)
 
-    # Load ML ensemble once at startup
-    try:
-        _ml_ensemble = _init_ml_ensemble()
-        log.info("  ML ensemble loaded OK")
-    except Exception as exc:
-        log.warning("  ML ensemble unavailable: %s", exc)
+    # ML ensemble startup load REMOVED 2026-06-10 with the ML gate (FIX 2).
 
     log.info("Starting main loop...")
     cycle = 0

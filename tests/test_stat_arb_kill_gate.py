@@ -15,6 +15,7 @@ C3 (altcoin_reversion.py) and C6 (bollinger_range.py).
 
 Reference: docs/known_issues/2026-05-23_kill_trigger_investigation.md.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -39,12 +40,24 @@ def _make_stretched_pair(
     # Plunge ETH in the final 10 bars to stretch the spread.
     b_close[-10:] = np.linspace(base_b, base_b * 0.7, 10)
     df_a = pd.DataFrame(
-        {"timestamp": idx, "open": a_close, "high": a_close + 1,
-         "low": a_close - 1, "close": a_close, "volume": np.ones(rows)}
+        {
+            "timestamp": idx,
+            "open": a_close,
+            "high": a_close + 1,
+            "low": a_close - 1,
+            "close": a_close,
+            "volume": np.ones(rows),
+        }
     )
     df_b = pd.DataFrame(
-        {"timestamp": idx, "open": b_close, "high": b_close + 1,
-         "low": b_close - 1, "close": b_close, "volume": np.ones(rows)}
+        {
+            "timestamp": idx,
+            "open": b_close,
+            "high": b_close + 1,
+            "low": b_close - 1,
+            "close": b_close,
+            "volume": np.ones(rows),
+        }
     )
     return df_a, df_b
 
@@ -73,6 +86,10 @@ def _stat_arb_module(monkeypatch, tmp_path):
     monkeypatch.setattr(sa, "_record_stat_arb_trade", lambda *a, **kw: None)
     # Silence Telegram.
     monkeypatch.setattr(sa, "_send", lambda *a, **kw: None)
+    # These tests exercise the kill-switch gate on the ENTRY path, so the
+    # research-bed demotion (ENTRIES_DISABLED, 2026-06-10) must be lifted —
+    # otherwise every entry is blocked before the gate under test runs.
+    monkeypatch.setattr(sa, "ENTRIES_DISABLED", False)
     return sa
 
 
@@ -121,20 +138,21 @@ def test_kill_gate_blocks_entry_at_drawdown(_stat_arb_module, monkeypatch):
 
     # Sanity: the synthetic data really does cross the entry-z threshold.
     pair = next(p for p in sa.PAIRS if p.market == "crypto")
-    _spread, _z = sa._compute_spread_zscore(
-        df_a["close"], df_b["close"], pair.window
-    )
-    assert abs(_z) > pair.entry_z, (
-        f"fixture broken: |z|={abs(_z):.3f} should exceed entry_z={pair.entry_z}"
-    )
+    _spread, _z = sa._compute_spread_zscore(df_a["close"], df_b["close"], pair.window)
+    assert (
+        abs(_z) > pair.entry_z
+    ), f"fixture broken: |z|={abs(_z):.3f} should exceed entry_z={pair.entry_z}"
 
     # Patch the runner's gate to always block — simulates HALT_MARKET /
     # HALT_ALL decision from RiskEngine.update_market at <-15% drawdown.
     import trading.live_paper_runner as lpr
+
     monkeypatch.setattr(
-        lpr, "apply_kill_switch_gate",
+        lpr,
+        "apply_kill_switch_gate",
         lambda market, symbol, last_price, positions, portfolio: (
-            False, "TEST_HALT_MARKET_DD"
+            False,
+            "TEST_HALT_MARKET_DD",
         ),
     )
 
@@ -148,9 +166,9 @@ def test_kill_gate_blocks_entry_at_drawdown(_stat_arb_module, monkeypatch):
     # Assert: no position opened, capital unchanged.
     state = sa._load_state()
     assert state == {}, f"kill gate failed — position opened: {state}"
-    assert portfolio["crypto"]["capital"] == pytest.approx(87.45), (
-        "capital was debited despite kill gate blocking entry"
-    )
+    assert portfolio["crypto"]["capital"] == pytest.approx(
+        87.45
+    ), "capital was debited despite kill gate blocking entry"
     assert portfolio["crypto"]["total_trades"] == 0
 
 
@@ -164,8 +182,10 @@ def test_kill_gate_open_allows_entry(_stat_arb_module, monkeypatch):
     df_a, df_b = _make_stretched_pair()
 
     import trading.live_paper_runner as lpr
+
     monkeypatch.setattr(
-        lpr, "apply_kill_switch_gate",
+        lpr,
+        "apply_kill_switch_gate",
         lambda market, symbol, last_price, positions, portfolio: (True, ""),
     )
 
@@ -181,9 +201,7 @@ def test_kill_gate_open_allows_entry(_stat_arb_module, monkeypatch):
         f"gate-open path did NOT open a position: state={state}. "
         "Fixture or health-gate may be silently skipping."
     )
-    assert portfolio["crypto"]["capital"] < 87.45, (
-        "capital was not debited on entry"
-    )
+    assert portfolio["crypto"]["capital"] < 87.45, "capital was not debited on entry"
 
 
 def test_back_compat_no_gate_when_kwargs_missing(_stat_arb_module):
@@ -202,7 +220,6 @@ def test_back_compat_no_gate_when_kwargs_missing(_stat_arb_module):
 
     # Without the gate, the stretched spread should open the position.
     state = sa._load_state()
-    assert "BTC/USDT_ETH/USDT" in state, (
-        "back-compat path (no gate kwargs) failed to open position: state="
-        f"{state}"
-    )
+    assert (
+        "BTC/USDT_ETH/USDT" in state
+    ), f"back-compat path (no gate kwargs) failed to open position: state={state}"
