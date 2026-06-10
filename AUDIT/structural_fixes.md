@@ -86,10 +86,15 @@ files, so nothing breaks.
 
 ## [STAGED] — needs an explicitly-confirmed box deploy
 
-| Item | Why staged |
-|---|---|
-| Remove ML gate from runner (FIX 2) | live-runner edit; only takes effect on redeploy |
-| Delete C5b/C2 modules + runner imports (see prune_log) | live-runner edit; repo/box must stay in sync |
-| Demote C1/C3/C6 to no-trade | the only honest posture given no edge; needs runner change + deploy |
-| Wire `analytics.cost_model` into the live record path | makes the live ledger net-of-cost at write time (today it's re-priced post-hoc) |
-| Full git-history secret scan + key rotation | operator action |
+> **DEPLOYED 2026-06-10T17:12Z** (operator-confirmed; commit `1c39dde3`,
+> deploy script `tools/operator/deploy_research_bed_posture_2026_06_10.py`,
+> rollback `.rollback/2026-06-10_research_bed_posture/`). Verification:
+> [docs/decisions/2026-06-10_research_bed_posture_deploy.md](../docs/decisions/2026-06-10_research_bed_posture_deploy.md).
+
+| Item | Why staged | Status |
+|---|---|---|
+| Remove ML gate from runner (FIX 2) | live-runner edit; only takes effect on redeploy | ✅ deployed 2026-06-10 |
+| Delete C5b/C2 modules + runner imports (see prune_log) | live-runner edit; repo/box must stay in sync | ✅ deployed 2026-06-10 |
+| Demote C1/C3/C6 to no-trade | the only honest posture given no edge; needs runner change + deploy | ✅ deployed 2026-06-10 (`ENTRIES_DISABLED=True`, exits live) |
+| Wire `analytics.cost_model` into the live record path | makes the live ledger net-of-cost at write time (today it's re-priced post-hoc) | ✅ deployed 2026-06-10 (first net row: SAHARA/USDT SELL 17:13Z) |
+| Full git-history secret scan + key rotation | operator action | ⏳ key rotation in progress (operator, 2026-06-10); history scan pending |

@@ -1,0 +1,30 @@
+# AAATS research-bed posture rollback baseline
+# Generated: 2026-06-10T17:04:12.240260+00:00
+# Host: aaats@100.95.126.39
+# Workstation commit: 1c39dde3 (pre-change: 8f2ba12d)
+
+## Files uploaded (workstation -> box)
+  trading/live_paper_runner.py  ->  /home/aaats/aaats/trading/live_paper_runner.py
+    sha256_16 = 090aed755f0790c9
+  trading/altcoin_reversion.py  ->  /home/aaats/aaats/trading/altcoin_reversion.py
+    sha256_16 = 447b07ebc6904c45
+  trading/bollinger_range.py  ->  /home/aaats/aaats/trading/bollinger_range.py
+    sha256_16 = 1d21cec5225ec836
+  trading/stat_arb.py  ->  /home/aaats/aaats/trading/stat_arb.py
+    sha256_16 = 51a253db104f3c54
+  analytics/cost_model.py  ->  /home/aaats/aaats/analytics/cost_model.py
+    sha256_16 = 5a2c9b56ff07e60c
+  analytics/ledger_repricer.py  ->  /home/aaats/aaats/analytics/ledger_repricer.py
+    sha256_16 = c07cc44a2a2b6369
+  ml/model_health.py  ->  /home/aaats/aaats/ml/model_health.py
+    sha256_16 = 6d0848061a5ab27b
+
+## Files removed on box (mv to .removed-<ts>)
+  /home/aaats/aaats/trading/funding_arb.py  ->  /home/aaats/aaats/trading/funding_arb.py.removed-20260610T170412Z
+  /home/aaats/aaats/trading/momentum_breakout.py  ->  /home/aaats/aaats/trading/momentum_breakout.py.removed-20260610T170412Z
+
+## Rollback steps
+  1. On box: cp <path>.bak-20260610T170412Z <path> for each uploaded file.
+  2. On box: mv <path>.removed-20260610T170412Z <path> for each removed file.
+  3. On box: cd /home/aaats/aaats && docker compose -f deployment/docker-compose.yml up -d --build --no-deps aaats-paper-crypto
+  4. Workstation: git revert 1c39dde3 && push (keeps repo/box sync).
