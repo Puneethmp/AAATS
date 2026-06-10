@@ -92,3 +92,16 @@ diagnostics/reports/
 !data/graduation/
 # NautilusTrader research venv (Python 3.11; per requirements-dev.txt) — local only
 .venv-nt/
+
+# T3 off-box backups pulled by tools/operator/backup_t3_pull.py (OneDrive-synced, not git)
+runtime/t3_offbox_backups/
+# Transient SQLite WAL/SHM + FUSE orphan handles (never source-of-truth)
+runtime/*.db-wal
+runtime/*.db-shm
+runtime/.fuse_hidden*
+# SECURITY (2026-06-10 forensic audit): container log tails must NOT be pushed to
+# the PUBLIC repo — a future traceback could expose an API key. The box autopush
+# does `git reset --hard origin/main` then `git add runtime/`, so this ignore
+# stops the leak on the next cron cycle with no box deploy required.
+# check_engine.py reads logs via `docker logs`, not these files — safe to drop.
+runtime/*.log
