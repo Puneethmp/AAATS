@@ -1,66 +1,3 @@
-[32m23:32:07[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
-2026-06-09T23:32:07Z  INFO     paper_runner    [AVAX/USDT] price=6.6310 | BTC.D=53.4%
-2026-06-09T23:32:07Z  INFO     paper_runner      regime=BEAR_TREND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
-[32m23:32:07[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
-2026-06-09T23:32:07Z  INFO     paper_runner    ⏸  HOLD AVAX/USDT @ 6.6310
-2026-06-09T23:32:08Z  INFO     trading.stat_arb    [BTC/USDT/ETH/USDT] spread=3.6302 z=+1.698 prices=(61668.4300, 1634.9600)
-2026-06-09T23:32:09Z  INFO     markets.crypto.universe  [universe] fetched 3594 raw tickers from Binance
-2026-06-09T23:32:09Z  INFO     markets.crypto.universe  [universe] kept=18  rejected_by={quote:2927, low:515, leveraged:52, crashing:34, denylist:24}  top3=[USD1/USDT, ENA/USDT, XLM/USDT]
-2026-06-09T23:32:09Z  INFO     paper_runner  [scanner] universe size=18  top5=['USD1/USDT', 'ENA/USDT', 'XLM/USDT', 'EUR/USDT', 'HOME/USDT']
-2026-06-09T23:32:12Z  INFO     markets.crypto.scanner  [scanner] universe=18 fetched=18 skipped=0  candidates: c3=0, c6=2
-2026-06-09T23:32:12Z  INFO     markets.crypto.scanner  [scanner] c6 top3: BFUSD/USDT(-0.836), EUR/USDT(-0.003)
-2026-06-09T23:32:12Z  INFO     markets.crypto.allocator  [allocator] capital=$179.15  open=0/6  per_strategy_counts={}
-2026-06-09T23:32:12Z  INFO     markets.crypto.allocator  [allocator] c6 picks (top 2): BFUSD/USDT, EUR/USDT
-2026-06-09T23:32:12Z  INFO     markets.crypto.sentiment  [sentiment] F&G=10 (Extreme Fear)
-2026-06-09T23:32:12Z  INFO     paper_runner  [scanner] final plan: c3=None  c6=['BFUSD/USDT', 'EUR/USDT']  fg=10  skip_c3=False  skip_c6=False
-2026-06-09T23:32:12Z  INFO     trading.altcoin_reversion  [c3] also evaluating 2 held position(s) outside picks: ['OPN/USDT', 'XLM/USDT']
-2026-06-09T23:32:12Z  INFO     trading.altcoin_reversion  [c3] cooldown active for: ENA/USDT(1.0h), 币安人生/USDT(17.5h)
-2026-06-09T23:32:13Z  INFO     trading.altcoin_reversion  [c3] HOLD  OPN/USDT  z=-0.769  pct=+1.45%  age=17.8h
-2026-06-09T23:32:13Z  INFO     trading.altcoin_reversion  [c3] HOLD  XLM/USDT  z=-1.555  pct=-0.16%  age=0.8h
-2026-06-09T23:32:13Z  INFO     trading.bollinger_range  [c6] BFUSD/USDT  price=0.9990  %B=-0.366  RSI=0.0  regime=RANGE_BOUND
-[32m23:32:13[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
-[32m23:32:13[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN stra...): duplicate column name: strategy
-[32m23:32:13[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN entr...): duplicate column name: entry_time
-[32m23:32:13[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN exit...): duplicate column name: exit_time
-[32m23:32:13[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN pnl_...): duplicate column name: pnl_pct
-[32m23:32:13[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN note...): duplicate column name: notes
-[32m23:32:13[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN size...): duplicate column name: size_usd
-[32m23:32:13[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN valu...): duplicate column name: value
-[32m23:32:13[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN risk...): duplicate column name: risk_action
-[32m23:32:13[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN clie...): duplicate column name: client_order_id
-[32m23:32:13[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN corr...): duplicate column name: correlation_id
-2026-06-09T23:32:13Z  INFO     trading.bollinger_range  [c6] ENTRY BFUSD/USDT  %B=-0.366  RSI=0.0  size=$10.75  cap=$168.40
-[32m23:32:13[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [1mINFO    [0m | PAPER BUY BFUSD/USDT @ 0.9990 x10.759966 | strat=C6_bollinger_range | regime=RANGE_BOUND | cli=310922c67368 | corr=ee4ff536
-2026-06-09T23:32:13Z  INFO     trading.bollinger_range  [c6] EUR/USDT  price=1.1539  %B=0.148  RSI=31.8  regime=RANGE_BOUND
-2026-06-09T23:32:13Z  INFO     trading.bollinger_range  [c6] EUR/USDT: volume below floor — skip
-2026-06-09T23:32:13Z  INFO     paper_runner    [reconcile] crypto portfolio stats refreshed from DB: trades 560→561, realized_pnl -2.3297→-2.3297
-2026-06-09T23:32:13Z  INFO     paper_runner  == Crypto cycle done | capital=USD 168.40 ==
-[32m23:32:13[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter (drift): OPN/USDT drift_shares=0.000000 notional<$0.25 — skip
-[32m23:32:13[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter (drift): XLM/USDT drift_shares=0.000000 notional<$0.25 — skip
-[32m23:32:13[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter (drift): BFUSD/USDT drift_shares=0.000000 notional<$0.25 — skip
-[32m23:32:13[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | reconciler: filtered 3 dust drift entries (notional < $0.25)
-[32m23:32:13[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | Reconciliation clean | checked=3 positions across crypto
-2026-06-09T23:32:13Z  INFO     paper_runner    Cycle 1311 done in 8.1s — sleeping 892s
-2026-06-09T23:32:13Z  INFO     paper_runner  [runner] cycle 1311 complete: C1=idle C2=idle C3=hold(2) C5b=halted_src C6=hold(1,picks=2)
-2026-06-09T23:47:05Z  INFO     paper_runner  ── Cycle 1312 ─────────────────────────────────────
-2026-06-09T23:47:05Z  INFO     paper_runner  == Crypto cycle | capital=USD 168.40 ==
-2026-06-09T23:47:06Z  INFO     paper_runner    BTC dominance proxy: 53.3%
-2026-06-09T23:47:07Z  INFO     paper_runner    [BTC/USDT] price=61677.9900 | BTC.D=53.3%
-2026-06-09T23:47:07Z  INFO     paper_runner      regime=RANGE_BOUND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
-2026-06-09T23:47:08Z  INFO     paper_runner    📊 Fear & Greed: 10 (Extreme Fear)
-[32m23:47:08[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
-2026-06-09T23:47:08Z  INFO     paper_runner    ⏸  HOLD BTC/USDT @ 61677.9900
-2026-06-09T23:47:08Z  INFO     paper_runner    [ETH/USDT] price=1639.1500 | BTC.D=53.3%
-2026-06-09T23:47:08Z  INFO     paper_runner      regime=BULL_TREND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
-[32m23:47:08[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
-2026-06-09T23:47:08Z  INFO     paper_runner    ⏸  HOLD ETH/USDT @ 1639.1500
-2026-06-09T23:47:08Z  INFO     paper_runner    [SOL/USDT] price=65.0500 | BTC.D=53.3%
-2026-06-09T23:47:08Z  INFO     paper_runner      regime=BEAR_TREND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
-[32m23:47:08[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
-2026-06-09T23:47:08Z  INFO     paper_runner    ⏸  HOLD SOL/USDT @ 65.0500
-2026-06-09T23:47:08Z  INFO     paper_runner    [LINK/USDT] price=7.8370 | BTC.D=53.3%
-2026-06-09T23:47:08Z  INFO     paper_runner      regime=BEAR_TREND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
-[32m23:47:08[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
 2026-06-09T23:47:08Z  INFO     paper_runner    ⏸  HOLD LINK/USDT @ 7.8370
 2026-06-09T23:47:08Z  INFO     paper_runner    [DOT/USDT] price=0.9590 | BTC.D=53.3%
 2026-06-09T23:47:08Z  INFO     paper_runner      regime=RANGE_BOUND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
@@ -498,3 +435,66 @@
 [32m01:47:14[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | Reconciliation clean | checked=3 positions across crypto
 2026-06-10T01:47:14Z  INFO     paper_runner    Cycle 1320 done in 8.3s — sleeping 892s
 2026-06-10T01:47:14Z  INFO     paper_runner  [runner] cycle 1320 complete: C1=idle C2=idle C3=hold(2) C5b=halted_src C6=hold(1,picks=2)
+2026-06-10T02:02:05Z  INFO     paper_runner  ── Cycle 1321 ─────────────────────────────────────
+2026-06-10T02:02:05Z  INFO     paper_runner  == Crypto cycle | capital=USD 168.40 ==
+2026-06-10T02:02:06Z  INFO     paper_runner    BTC dominance proxy: 52.9%
+2026-06-10T02:02:07Z  INFO     paper_runner    [BTC/USDT] price=61796.0100 | BTC.D=52.9%
+2026-06-10T02:02:07Z  INFO     paper_runner      regime=RANGE_BOUND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
+[32m02:02:07[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
+2026-06-10T02:02:07Z  INFO     paper_runner    ⏸  HOLD BTC/USDT @ 61796.0100
+2026-06-10T02:02:07Z  INFO     paper_runner    [ETH/USDT] price=1641.3600 | BTC.D=52.9%
+2026-06-10T02:02:07Z  INFO     paper_runner      regime=BULL_TREND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
+[32m02:02:07[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
+2026-06-10T02:02:07Z  INFO     paper_runner    ⏸  HOLD ETH/USDT @ 1641.3600
+2026-06-10T02:02:07Z  INFO     paper_runner    [SOL/USDT] price=65.2000 | BTC.D=52.9%
+2026-06-10T02:02:07Z  INFO     paper_runner      regime=BEAR_TREND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
+2026-06-10T02:02:07Z  INFO     paper_runner    ⏸  HOLD SOL/USDT @ 65.2000
+2026-06-10T02:02:07Z  INFO     paper_runner    [LINK/USDT] price=7.8170 | BTC.D=52.9%
+[32m02:02:07[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
+2026-06-10T02:02:07Z  INFO     paper_runner      regime=BEAR_TREND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
+[32m02:02:07[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
+2026-06-10T02:02:07Z  INFO     paper_runner    ⏸  HOLD LINK/USDT @ 7.8170
+2026-06-10T02:02:07Z  INFO     paper_runner    [DOT/USDT] price=0.9600 | BTC.D=52.9%
+2026-06-10T02:02:07Z  INFO     paper_runner      regime=RANGE_BOUND(0.99) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
+[32m02:02:07[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
+2026-06-10T02:02:07Z  INFO     paper_runner    ⏸  HOLD DOT/USDT @ 0.9600
+2026-06-10T02:02:07Z  INFO     paper_runner    [AVAX/USDT] price=6.6470 | BTC.D=52.9%
+2026-06-10T02:02:07Z  INFO     paper_runner      regime=BEAR_TREND(1.00) votes={'HOLD': 6} → HOLD (agree=1.00 conf=0.80)
+[32m02:02:07[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
+2026-06-10T02:02:07Z  INFO     paper_runner    ⏸  HOLD AVAX/USDT @ 6.6470
+2026-06-10T02:02:08Z  INFO     trading.stat_arb    [BTC/USDT/ETH/USDT] spread=3.6284 z=+1.170 prices=(61816.6600, 1641.7600)
+2026-06-10T02:02:08Z  INFO     paper_runner  [scanner] universe size=19  top5=['USD1/USDT', 'STRAX/USDT', 'ALLO/USDT', 'EUR/USDT', 'HOME/USDT']
+2026-06-10T02:02:11Z  INFO     markets.crypto.scanner  [scanner] universe=19 fetched=19 skipped=0  candidates: c3=0, c6=1
+2026-06-10T02:02:11Z  INFO     markets.crypto.scanner  [scanner] c6 top3: ALLO/USDT(-0.182)
+2026-06-10T02:02:11Z  INFO     markets.crypto.allocator  [allocator] capital=$168.40  open=0/6  per_strategy_counts={}
+2026-06-10T02:02:11Z  INFO     markets.crypto.allocator  [allocator] c6 picks (top 1): ALLO/USDT
+2026-06-10T02:02:11Z  INFO     paper_runner  [scanner] final plan: c3=None  c6=['ALLO/USDT']  fg=9  skip_c3=False  skip_c6=False
+2026-06-10T02:02:11Z  INFO     trading.altcoin_reversion  [c3] also evaluating 2 held position(s) outside picks: ['OPN/USDT', 'XLM/USDT']
+2026-06-10T02:02:11Z  INFO     trading.altcoin_reversion  [c3] cooldown active for: 币安人生/USDT(15.0h)
+2026-06-10T02:02:12Z  INFO     trading.altcoin_reversion  [c3] HOLD  OPN/USDT  z=-0.442  pct=+5.14%  age=20.3h
+2026-06-10T02:02:12Z  INFO     trading.altcoin_reversion  [c3] HOLD  XLM/USDT  z=-2.069  pct=-1.19%  age=3.3h
+2026-06-10T02:02:12Z  INFO     trading.bollinger_range  [c6] also evaluating 1 held position(s) outside picks: ['BFUSD/USDT']
+2026-06-10T02:02:12Z  INFO     trading.bollinger_range  [c6] ALLO/USDT  price=0.3919  %B=0.112  RSI=18.8  regime=RANGE_BOUND
+2026-06-10T02:02:12Z  INFO     trading.bollinger_range  [c6] ALLO/USDT: volume below floor — skip
+2026-06-10T02:02:12Z  INFO     trading.bollinger_range  [c6] BFUSD/USDT  price=0.9993  %B=0.551  RSI=50.0  regime=RANGE_BOUND
+[32m02:02:12[0m | [36mrisk        [0m | [36mengine              [0m | [34m[1mDEBUG   [0m | Portfolio drawdown -0.1% — within limits
+[32m02:02:12[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN stra...): duplicate column name: strategy
+[32m02:02:12[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN entr...): duplicate column name: entry_time
+[32m02:02:12[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN exit...): duplicate column name: exit_time
+[32m02:02:12[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN pnl_...): duplicate column name: pnl_pct
+[32m02:02:12[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN note...): duplicate column name: notes
+[32m02:02:12[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN size...): duplicate column name: size_usd
+[32m02:02:12[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN valu...): duplicate column name: value
+[32m02:02:12[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN risk...): duplicate column name: risk_action
+[32m02:02:12[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN clie...): duplicate column name: client_order_id
+[32m02:02:12[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [34m[1mDEBUG   [0m | paper_trades migration noop (ALTER TABLE paper_trades ADD COLUMN corr...): duplicate column name: correlation_id
+[32m02:02:13[0m | [36mexecution   [0m | [36mpaper_trader        [0m | [1mINFO    [0m | PAPER SELL BFUSD/USDT @ 0.9993 x10.759966 | strat=C6_bollinger_range | regime=RANGE_BOUND | cli=14dca7dd51ad | corr=71613bff
+2026-06-10T02:02:13Z  INFO     trading.bollinger_range  [c6] EXIT  BFUSD/USDT  reason=pct_b_target(0.551>=0.5)  pnl=$0.0032 (+0.03%)  cap=$179.16
+2026-06-10T02:02:13Z  INFO     paper_runner    [reconcile] crypto portfolio stats refreshed from DB: trades 561→562, realized_pnl -2.3297→-2.3265
+2026-06-10T02:02:13Z  INFO     paper_runner  == Crypto cycle done | capital=USD 179.16 ==
+[32m02:02:13[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter (drift): OPN/USDT drift_shares=0.000000 notional<$0.25 — skip
+[32m02:02:13[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [34m[1mDEBUG   [0m | dust filter (drift): XLM/USDT drift_shares=0.000000 notional<$0.25 — skip
+[32m02:02:13[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | reconciler: filtered 2 dust drift entries (notional < $0.25)
+[32m02:02:13[0m | [36mscripts     [0m | [36mreconcile_intracycle[0m | [1mINFO    [0m | Reconciliation clean | checked=2 positions across crypto
+2026-06-10T02:02:13Z  INFO     paper_runner    Cycle 1321 done in 7.3s — sleeping 893s
+2026-06-10T02:02:13Z  INFO     paper_runner  [runner] cycle 1321 complete: C1=idle C2=idle C3=hold(2) C5b=halted_src C6=idle(picks=1)
