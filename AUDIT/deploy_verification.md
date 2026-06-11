@@ -133,11 +133,15 @@ Evidence: `a2_a5_ledger_state_ml.txt` + cron-gap analysis in `a6_logpush_precise
 - L2 heartbeat `status=ok, last_push=11:30:19Z`; L3 watchdog log shows
   uninterrupted "heartbeat fresh" ticks; 73 auto commits with **no gap >
   20 min** — continuous liveness for the whole window.
-- 24 h mark falls at 2026-06-11T17:12Z; final checkpoint appended below when
-  reached.
+- **24 h checkpoint (2026-06-11T17:13:24Z, automated):**
+  `health=healthy restarts=0` (same container start 17:12:35Z — zero
+  restarts across the full 24 h); L2 heartbeat `status=ok` at 17:00:24Z;
+  0 error/traceback lines 11:30Z→17:13Z; **still 0 entry lines across the
+  entire 24 h window**. Raw capture: evidence task output appended by
+  `a7_checkpoint_runner.py`.
 
-**Finding: PASS at 18.3 h** (no restart, no error, both midnight rollovers
-clean). _24 h checkpoint: pending._
+**Finding: PASS — 24 h continuous green** (no restart, no error, both
+midnight rollovers clean, zero entries end-to-end).
 
 ---
 
@@ -151,4 +155,4 @@ clean). _24 h checkpoint: pending._
 | A4 | Wind-down | ✅ PASS — flat in 15.8 h, 4 distinct exit paths fired |
 | A5 | ML gone | ✅ PASS — comment tombstone only; 0 ml/ imports |
 | A6 | Log-push stopped | ✅ PASS — 0 log pushes / 73 cron cycles |
-| A7 | 24 h health | ✅ 18.3 h clean incl. both midnights; 24 h checkpoint pending |
+| A7 | 24 h health | ✅ PASS — 24 h continuous: 0 restarts, 0 errors, both midnights clean, 0 entries |
