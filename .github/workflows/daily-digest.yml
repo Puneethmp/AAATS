@@ -19,12 +19,14 @@ name: AAATS daily digest
 # file is missing in origin), the digest reports "unknown" for that field
 # instead of failing the whole run.
 
+# SCHEDULE DISABLED 2026-06-11 (maintenance contract — zero daily noise).
+# The steady-state alert surface is exactly three conditions: entry tripwire,
+# OI collector gap, health red (see OPERATIONS/runbook.md). The weekly report
+# (runtime/REPORTS/week_NN.md on origin/main, Mondays) replaced this digest
+# as the operator contact surface. Re-enable by restoring:
+#   schedule:
+#     - cron: '5 6 * * *'
 on:
-  schedule:
-    # 06:00 UTC daily = 11:30 IST for the operator. The autopush at 06:00:00
-    # lands a fresh snapshot ~5 sec earlier, so by :05 we have the freshest
-    # state of the day.
-    - cron: '5 6 * * *'
   workflow_dispatch:
     inputs:
       dry_run:

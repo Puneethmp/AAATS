@@ -1,0 +1,18 @@
+*/15 * * * * /home/aaats/bin/aaats-autopush.sh
+0 3 * * 0 docker builder prune -af --filter=until=72h >> /home/aaats/aaats-cleanup.log 2>&1
+*/5 * * * * /home/aaats/bin/aaats-cloudflare-watch.sh
+0 1 * * * /home/aaats/bin/aaats-logrotate.sh >> /srv/aaats/logs/logrotate.log 2>&1
+
+# AAATS autonomy crons - added 2026-05-09
+# Hourly Fear & Greed index fetch (drives momentum_breakout entry filter)
+0 * * * * /home/aaats/bin/aaats-fear-greed.py >> /srv/aaats/logs/fear-greed.log 2>&1
+# State file bootstrap every 6 hours (idempotent - only creates missing files)
+0 */6 * * * /home/aaats/bin/aaats-bootstrap-state.sh >> /srv/aaats/logs/bootstrap.log 2>&1
+
+# Heartbeat freshness check every 5 min (added 2026-05-24 auto-cron resilience)
+*/5 * * * * /home/aaats/bin/aaats-heartbeat-checker.sh >> /home/aaats/aaats-heartbeat-checker.log 2>&1
+7 * * * * /usr/bin/python3 /home/aaats/bin/aaats-t3-oi-collector.py >> /home/aaats/t3/collector.log 2>&1  # AAATS-T3-COLLECTOR
+30 2 * * * /home/aaats/bin/aaats-t3-backup.sh >> /home/aaats/t3/backup.log 2>&1  # AAATS-T3-BACKUP
+*/30 * * * * /home/aaats/bin/aaats-t3-watchdog.sh >> /home/aaats/t3/watchdog.log 2>&1  # AAATS-T3-WATCHDOG
+*/30 * * * * /home/aaats/bin/aaats-entry-tripwire.sh >> /home/aaats/entry-tripwire.log 2>&1  # AAATS-ENTRY-TRIPWIRE
+10 6 * * 1 /home/aaats/bin/aaats-weekly-report.sh >> /home/aaats/weekly-report.log 2>&1  # AAATS-WEEKLY-REPORT

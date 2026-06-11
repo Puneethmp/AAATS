@@ -1,0 +1,30 @@
+# AAATS steady-state handoff rollback baseline (Phase C, 2026-06-11)
+# Host: aaats@100.95.126.39
+
+## Box changes
+1. crontab replaced — exact before/after in crontab.before.txt /
+   crontab.after.txt (this dir). Delta: removed aaats-ml-retrain.sh daily
+   line (dead weight after ML-gate removal); added AAATS-ENTRY-TRIPWIRE
+   (*/30) + AAATS-WEEKLY-REPORT (Mon 06:10Z).
+   Rollback: `ssh aaats@box 'crontab -'` < crontab.before.txt
+2. New files (additive, no overwrite):
+   /home/aaats/bin/aaats-entry-tripwire.sh   sha=b122c30aa7893041
+   /home/aaats/bin/aaats-weekly-report.sh    sha=61d63da8463b65f9
+   /home/aaats/aaats/tools/reports/weekly_report.py  sha=4e1a44f990669587
+   /home/aaats/aaats/tools/reports/__init__.py       sha=e3b0c44298fc1c14
+   Rollback: rm the four files; rm /home/aaats/.entry_tripwire_watermark
+3. /home/aaats/bin/aaats-ml-retrain.sh left ON DISK (only the cron line
+   was removed) — restore = re-add the cron line.
+
+## Repo changes (same commit as this manifest)
+- .github/workflows/daily-digest.yml — schedule commented out (restore: see
+  in-file comment)
+- .github/workflows/activity-floor-monitor.yml — schedule commented out
+- CLAUDE.md — maintenance contract appended
+- OPERATIONS/runbook.md, scripts/box/aaats-entry-tripwire.sh,
+  scripts/box/aaats-weekly-report.sh — new files
+
+## Smoke evidence (2026-06-11T11:55Z)
+- tripwire: "clean (no entries after 2026-06-10T17:12:00+00:00)"
+- weekly report: generated + published to
+  /srv/aaats/runtime_repo/runtime/REPORTS/week_24.md (origin on next push)

@@ -11,9 +11,14 @@ name: AAATS activity floor monitor
 # data/halt_state.json (operator-confirmed 2026-05-24). When those books
 # come back online, add them to ACTIVE_MARKETS in the script below.
 
+# SCHEDULE DISABLED 2026-06-11 (research-bed demotion makes a quiet book the
+# GOAL, not an anomaly — entries are disabled by design since 2026-06-10, so
+# this monitor would alert every 6h forever. The inverse condition is now
+# monitored instead: scripts/box/aaats-entry-tripwire.sh alerts if a trade
+# APPEARS. Re-enable only if a new pre-registered thesis reactivates trading:
+#   schedule:
+#     - cron: '0 */6 * * *'
 on:
-  schedule:
-    - cron: '0 */6 * * *'
   workflow_dispatch:
     inputs:
       force_alert:

@@ -163,3 +163,34 @@ The Agent tool (Task tool) lets a session dispatch read-only research, planning,
 **Known quirk (2026-05-21):** spawned Agents hit Write-tool permission denials on this workstation. Main-context Edit/Write work fine. **Pattern:** when delegating to subagents, instruct them to *return content in their reply*. The parent context writes the files. Do not have the subagent call Write/Edit/NotebookEdit directly — it will fail silently or noisily depending on tool.
 
 Parallelism rule: when independent agents are dispatched, send them in the SAME message (multiple Agent tool calls in one assistant turn). Serializing them defeats the purpose.
+
+## MAINTENANCE CONTRACT (appended 2026-06-11 — binding until the 2027 T3 review)
+
+**In maintenance mode, NO code changes are permitted except (1) security
+patches and (2) T3-collector-uptime fixes.** Any other change — refactors,
+"improvements", dashboard tweaks, dependency bumps, doc reorganizations,
+anything touching `trading/`, `risk/`, `execution/`, or the monitoring
+stack beyond restoring it to green — requires explicit operator sign-off
+that references the reopen criteria in `OPERATIONS/runbook.md`. A Claude
+session asked to make such a change without that sign-off should decline
+and point here.
+
+The system's entire job until then: **stay flat, stay healthy, keep
+collecting.**
+
+- Stay flat: entries are disabled everywhere (`ENTRIES_DISABLED`, deploy
+  2026-06-10T17:12Z); the book has been flat since 2026-06-11T08:58Z. The
+  entry tripwire (`scripts/box/aaats-entry-tripwire.sh`) alerts if a trade
+  ever appears — that alert is an incident, not a feature.
+- Stay healthy: alert surface is exactly three conditions (entry tripwire /
+  OI gap / health red — see `OPERATIONS/runbook.md`). The Monday weekly
+  report at `runtime/REPORTS/week_NN.md` on origin/main is the operator's
+  only required contact surface. Daily digest + activity-floor schedules are
+  intentionally OFF; do not re-enable them as a "fix".
+- Keep collecting: the hourly T3 OI collector and its DB
+  (`/home/aaats/t3/t3_positioning.db`, box-local, NOT in git) are the only
+  asset with future value. A >30-day gap is unrecoverable and kills the last
+  open thesis. When in doubt, protect the collector first.
+
+Verification + incident record for this posture: `AUDIT/deploy_verification.md`,
+`AUDIT/security_closeout.md`, `AUDIT/closeout.md`.
