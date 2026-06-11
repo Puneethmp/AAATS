@@ -1,0 +1,93 @@
+<stdin>:42: SyntaxWarning: "\|" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\|"? A raw string is also an option.
+<stdin>:44: SyntaxWarning: "\|" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\|"? A raw string is also an option.
+
+===== A2: realized rows post-deploy with gross/costs reconciliation =====
+2026-06-10T17:13:11.025985+00:00 C6_bollinger_range     SAHARA/USDT  pnl=+0.135614 gross=0.173954 costs=0.038339 reconciles=False
+2026-06-10T19:43:10.620158+00:00 C3_altcoin_reversion   XRP/USDT     pnl=-0.178022 gross=-0.136134 costs=0.041888 reconciles=True
+2026-06-11T06:58:09.087058+00:00 C3_altcoin_reversion   DEXE/USDT    pnl=+0.471242 gross=0.492227 costs=0.020984 reconciles=False
+2026-06-11T07:43:10.788629+00:00 C3_altcoin_reversion   INJ/USDT     pnl=-0.023794 gross=-0.003802 costs=0.019992 reconciles=True
+2026-06-11T08:58:08.953424+00:00 C3_altcoin_reversion   WLD/USDT     pnl=+0.299605 gross=0.320246 costs=0.02064 reconciles=False
+
+===== A3: current portfolio file =====
+portfolio: {
+  "crypto": {
+    "capital": 190.0276270059101,
+    "starting_equity": 200.0,
+    "realized_pnl": -1.45550843086782,
+    "total_trades": 600,
+    "wins": 146,
+    "losses": 150,
+    "total_win_pct": 2.937142,
+    "total_loss_pct": 3.1679649999999997,
+    "settlement_queue": []
+  },
+  "india": {
+    "capital": 25000.0,
+    "starting_equity": 25000.0,
+    "realized_pnl": 0.0,
+    "total_trades": 0
+
+===== A3: L11/L5 alert files =====
+-rw-r--r-- 1 root root 430 May 27 08:01 /app/data/capital_invariant_alerts.json
+-rw-r--r-- 1 root root 111 Jun 11 11:28 /app/data/ledger_divergence_alerts.json
+---
+{
+  "last_check_utc": "2026-05-27T08:01:50.577342+00:00",
+  "market": "crypto",
+  "verdict": "ok",
+  "actual_capital": 156.0706,
+  "starting_equity": 200.0,
+  "realized_pnl_db": 0.9872,
+  "strategy_open_notional": 36.3998,
+  "directional_open_notional": 0.0,
+  "open_notional": 36.3998,
+  "expected_capital": 164.5874,
+  "delta_usd": 0.0,
+  "raw_delta_usd": -8.5169,
+  "baseline_drift_usd": -8.5169,
+
+===== A3/L5: live ledger divergence check =====
+L5 divergence: {}
+
+===== A4: all strategy state files + directional positions (flat check) =====
+altcoin_reversion_state: {}
+bollinger_range_state: {}
+stat_arb_state: {}
+funding_arb_state: MISSING
+
+positions:
+{
+  "india": {},
+  "crypto": {}
+}
+
+===== A5: ML residue grep, box host tree trading/ =====
+/home/aaats/aaats/trading/live_paper_runner.py:1518:# The XGBoost confidence gate (_score_ml/_ml_position_scale/_init_ml_ensemble)
+
+===== A5: ML residue grep, inside running image =====
+/app/trading/live_paper_runner.py:1518:# The XGBoost confidence gate (_score_ml/_ml_position_scale/_init_ml_ensemble)
+
+===== A5: modules under ml/ pulled in by importing the runner =====
+ml modules loaded by runner import:[32m11:31:23[0m | [36mdecision    [0m | [36mconsensus_voting    [0m | [1mINFO    [0m | Initialized consensus voting: agreement_threshold=0.45, veto_threshold=0.85
+ NONE
+
+===== A7: container health/restart count =====
+health=healthy restarts=0 started=2026-06-10T17:12:35.82342962Z
+
+===== A7: error count around box-local midnight (22:00Z CEST) and UTC midnight =====
+0
+0
+
+===== A7: L3 watchdog + L2 heartbeat =====
+[2026-06-11T11:10:02Z] heartbeat fresh (age=581s, last=2026-06-11T11:00:20Z)
+[2026-06-11T11:15:02Z] heartbeat fresh (age=0s, last=2026-06-11T11:15:01Z)
+[2026-06-11T11:20:04Z] heartbeat fresh (age=286s, last=2026-06-11T11:15:15Z)
+[2026-06-11T11:25:02Z] heartbeat fresh (age=587s, last=2026-06-11T11:15:15Z)
+[2026-06-11T11:30:03Z] heartbeat fresh (age=887s, last=2026-06-11T11:15:15Z)
+---
+{
+  "last_tick": "2026-06-11T11:30:19Z",
+  "host": "vmi3275738",
+  "status": "ok",
+  "last_push": "2026-06-11T11:30:19Z"
+}

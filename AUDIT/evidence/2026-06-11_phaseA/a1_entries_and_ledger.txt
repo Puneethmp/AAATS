@@ -1,0 +1,42 @@
+<stdin>:27: SyntaxWarning: "\[" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\["? A raw string is also an option.
+
+===== box clock + timezone =====
+2026-06-11T11:30:16Z
+Thu Jun 11 13:30:16 CEST 2026
+Europe/Berlin
+
+===== ALL ledger rows since 2026-06-10T17:12Z =====
+TOTAL ROWS SINCE DEPLOY: 5
+('2026-06-10T17:13:11.025985+00:00', 'C6_bollinger_range', 'SAHARA/USDT', 'SELL', 579.845236, 0.01668, 0.135614, 9.4979, 'C6 SELL %B=0.049 RSI=31.5', 1)
+('2026-06-10T19:43:10.620158+00:00', 'C3_altcoin_reversion', 'XRP/USDT', 'SELL', 9.453763, 1.1005, -0.178022, 10.54, 'C3 SELL z=-2.733', 1)
+('2026-06-11T06:58:09.087058+00:00', 'C3_altcoin_reversion', 'DEXE/USDT', 'SELL', 0.277624, 19.783, 0.471242, 5.0, 'C3 SELL z=-0.262', 1)
+('2026-06-11T07:43:10.788629+00:00', 'C3_altcoin_reversion', 'INJ/USDT', 'SELL', 0.95039, 5.257, -0.023794, 5.0, 'C3 SELL z=-0.766', 1)
+('2026-06-11T08:58:08.953424+00:00', 'C3_altcoin_reversion', 'WLD/USDT', 'SELL', 10.967317, 0.4851, 0.299605, 5.0, 'C3 SELL z=-0.466', 1)
+
+===== entry-pattern count in full container log (since 17:12Z restart) =====
+0
+---
+
+===== DEMOTED line count / cycles completed / latest cycle summaries =====
+148
+74
+2026-06-11T10:58:08Z  INFO     paper_runner  [runner] cycle 72 complete: C1=idle C2=idle C3=idle(picks=1) C5b=halted_src C6=idle
+2026-06-11T11:13:10Z  INFO     paper_runner  [runner] cycle 73 complete: C1=idle C2=idle C3=idle(picks=1) C5b=halted_src C6=idle
+2026-06-11T11:28:10Z  INFO     paper_runner  [runner] cycle 74 complete: C1=idle C2=idle C3=idle(picks=1) C5b=halted_src C6=idle
+
+===== blocked-entry gate hits (tripwire that gates evaluated) =====
+13
+2026-06-10T17:43:04Z  INFO     trading.stat_arb    [c1] BTC/USDT_ETH/USDT: SKIP ENTRY — demoted to no-trade (research-bed 2026-06-10), z=2.257
+2026-06-10T17:58:04Z  INFO     trading.stat_arb    [c1] BTC/USDT_ETH/USDT: SKIP ENTRY — demoted to no-trade (research-bed 2026-06-10), z=2.151
+2026-06-10T18:13:04Z  INFO     trading.stat_arb    [c1] BTC/USDT_ETH/USDT: SKIP ENTRY — demoted to no-trade (research-bed 2026-06-10), z=2.165
+2026-06-10T18:28:04Z  INFO     trading.stat_arb    [c1] BTC/USDT_ETH/USDT: SKIP ENTRY — demoted to no-trade (research-bed 2026-06-10), z=2.166
+2026-06-10T18:43:04Z  INFO     trading.stat_arb    [c1] BTC/USDT_ETH/USDT: SKIP ENTRY — demoted to no-trade (research-bed 2026-06-10), z=2.027
+
+===== exit events since restart =====
+2026-06-10T17:13:11Z  INFO     trading.bollinger_range  [c6] EXIT  SAHARA/USDT  reason=take_profit(1.83%)  pnl=$0.1356 (+1.83%)  cap=$163.92
+2026-06-10T19:43:10Z  INFO     trading.altcoin_reversion  [c3] EXIT  XRP/USDT  reason=z_hard_stop  z=-2.733  pnl=$-0.1780 (-1.69%)  portfolio=$174.28
+2026-06-10T19:43:10Z  INFO     trading.altcoin_reversion  [c3] cooldown XRP/USDT for 24h after z_hard_stop (pnl=-1.69%)
+2026-06-11T06:58:09Z  INFO     trading.altcoin_reversion  [c3] EXIT  DEXE/USDT  reason=z_trailing  z=-0.262  pnl=$0.4712 (9.42%)  portfolio=$179.75
+2026-06-11T07:43:10Z  INFO     trading.altcoin_reversion  [c3] EXIT  INJ/USDT  reason=time_stop_24h  z=-0.766  pnl=$-0.0238 (-0.48%)  portfolio=$184.73
+2026-06-11T07:43:10Z  INFO     trading.altcoin_reversion  [c3] cooldown INJ/USDT for 24h after time_stop_24h (pnl=-0.48%)
+2026-06-11T08:58:09Z  INFO     trading.altcoin_reversion  [c3] EXIT  WLD/USDT  reason=z_trailing  z=-0.466  pnl=$0.2996 (5.99%)  portfolio=$190.03

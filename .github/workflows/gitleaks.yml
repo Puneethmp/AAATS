@@ -1,0 +1,30 @@
+# Secret-scan gate (Phase B recurrence prevention, 2026-06-11).
+#
+# Runs gitleaks on every push — INCLUDING the box auto-cron pushes of
+# runtime/ snapshots, which were the vector for the 2026-06-10 log-leak
+# (docker log tails pushed to a public repo every 15 min; see
+# AUDIT/security_closeout.md). The action scans the commits contained in
+# the push event, so historical (pre-scrub) leaks in old commits do not
+# fail every run.
+#
+# Cost note: the box pushes ~96x/day; each run is <1 min. Free on a public
+# repo; if the repo goes private this consumes ~1,400 GitHub-hosted minutes
+# per month of the 2,000 free — acceptable, but worth knowing.
+name: gitleaks
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
