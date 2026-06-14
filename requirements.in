@@ -14,16 +14,14 @@ alpaca-py
 smartapi-python
 pyotp
 mibian
-nsepy
 
 # ── Shared Intelligence ───────────────────────────────────────
+# Trimmed 2026-06-13 (AUDIT/repo_audit_2026-06-13.md) — removed deps with zero
+# importers after Tier-1 dead-code removal: nsepy, xgboost, torch, shap,
+# vectorbt, scikit-learn, fredapi, pycoingecko. statsmodels kept (live C1).
 pandas-ta
 scipy
-xgboost
-torch
-shap
-vectorbt
-scikit-learn
+statsmodels
 numpy
 pandas
 
@@ -47,9 +45,5 @@ ruff
 black
 pre-commit
 
-# ── US Macro ──────────────────────────────────────────────────
-fredapi
-
-# ── Crypto (Phase 8 — included now, used later) ───────────────
-pycoingecko
+# ── Crypto ────────────────────────────────────────────────────
 ccxt

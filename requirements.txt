@@ -24,9 +24,6 @@ requests>=2.31.0
 python-dateutil>=2.8.2
 pytz>=2024.1
 
-# Crypto (for Phase 8)
-web3>=6.0.0
-
 # Web App & Dashboard
 streamlit>=1.28.0
 streamlit-autorefresh>=0.0.1
@@ -37,13 +34,11 @@ black>=23.0.0
 flake8>=6.1.0
 mypy>=1.7.0
 
-# Claude SDK (for autonomous build via API)
-anthropic>=0.7.0
-
-# ML & Statistics (required for AAATS Phase 1)
-hmmlearn>=0.3.0
-xgboost>=2.0.0
-scikit-learn>=1.3.0
+# Statistics
+# Removed 2026-06-13 (AUDIT/repo_audit_2026-06-13.md) — zero importers after
+# Tier-1 dead-code removal: web3, anthropic, hmmlearn (the regime HMM is a
+# hand-rolled GaussianHMM that never imports it), xgboost + scikit-learn (ML
+# gate removed 2026-06-10). statsmodels kept: live in trading/stat_arb.py (C1).
 statsmodels>=0.14.0
 scipy>=1.11.0
 
