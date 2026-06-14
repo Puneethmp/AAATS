@@ -1,48 +1,9 @@
 """
-Execution Module — Intelligent Order Execution
+Execution module.
 
-Provides:
-- Smart order routing based on market conditions
-- Execution quality tracking and analysis
-- Adaptive execution engine with learning
-- Integration with paper trading and live execution
-
-Phase 8: Execution Intelligence
+The live trading path imports submodules directly (e.g.
+`from execution.paper_trader import record_trade`); this package exposes no
+top-level re-exports. The institutional execution cluster (smart order router,
+adaptive engine, quality tracker, OMS, fill_model, etc.) was removed
+2026-06-13 as never-wired dead code (AUDIT/repo_audit_2026-06-13.md).
 """
-
-from execution.smart_order_router import (
-    SmartOrderRouter,
-    OrderUrgency,
-    RoutingDecision,
-    VenueType
-)
-
-from execution.execution_quality_tracker import (
-    ExecutionQualityTracker,
-    ExecutionRecord,
-    VenueQualityMetrics
-)
-
-from execution.adaptive_execution_engine import (
-    AdaptiveExecutionEngine,
-    ExecutionRequest,
-    ExecutionResult
-)
-
-__all__ = [
-    # Smart Order Router
-    "SmartOrderRouter",
-    "OrderUrgency",
-    "RoutingDecision",
-    "VenueType",
-    
-    # Execution Quality Tracker
-    "ExecutionQualityTracker",
-    "ExecutionRecord",
-    "VenueQualityMetrics",
-    
-    # Adaptive Execution Engine
-    "AdaptiveExecutionEngine",
-    "ExecutionRequest",
-    "ExecutionResult",
-]

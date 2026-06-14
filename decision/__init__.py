@@ -1,18 +1,9 @@
 """
-Decision layer for AAATS - Consensus & Ensemble Intelligence.
+Decision layer — consensus voting.
 
-Provides sophisticated multi-strategy decision-making:
-  - Consensus voting across strategies
-  - Ensemble signal aggregation
-  - Multi-factor confidence scoring
-  - Meta-strategy coordination
-  - Portfolio intelligence integration
-
-Usage:
-    from decision import MetaCoordinator, StrategyInput, MarketContext
-    
-    coordinator = MetaCoordinator()
-    decision = coordinator.coordinate_decision(strategy_inputs, market_context)
+Only `consensus_voting` is live (imported by trading/live_paper_runner.py).
+The ensemble aggregator, confidence scorer, and meta-coordinator were removed
+2026-06-13 as never-wired dead code (AUDIT/repo_audit_2026-06-13.md).
 """
 
 from decision.consensus_voting import (
@@ -21,44 +12,8 @@ from decision.consensus_voting import (
     ConsensusResult,
 )
 
-from decision.ensemble_aggregator import (
-    EnsembleAggregator,
-    StrategySignal,
-    EnsembleSignal,
-)
-
-from decision.confidence_scorer import (
-    ConfidenceScorer,
-    ConfidenceFactors,
-    ConfidenceScore,
-)
-
-from decision.meta_coordinator import (
-    MetaCoordinator,
-    StrategyInput,
-    MarketContext,
-    FinalDecision,
-)
-
 __all__ = [
-    # Consensus voting
     "ConsensusVoting",
     "StrategyVote",
     "ConsensusResult",
-    
-    # Ensemble aggregation
-    "EnsembleAggregator",
-    "StrategySignal",
-    "EnsembleSignal",
-    
-    # Confidence scoring
-    "ConfidenceScorer",
-    "ConfidenceFactors",
-    "ConfidenceScore",
-    
-    # Meta-coordination
-    "MetaCoordinator",
-    "StrategyInput",
-    "MarketContext",
-    "FinalDecision",
 ]
