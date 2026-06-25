@@ -1,0 +1,50 @@
+# AAATS Telegram self-heal rollback baseline
+# Generated: 2026-06-25 (pre-deploy)
+# Host: aaats@100.95.126.39
+# Change class: alert-chain / uptime fix (maintenance-contract exception)
+# Decision: docs/decisions/2026-06-25_telegram_selfheal.md
+
+## PRE-DEPLOY BOX STATE (baseline to restore on rollback)
+  container:   aaats-telegram-bot
+  status:      running
+  health:      healthy   (via OLD Dockerfile default healthcheck)
+  restartCount: 0
+  image:       deployment-aaats-telegram-bot
+               sha256:43be8282ea5d940c20ae1d5a6daa3dfb9f71bdc5cbc73f828c5f845b66d29641
+  Config.Healthcheck (pre-change, from Dockerfile HEALTHCHECK):
+    test:        ["CMD-SHELL","python scripts/health_check.py || exit 1"]
+    interval:    60s   timeout: 10s   start_period: 30s   retries: 3
+  crontab:     NO aaats-telegram-watchdog entry (count=0)
+  state files: /srv/aaats/state/telegram_token.hash       ABSENT
+               /srv/aaats/state/telegram_unhealthy_since   ABSENT
+
+  Baseline compose saved alongside: docker-compose.yml.box-baseline
+  (NOTE: scripts/telegram_healthcheck.py is NOT present in the baseline image —
+   the new compose healthcheck overrides to it and the deploy rebuilds the image
+   with --build so the file is baked in.)
+
+## Files added/changed by this deploy (workstation -> box)
+  scripts/telegram_healthcheck.py        -> /home/aaats/aaats/scripts/telegram_healthcheck.py   (NEW, L1)
+  deployment/docker-compose.yml          -> /home/aaats/aaats/deployment/docker-compose.yml      (adds healthcheck: block)
+  scripts/box/aaats-telegram-watchdog.sh -> /home/aaats/bin/aaats-telegram-watchdog.sh           (NEW, L3, +x)
+  crontab:  +  */5 * * * * /home/aaats/bin/aaats-telegram-watchdog.sh >> /home/aaats/aaats-telegram-watchdog.log 2>&1
+  .github/workflows/telegram-bot-liveness.yml  (L4, deploys via origin/main; not shipped by deploy script)
+
+## ROLLBACK PROCEDURE
+  1. Remove watchdog cron:
+       crontab -l | grep -v 'aaats-telegram-watchdog.sh' | crontab -
+  2. Restore baseline compose on box:
+       cp .rollback/2026-06-25_telegram_selfheal/docker-compose.yml.box-baseline \
+          /home/aaats/aaats/deployment/docker-compose.yml   (re-upload via sftp)
+  3. Rebuild+recreate bot onto baseline (drops the L1 healthcheck override):
+       cd /home/aaats/aaats && docker compose -p deployment \
+         -f deployment/docker-compose.yml up -d --no-deps --build --force-recreate aaats-telegram-bot
+  4. Clean up watchdog state:
+       rm -f /srv/aaats/state/telegram_token.hash /srv/aaats/state/telegram_unhealthy_since \
+             /tmp/aaats-telegram-watchdog-last-alert /home/aaats/aaats-telegram-watchdog.log
+  5. Remove watchdog script:
+       rm -f /home/aaats/bin/aaats-telegram-watchdog.sh
+  6. Disable L4: set repo variable LIVENESS_ENABLED=false OR delete the workflow file.
+
+  The bot reverts to the pre-change Dockerfile default healthcheck. No trading/
+  risk/execution state is touched by deploy or rollback; the book stays flat.

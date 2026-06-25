@@ -1,0 +1,320 @@
+services:
+  # Paper trading - US markets
+  aaats-paper-us:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    container_name: aaats-paper-us
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      - SYSTEM__TRADING_MODE=paper
+      - MARKET=us
+      - PYTHONPATH=/app
+    volumes:
+      - ../logs:/app/logs
+      - ../data:/app/data
+      - state-us:/app/data/state
+    command: python trading/paper_loop.py --market us
+    healthcheck:
+      test: ["CMD", "python", "scripts/health_check.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Paper trading - India markets
+  aaats-paper-india:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    container_name: aaats-paper-india
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      - SYSTEM__TRADING_MODE=paper
+      - MARKET=india
+      - PYTHONPATH=/app
+    volumes:
+      - ../logs:/app/logs
+      - ../data:/app/data
+      - state-india:/app/data/state
+    command: python trading/paper_loop.py --market india
+    healthcheck:
+      test: ["CMD", "python", "scripts/health_check.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Paper trading - Crypto markets
+  aaats-paper-crypto:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    container_name: aaats-paper-crypto
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      - SYSTEM__TRADING_MODE=paper
+      - MARKET=crypto
+      - PYTHONPATH=/app
+      # A.1 (2026-05-23): per-mode risk-engine state directory. Compose-level
+      # ${SYSTEM__TRADING_MODE} interpolation routes paper-mode writes to
+      # /app/data/state-paper and live-mode writes to /app/data/state-live,
+      # so a paper-to-live mode flip cannot inherit the other mode's
+      # peak/drawdown high-water marks. risk/engine.py reads this var.
+      - AAATS_RISK_STATE_DIR=/app/data/state-${SYSTEM__TRADING_MODE:-paper}
+    volumes:
+      - ../logs:/app/logs
+      - ../data:/app/data
+      # 2026-05-14: bind-mount scripts/ so hot-fixes (cleanup, reset, reconciler
+      # patches) take effect on container restart without rebuilding the image.
+      # Trades a tiny amount of immutability for a huge iteration-speed win.
+      - ../scripts:/app/scripts
+      # A.1 (2026-05-23): per-mode risk-engine state volumes. The legacy
+      # `state-crypto:/app/data/state` mount has been retired; that volume
+      # is preserved at the docker level for rollback (`docker volume ls`)
+      # but no longer mounted -- the per-mode engine writes here instead.
+      # See scripts/migrate_state_to_per_mode.sh for the one-time cutover.
+      - state-crypto-paper:/app/data/state-paper
+      - state-crypto-live:/app/data/state-live
+    # 2026-05-13: entrypoint runs DB migration before main loop. init_db
+    # is idempotent (CREATE TABLE IF NOT EXISTS) so safe on every start.
+    # Exec-form list to avoid YAML folded-scalar newline quirk.
+    command: ["sh", "-c", "python scripts/init_db.py && python trading/paper_loop.py --market crypto"]
+    healthcheck:
+      test: ["CMD", "python", "scripts/health_check.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          # 2026-05-13: raised 512M → 1G. Sustained ~76% at 20h uptime under
+          # 50-symbol scanner load. 1G provides headroom + leak-detection
+          # signal (alert at 85% = 870M).
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 384M
+
+  # Streamlit dashboard
+  aaats-dashboard:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    container_name: aaats-dashboard
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    ports:
+      - "8501:8501"
+    volumes:
+      - ../logs:/app/logs
+      - ../data:/app/data
+    environment:
+      - PYTHONPATH=/app
+    command: streamlit run streamlit_app/app.py --server.port=8501 --server.address=0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # ── Observability stack ───────────────────────────────────────────────────
+
+  # Prometheus metrics exporter — reads AAATS data files, exposes on :9091
+  aaats-metrics:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    container_name: aaats-metrics
+    restart: unless-stopped
+    ports:
+      - "9091:9091"
+    volumes:
+      - ../logs:/app/logs
+      - ../data:/app/data
+      # L8 (2026-05-24): mount the named volume read-only so collect_drawdown
+      # can read peak / market_peaks from risk_engine_state.paper.json.
+      # Mirrors aaats-watchdog's mount at the same path.
+      - state-crypto-paper:/app/data/state-paper:ro
+    environment:
+      - PYTHONPATH=/app
+    command: python monitoring/metrics_exporter.py
+    networks:
+      - default
+      - aaats
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:9091/metrics', timeout=3); sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+
+  # Prometheus — scrapes aaats-metrics every 30s
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: aaats-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+
+  # Grafana — hedge-fund command center on :3000
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: aaats-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=aaats
+      - GF_SECURITY_ADMIN_PASSWORD=aaats2026
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/dashboards/aaats_command_center.json
+      - GF_USERS_DEFAULT_THEME=dark
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # ── Heartbeat watchdog (D.2, 2026-05-22) ──────────────────────────────────
+  # Tails data/heartbeat.json (FLAT schema). Restarts aaats-paper-crypto on
+  # stale heartbeat (age > 3 × cycle interval = 2700s), rate-limited to 3
+  # restarts per 30 minutes (4th detection escalates Telegram-only). Reads
+  # are decoupled from Docker healthchecks — the trading heartbeat file is
+  # the authoritative liveness signal.
+  aaats-watchdog:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.watchdog
+    container_name: aaats-watchdog
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      - PYTHONPATH=/app
+      - AAATS_DATA=/app/data
+      - WATCHDOG_TARGET=aaats-paper-crypto
+      - WATCHDOG_CYCLE_INTERVAL_SEC=900
+      - WATCHDOG_POLL_INTERVAL_SEC=60
+      - WATCHDOG_MAX_RESTARTS=3
+      - WATCHDOG_RATE_WINDOW_SEC=1800
+      - WATCHDOG_DIGEST_HOUR_IST=9
+    volumes:
+      # rw needed for watchdog's self-heartbeat at data/watchdog_heartbeat.json
+      # and for D.4's data/digest_log.json + data/digests/ archive writes.
+      - ../data:/app/data
+      # D.4 daily digest: read-only view into the per-mode risk-engine state
+      # so the digest's P&L section can resolve equity / peak / drawdown.
+      # Without this the digest reports those as N/A and the Action-needed
+      # drawdown-trigger goes silent on real downside (caught 2026-05-23 when
+      # the first live digest reported "NONE" against a -33% paper drawdown).
+      # paper-crypto owns the rw mount; the watchdog only reads.
+      - state-crypto-paper:/app/data/state-paper:ro
+      # Host docker socket — required for `docker restart aaats-paper-crypto`.
+      # Read-only mount of the socket is NOT supported by Docker (the API
+      # uses the socket bidirectionally); least-privilege is a separate
+      # follow-up (docker-in-docker, BuildKit secrets, or a dedicated
+      # restart-only proxy).
+      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 64M
+
+  # ── Telegram command bot ──────────────────────────────────────────────────
+  aaats-telegram-bot:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    container_name: aaats-telegram-bot
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ../logs:/app/logs
+      - ../data:/app/data
+    command: python monitoring/telegram_bot.py
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 128M
+
+volumes:
+  state-us:
+  state-india:
+  # state-crypto (legacy, pre-A.1) -- retained for rollback. No longer
+  # mounted by aaats-paper-crypto. Contents migrated to state-crypto-paper
+  # via scripts/migrate_state_to_per_mode.sh on 2026-05-23 cutover.
+  state-crypto:
+  state-crypto-paper:
+  state-crypto-live:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  default:
+    name: aaats-network
+  aaats:
+    external: true
