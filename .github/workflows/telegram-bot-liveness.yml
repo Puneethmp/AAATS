@@ -1,0 +1,89 @@
+name: AAATS telegram bot liveness
+
+# L4 — OUT-OF-BAND token liveness check.
+#
+# The alert channel for "something is broken" IS the Telegram bot. So when the
+# bot dies, the thing meant to warn you is the thing that died — a blind spot
+# exactly the shape of its own failure. This job runs on GitHub's infra,
+# entirely off the Contabo box, and calls getMe with the token stored as a
+# repo secret. If getMe is not 200/ok the token is revoked or invalid and we
+# alert. Because it is off-box, it ALSO fires when the whole box is down.
+#
+# Scope note: getMe proves the TOKEN authenticates. The on-box watchdog (L3,
+# scripts/box/aaats-telegram-watchdog.sh) proves the CONTAINER is healthy and
+# polling. The two together cover both failure modes.
+#
+# Setup: requires repo secrets TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (same
+# secrets the L1 liveness-monitor.yml uses) and repo variable
+# LIVENESS_ENABLED=true. See docs/runbooks/telegram_bot_selfheal.md.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      force_alert:
+        description: 'Force a test alert (simulate invalid token)'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+
+jobs:
+  check-bot-token:
+    runs-on: ubuntu-latest
+    if: vars.LIVENESS_ENABLED == 'true'
+    steps:
+      - name: Probe getMe
+        id: probe
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          FORCE: ${{ github.event.inputs.force_alert }}
+        run: |
+          set -uo pipefail
+          if [ "${FORCE:-false}" = "true" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "code=forced-test" >> "$GITHUB_OUTPUT"
+            echo "username=(forced-test)" >> "$GITHUB_OUTPUT"
+            echo "## Bot liveness $(date -u +%FT%TZ) — FORCED TEST" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN secret not set"
+            echo "ok=false"  >> "$GITHUB_OUTPUT"
+            echo "code=no-secret" >> "$GITHUB_OUTPUT"
+            echo "username=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BODY=$(curl -sS --max-time 15 \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe" || echo '{"ok":false}')
+          OK=$(printf '%s' "$BODY" | python3 -c 'import sys,json; print(str(json.load(sys.stdin).get("ok",False)).lower())' 2>/dev/null || echo false)
+          UNAME=$(printf '%s' "$BODY" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("result",{}).get("username",""))' 2>/dev/null || echo "")
+          echo "ok=$OK" >> "$GITHUB_OUTPUT"
+          echo "username=$UNAME" >> "$GITHUB_OUTPUT"
+          echo "## Bot liveness $(date -u +%FT%TZ)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$OK" = "true" ]; then
+            echo "- getMe: **ok**, bot @$UNAME" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- getMe: **FAILED** — token likely revoked/invalid" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Alert on dead/invalid token
+        if: steps.probe.outputs.ok != 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -uo pipefail
+          # Best-effort: if the token is the thing that's dead this won't deliver,
+          # but the GitHub Actions run itself goes red and is independently visible
+          # in the Actions tab / email notifications.
+          if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
+            MSG="AAATS BOT LIVENESS ALERT: getMe failed — Telegram token likely revoked/invalid. Rotate .env on box (aaats@100.95.126.39); the on-box watchdog will auto-recreate once .env is updated. See docs/runbooks/telegram_bot_selfheal.md"
+            curl -sS --max-time 15 -X POST \
+              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d "chat_id=${TELEGRAM_CHAT_ID}" -d "text=${MSG}" || true
+          fi
+          echo "::error::Telegram bot token failed getMe — see step summary and runbook."
+          exit 1
