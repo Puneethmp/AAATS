@@ -133,6 +133,25 @@ Clean up `/srv/aaats/state/telegram_unhealthy_since`,
   `.env`," but now you find out in minutes, not weeks — and the watchdog stops
   churning instead of recreating endlessly.
 
+## Telemetry — `runtime/telegram_selfheal.json` (origin/main observability)
+
+The self-heal's live state lives only in `docker inspect` + `/srv/aaats/state/`
+on the box, which never reach origin/main. The **read-only** emitter
+`scripts/box/aaats-telegram-selfheal-snapshot.sh` (deployed to
+`/home/aaats/bin/`, cron `*/5`) writes a small JSON snapshot to
+`/srv/aaats/runtime_repo/runtime/telegram_selfheal.json`, which rides the
+existing autopush to **origin/main** so a dashboard reading the repo can see it.
+
+It contains: bot `state`/`health`/`restart_count`/`started_at`/`uptime`/`image`;
+watchdog `last_tick_utc`/`age_seconds`/`hash_baseline_present`/`last_restartcount`/
+`unhealthy_marker_present`/`starting_marker_present`/`cron_present`; and a
+`verdict` mirroring the watchdog's own logic
+(`ok` | `unhealthy` | `crash_loop` | `stuck_starting` | `watchdog_stale` |
+`bot_absent`). It is **purely observational** — it never recreates a container,
+writes `.env`, or touches the watchdog's control state; the watchdog log stays
+authoritative. Written atomically (tmp + `mv`) so autopush never commits a
+half-written file.
+
 ## Related
 
 - `deploy_lib.verify_telegram_path` / `send_telegram_message` — canonical token

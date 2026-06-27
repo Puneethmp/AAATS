@@ -102,6 +102,13 @@ unchanged (process stays up → `unhealthy` → recreate). Residual: a crash-loo
 *alerted*, not auto-healed — by design, because the only fix is a correct `.env`
 token (after which Job 1's hash-watch auto-recreates). Off-box L4 also covers it.
 
+## Update 2026-06-27 — origin/main observability emitter
+
+Added `scripts/box/aaats-telegram-selfheal-snapshot.sh` (read-only, cron `*/5`):
+emits `runtime/telegram_selfheal.json` (bot health/RestartCount + watchdog
+liveness + a verdict mirroring the watchdog) into the runtime repo so it rides
+autopush to origin/main for a repo-reading dashboard. No control-logic change.
+
 ## Verification
 
 Synthetic bad-token test in `docs/runbooks/telegram_bot_selfheal.md` proves the
