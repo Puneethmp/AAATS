@@ -178,10 +178,21 @@ and point here.
 The system's entire job until then: **stay flat, stay healthy, keep
 collecting.**
 
+> **TEMPORARY PAPER WINDOW ACTIVE (2026-06-27 → auto-reverts ~2026-07-04):**
+> operator-authorized, time-boxed, **PAPER-ONLY** entry resume for observation —
+> `ENTRIES_DISABLED` is intentionally `False` (paper crypto only). NOT a strategy
+> reopen; the NO-GO verdict stands. The box auto-reverts to entries-disabled at
+> the deadline (`scripts/box/aaats-paper-window-revert.sh`, cron `*/15`); the
+> entry tripwire is intentionally suppressed during the window. Paper trades are
+> EXPECTED, not an incident, until then. Decision:
+> `docs/decisions/2026-06-27_paper_only_entry_resume.md`. After the window,
+> restore the repo `ENTRIES_DISABLED` flags to `True`.
+
 - Stay flat: entries are disabled everywhere (`ENTRIES_DISABLED`, deploy
   2026-06-10T17:12Z); the book has been flat since 2026-06-11T08:58Z. The
   entry tripwire (`scripts/box/aaats-entry-tripwire.sh`) alerts if a trade
-  ever appears — that alert is an incident, not a feature.
+  ever appears — that alert is an incident, not a feature. **(Suspended for the
+  paper window noted above.)**
 - Stay healthy: alert surface is exactly three conditions (entry tripwire /
   OI gap / health red — see `OPERATIONS/runbook.md`). The Monday weekly
   report at `runtime/REPORTS/week_NN.md` on origin/main is the operator's

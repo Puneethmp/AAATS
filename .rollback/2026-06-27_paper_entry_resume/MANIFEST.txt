@@ -1,0 +1,53 @@
+# AAATS — time-boxed PAPER-ONLY entry resume (observation) rollback baseline
+# Generated: 2026-06-27 (pre-change)
+# Host: aaats@100.95.126.39
+# Authorization: operator (Puneeth), explicit, paper-only, time-boxed.
+# NOT a strategy reopen — the 36mo/15-fold walk-forward NO-GO stands.
+# Decision: docs/decisions/2026-06-27_paper_only_entry_resume.md
+
+## PAPER-ONLY ISOLATION PROOF (gates verified before any change)
+  Gate 1 (only change = paper crypto entries): the gate is the module constant
+    ENTRIES_DISABLED in trading/{live_paper_runner,stat_arb,altcoin_reversion,
+    bollinger_range}.py. live_paper_runner.py:1255 skips BUY when set. Entries
+    route to execution.paper_trader.record_trade() (simulated).
+  Gate 2 (paper engine, no live path): container aaats-paper-crypto runs
+    `python trading/paper_loop.py --market crypto` -> delegates to
+    live_paper_runner.main(market="crypto"). ZERO create_order/place_order calls
+    exist in trading/ or execution/ (grep clean) — execution is simulated via
+    _fill_price + record_trade. Binance/CCXT used for DATA FETCH only. The
+    $25/mo BTC DCA is EXCHANGE-SIDE (Binance app recurring buy, runbook
+    research_bed_maintenance.md) — not in this codebase, unreachable by a Python
+    constant flip. crypto-only container; india/us not run here.
+  Gate 3 (simulated book): BUYs update paper_portfolio.json / paper_trades.db
+    (simulated $200 book). Zero real capital at risk.
+
+## PRE-CHANGE BOX STATE (baseline to restore)
+  trading/live_paper_runner.py   :134  ENTRIES_DISABLED = True
+  trading/stat_arb.py            : 69  ENTRIES_DISABLED = True
+  trading/altcoin_reversion.py   :128  ENTRIES_DISABLED = True
+  trading/bollinger_range.py     :108  ENTRIES_DISABLED = True
+  container aaats-paper-crypto: image=deployment-aaats-paper-crypto
+    StartedAt=2026-06-10T17:12:35.82342962Z  RestartCount=0
+  data/halt_state.json: {"us":true,"india":true,"crypto":false}
+  entry tripwire cron: */30 * * * * /home/aaats/bin/aaats-entry-tripwire.sh >> /home/aaats/entry-tripwire.log 2>&1  # AAATS-ENTRY-TRIPWIRE
+  atd: INACTIVE (auto-revert uses cron deadline-guard, not `at`)
+
+## MANUAL REVERT (if the auto-revert job ever fails)
+  1. Restore the 4 True files on the box from the backup:
+       cp /srv/aaats/state/paper_entry_window_revert/*.py back to /home/aaats/aaats/trading/
+     (or sed -i 's/^ENTRIES_DISABLED = False/ENTRIES_DISABLED = True/' on each of the 4 files)
+  2. Rebuild only the paper container:
+       cd /home/aaats/aaats && docker compose -p deployment -f deployment/docker-compose.yml \
+         up -d --no-deps --build aaats-paper-crypto
+  3. FALLBACK if rebuild fails — immediate flat-gate (no rebuild), write through container:
+       echo '{"us":true,"india":true,"crypto":true}' | docker exec -i aaats-paper-crypto sh -c 'cat > /app/data/halt_state.json'
+     (operator halt makes run_crypto short-circuit; reset later via kill.py)
+  4. Re-arm tripwire: rm -f /srv/aaats/state/paper_entry_window_deadline  (un-suppresses the window guard)
+     and remove the revert cron: crontab -l | grep -v 'AAATS-PAPER-WINDOW-REVERT' | crontab -
+  5. Advance tripwire watermark so window entries don't flood-alert:
+       docker exec aaats-paper-crypto python -c "import sqlite3;c=sqlite3.connect('/app/data/paper_trades.db');print(c.execute(\"SELECT MAX(timestamp) FROM paper_trades WHERE action='BUY'\").fetchone()[0])" > /home/aaats/.entry_tripwire_watermark
+  6. Restore repo flags to True (commit) — repo holds False only during the window.
+
+## NOTE
+  The $25/mo BTC DCA (exchange-side) and any live path are NOT touched by this
+  change. Only the simulated paper crypto book is affected. india/us untouched.
