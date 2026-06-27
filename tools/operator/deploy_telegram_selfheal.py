@@ -24,7 +24,11 @@ What it does (idempotent, no sibling-container disruption):
      Telegram note via the box's own credentials.
 
 Run from the Windows workstation (same host that runs the other deploy
-scripts). Requires AAATS_SSH_PASSWORD in env/.env.
+scripts). SSH auth:
+  - If AAATS_SSH_PASSWORD is set, use password auth.
+  - Otherwise fall back to key-based auth (ssh-agent + default keys); set the
+    optional AAATS_SSH_KEY to point paramiko at a specific private-key file.
+The deploy only fails if the SSH connection itself fails.
 
     python tools/operator/deploy_telegram_selfheal.py [--dry-run]
 """
@@ -51,6 +55,7 @@ import os  # noqa: E402
 HOST = os.environ.get("AAATS_SSH_HOST", "100.95.126.39")
 USER = os.environ.get("AAATS_SSH_USER", "aaats")
 PASSWORD = os.environ.get("AAATS_SSH_PASSWORD")
+SSH_KEY = os.environ.get("AAATS_SSH_KEY")  # optional explicit private-key path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REMOTE_REPO = "/home/aaats/aaats"
@@ -91,13 +96,27 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    if not PASSWORD:
-        raise SystemExit("AAATS_SSH_PASSWORD not set (see .env.example).")
-
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    print(f"Connecting to {HOST} ...")
-    client.connect(HOST, port=22, username=USER, password=PASSWORD, timeout=30)
+    conn = dict(hostname=HOST, port=22, username=USER, timeout=30)
+    if PASSWORD:
+        print(f"Connecting to {HOST} (password auth) ...")
+        conn.update(password=PASSWORD, look_for_keys=False, allow_agent=False)
+    else:
+        auth = "key auth (ssh-agent + default keys)"
+        conn.update(look_for_keys=True, allow_agent=True)
+        if SSH_KEY:
+            conn["key_filename"] = SSH_KEY
+            auth = f"key auth (AAATS_SSH_KEY={SSH_KEY})"
+        print(f"Connecting to {HOST} ({auth}) ...")
+    try:
+        client.connect(**conn)
+    except Exception as e:  # noqa: BLE001 — surface the real connection failure
+        raise SystemExit(
+            f"SSH connection to {USER}@{HOST} failed ({e!r}). "
+            "Set AAATS_SSH_PASSWORD, or ensure your SSH key/agent can reach the "
+            "box (optionally point AAATS_SSH_KEY at a private-key file)."
+        )
     print("Connected.\n")
 
     def run(cmd: str, label: str = "") -> tuple[int, str]:
