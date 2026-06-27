@@ -20,6 +20,23 @@ WATERMARK="/home/aaats/.entry_tripwire_watermark"
 ALERT="/home/aaats/bin/aaats-cron-alert.sh"
 CONTAINER="aaats-paper-crypto"
 
+# ── Paper-window guard (2026-06-27) ──────────────────────────────────────────
+# During an operator-authorized, time-boxed PAPER-ONLY entry window, paper
+# entries are EXPECTED and must NOT page. If the deadline file exists and its
+# epoch is in the future, suppress (the window auto-reverts at the deadline; the
+# revert job then advances the watermark so window entries never flood-alert).
+# Fail-safe: if the file is absent or malformed, fall through to NORMAL alerting.
+# See docs/decisions/2026-06-27_paper_only_entry_resume.md.
+WINDOW_DEADLINE_FILE="/srv/aaats/state/paper_entry_window_deadline"
+if [ -f "${WINDOW_DEADLINE_FILE}" ]; then
+  _deadline=$(tr -dc '0-9' < "${WINDOW_DEADLINE_FILE}" 2>/dev/null)
+  _now=$(date -u +%s)
+  if [ -n "${_deadline}" ] && [ "${_now}" -lt "${_deadline}" ] 2>/dev/null; then
+    echo "[$(date -u +%FT%TZ)] tripwire: paper window active (until $(date -u -d "@${_deadline}" +%FT%TZ 2>/dev/null)) — suppressing"
+    exit 0
+  fi
+fi
+
 # Initialize watermark to the demotion deploy moment on first run.
 [ -f "${WATERMARK}" ] || echo "2026-06-10T17:12:00+00:00" > "${WATERMARK}"
 SINCE=$(cat "${WATERMARK}")
