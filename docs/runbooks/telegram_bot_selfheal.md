@@ -81,22 +81,57 @@ ssh aaats@100.95.126.39 '
     up -d --no-deps --force-recreate aaats-telegram-bot
 '
 ```
-Expect: within ~2 healthcheck cycles the container reports `unhealthy`; on the
-next `*/5` tick the watchdog logs the bad state. Restore the real token
-(`cp /tmp/.env.bak /home/aaats/aaats/.env`); the **hash change** triggers an
-immediate auto-recreate and a confirmation message. Clean up
-`/srv/aaats/state/telegram_unhealthy_since` if present.
+A token the server rejects is invalid **at startup**, so the container
+crash-loops (see "Failure modes" below) rather than reaching `unhealthy`: Docker
+health stays `starting` while `RestartCount` climbs. On the next `*/5` tick the
+watchdog detects the climbing `RestartCount` and fires a **crash-loop alert**
+(it does *not* recreate — recreate is futile against a bad `.env` token).
+Restore the real token (`cp /tmp/.env.bak /home/aaats/aaats/.env`); the **hash
+change** then triggers an immediate auto-recreate and a confirmation message.
+Clean up `/srv/aaats/state/telegram_unhealthy_since`,
+`/srv/aaats/state/telegram_starting_since`, and
+`/srv/aaats/state/telegram_last_restartcount` if present.
+
+> **Run drills DETACHED.** Always run break/restore drills under `setsid` with an
+> `EXIT` trap that restores the good token, e.g.
+> `setsid bash drill.sh >/tmp/drill.log 2>&1 </dev/null &` where `drill.sh` has
+> `trap 'cp /tmp/.env.bak "$ENV"; "$WD"' EXIT`. On 2026-06-25 two interactive
+> SSH sessions dropped mid-drill — once stranding the bad token in `.env` (alert
+> chain down ~10 min), once racing a `pkill` against the recreate and leaving the
+> container removed. A detached job with an auto-restore trap survives the drop.
+
+## Two failure shapes (and which layer catches each)
+
+- **Token revoked AFTER the bot is already polling** — the process stays up and
+  keeps logging `getUpdates` 401s; the L1 healthcheck (`getMe`) fails, so Docker
+  flips the container to `unhealthy` with `RestartCount` **stable**. The
+  watchdog's unhealthy-while-running path force-recreates it past the grace
+  window (picking up the new `.env` token) and alerts. This is the original
+  32-day incident shape.
+- **Token invalid AT STARTUP** (server-rejected token in `.env`) — PTB v20 calls
+  `getMe` inside `initialize()`, raises `InvalidToken`, the **process exits**,
+  and `restart: unless-stopped` restarts it. Each restart resets `start_period`,
+  so Docker health is stuck `starting` and **never reaches `unhealthy`**, while
+  `RestartCount` climbs. The watchdog's **crash-loop detector** (RestartCount
+  increased tick-over-tick AND health != healthy) fires an out-of-band alert and
+  **does NOT recreate** — recreate is futile against a bad `.env` token and just
+  churns. The fix is a manual `.env` token correction; once `.env` is fixed,
+  Job 1's hash-watch auto-recreates onto the good token. (Found 2026-06-25.)
 
 ## Failure modes the watchdog still can't self-fix
 
 - **Polling loop hangs but token valid + process up** — `getMe` still returns
-  200, so L1 stays green. Rare for python-telegram-bot; if it recurs, add a
-  bot-side heartbeat file and check its freshness in the watchdog.
+  200, so L1 stays green. The watchdog also bounds the `starting` state: a
+  container `starting` for `>STARTING_GRACE_SEC` (600s) with stable
+  `RestartCount` triggers a one-shot alert. For a hung *polling* loop with a
+  valid token, add a bot-side heartbeat file and check its freshness here.
 - **Recreate itself fails** (image won't build, disk full) — the watchdog
   alerts out-of-band and stops; this is a genuine incident needing the operator.
 - **`.env` has the wrong token** — L3 will faithfully recreate onto a bad
-  token; L1 then flags `unhealthy` and L4 alerts. The fix is still "put the
-  right token in `.env`," but now you find out in minutes, not weeks.
+  token; the container then crash-loops, which the crash-loop detector surfaces
+  via an alert (and L4 alerts off-box). The fix is still "put the right token in
+  `.env`," but now you find out in minutes, not weeks — and the watchdog stops
+  churning instead of recreating endlessly.
 
 ## Related
 

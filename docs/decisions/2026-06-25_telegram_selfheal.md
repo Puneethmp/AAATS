@@ -83,6 +83,25 @@ destructive step, recreate `--no-deps` so siblings are untouched).
 - A failed recreate (disk full / build break) is escalated out-of-band as a
   real incident, not auto-fixed.
 
+## Update 2026-06-26 — crash-loop coverage added
+
+The 2026-06-25 synthetic drill surfaced a second failure shape the original L1
+healthcheck does **not** turn into `unhealthy`: a token the server rejects **at
+startup** makes PTB raise `InvalidToken` in `initialize()`, the process exits,
+and `restart: unless-stopped` restarts it. Each restart resets `start_period`,
+so Docker health stays `starting` forever (never `unhealthy`) while
+`RestartCount` climbs. L1's `unhealthy` signal — and therefore the watchdog's
+unhealthy-while-running recreate — never fires.
+
+L3 Job 2 was hardened to track `RestartCount` across ticks: a climbing count with
+`health != healthy` is flagged as a **crash-loop**, which **alerts out-of-band
+and does NOT recreate** (recreate is futile against a bad `.env` token). A
+container stuck in `starting` beyond `STARTING_GRACE_SEC` with a stable
+`RestartCount` also alerts once. The original revoked-after-polling shape is
+unchanged (process stays up → `unhealthy` → recreate). Residual: a crash-loop is
+*alerted*, not auto-healed — by design, because the only fix is a correct `.env`
+token (after which Job 1's hash-watch auto-recreates). Off-box L4 also covers it.
+
 ## Verification
 
 Synthetic bad-token test in `docs/runbooks/telegram_bot_selfheal.md` proves the
