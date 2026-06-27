@@ -125,7 +125,10 @@ DB_PATH = str(_ROOT / "data" / "paper_trades.db")
 # runs so held positions exit cleanly and the book winds down to flat.
 # Module retained (not deleted) because backtest tooling + research provenance
 # import it. Tests may flip this attribute.
-ENTRIES_DISABLED = True
+# TEMPORARY (2026-06-27): operator-authorized PAPER-ONLY 7-day observation
+# window — flipped False; box auto-reverts to True at the deadline. NOT a
+# strategy reopen. See docs/decisions/2026-06-27_paper_only_entry_resume.md.
+ENTRIES_DISABLED = False
 
 # Honest-PnL cost layer (2026-06-10, AUDIT/structural_fixes.md FIX 1):
 # C3 fills are raw prices, so realized PnL is written net of fees + modeled

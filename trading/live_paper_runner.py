@@ -131,7 +131,14 @@ INITIAL_CAPITAL = {
 # C1/C3/C6 (each module has its own ENTRIES_DISABLED guard). Open positions
 # still mark-to-market and EXIT via SELL signals / ATR stops / per-trade
 # stops so the book winds down to flat. Tests may flip this attribute.
-ENTRIES_DISABLED = True
+#
+# TEMPORARY (2026-06-27): operator-authorized, time-boxed, PAPER-ONLY entry
+# resume for OBSERVATION — NOT a strategy reopen; the NO-GO verdict stands.
+# Flipped to False for a 7-day window; the box auto-reverts to True at the
+# deadline (cron deadline-guard + halt fallback). See
+# docs/decisions/2026-06-27_paper_only_entry_resume.md. Restore this flag to
+# True in the repo after the window closes.
+ENTRIES_DISABLED = False
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)

@@ -105,7 +105,10 @@ DB_PATH = str(_ROOT / "data" / "paper_trades.db")
 # CLAUDE.md). Entries are permanently disabled; the manage-open branch still
 # runs so held positions exit cleanly. Module retained for backtest tooling
 # + research provenance. Tests may flip this attribute.
-ENTRIES_DISABLED = True
+# TEMPORARY (2026-06-27): operator-authorized PAPER-ONLY 7-day observation
+# window — flipped False; box auto-reverts to True at the deadline. NOT a
+# strategy reopen. See docs/decisions/2026-06-27_paper_only_entry_resume.md.
+ENTRIES_DISABLED = False
 
 # Honest-PnL cost layer (2026-06-10, AUDIT/structural_fixes.md FIX 1):
 # C6 fills are raw prices, so realized PnL is written net of fees + modeled

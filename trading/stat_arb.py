@@ -66,7 +66,10 @@ PAIRS = [
 # hard-stop / time-stop) still run so open pairs wind down to flat.
 # Module retained for backtest tooling + research provenance. Tests may
 # flip this attribute.
-ENTRIES_DISABLED = True
+# TEMPORARY (2026-06-27): operator-authorized PAPER-ONLY 7-day observation
+# window — flipped False; box auto-reverts to True at the deadline. NOT a
+# strategy reopen. See docs/decisions/2026-06-27_paper_only_entry_resume.md.
+ENTRIES_DISABLED = False
 
 # Honest-PnL cost layer (2026-06-10, AUDIT/structural_fixes.md FIX 1):
 # C1 legs fill at raw prices, so each leg's realized PnL is written net of
