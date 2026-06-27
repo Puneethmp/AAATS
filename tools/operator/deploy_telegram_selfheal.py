@@ -11,15 +11,18 @@ docs/decisions/2026-06-25_telegram_selfheal.md.
 What it does (idempotent, no sibling-container disruption):
   1. Smoke-verify the Telegram path FIRST (verify_telegram_path) and fail-fast
      if the token is already broken — we don't want to deploy blind.
-  2. Atomic-upload the three on-box files with line-ending normalization:
-       - scripts/telegram_healthcheck.py        (in-container healthcheck)
-       - deployment/docker-compose.yml          (adds the healthcheck block)
-       - scripts/box/aaats-telegram-watchdog.sh -> /home/aaats/bin/ (+chmod +x)
-  3. Install the watchdog cron (*/5) if absent — mirrors aaats-heartbeat-checker.
+  2. Atomic-upload the on-box files with line-ending normalization:
+       - scripts/telegram_healthcheck.py             (in-container healthcheck)
+       - deployment/docker-compose.yml               (adds the healthcheck block)
+       - scripts/box/aaats-telegram-watchdog.sh         -> /home/aaats/bin/ (+x)
+       - scripts/box/aaats-telegram-selfheal-snapshot.sh -> /home/aaats/bin/ (+x)
+  3. Install the watchdog + snapshot crons (*/5) if absent (idempotent).
   4. Rebuild + recreate ONLY aaats-telegram-bot (--no-deps --build
-     --force-recreate) so the new healthcheck file is baked into the image
+     --force-recreate) so a new healthcheck file is baked into the image
      (scripts/ is COPY'd into the image, not bind-mounted) and the watchdog
-     baseline is seeded.
+     baseline is seeded. Pass --skip-bot-rebuild for box-script-only deploys
+     (no scripts/ change) to avoid churning the running bot. Then seed the
+     watchdog baseline + the runtime/telegram_selfheal.json snapshot.
   5. Post-verify: container reports a health status, and send a post-deploy
      Telegram note via the box's own credentials.
 
@@ -30,7 +33,7 @@ scripts). SSH auth:
     optional AAATS_SSH_KEY to point paramiko at a specific private-key file.
 The deploy only fails if the SSH connection itself fails.
 
-    python tools/operator/deploy_telegram_selfheal.py [--dry-run]
+    python tools/operator/deploy_telegram_selfheal.py [--dry-run] [--skip-bot-rebuild]
 """
 
 from __future__ import annotations
@@ -78,11 +81,20 @@ FILES = [
         f"{REMOTE_BIN}/aaats-telegram-watchdog.sh",
         True,
     ),
+    (
+        "scripts/box/aaats-telegram-selfheal-snapshot.sh",
+        f"{REMOTE_BIN}/aaats-telegram-selfheal-snapshot.sh",
+        True,
+    ),
 ]
 
 CRON_LINE = (
     "*/5 * * * * /home/aaats/bin/aaats-telegram-watchdog.sh "
     ">> /home/aaats/aaats-telegram-watchdog.log 2>&1"
+)
+SNAPSHOT_CRON_LINE = (
+    "*/5 * * * * /home/aaats/bin/aaats-telegram-selfheal-snapshot.sh "
+    ">> /home/aaats/aaats-telegram-selfheal-snapshot.log 2>&1"
 )
 
 
@@ -93,6 +105,15 @@ def main() -> int:
         "--dry-run",
         action="store_true",
         help="connect + smoke-verify + print plan, upload nothing",
+    )
+    ap.add_argument(
+        "--skip-bot-rebuild",
+        action="store_true",
+        help=(
+            "skip step 4's bot image rebuild/recreate. Use when the deploy ships "
+            "only box-side /home/aaats/bin scripts (no change to scripts/ baked "
+            "into the bot image) — avoids churning the running bot."
+        ),
     )
     args = ap.parse_args()
 
@@ -146,9 +167,15 @@ def main() -> int:
         for local, remote, ex in FILES:
             print(f"   {local}  ->  {remote}{'  (+x)' if ex else ''}")
         print(f"[dry-run] would ensure cron: {CRON_LINE}")
-        print(
-            "[dry-run] would rebuild+recreate aaats-telegram-bot (--no-deps --build --force-recreate)"
-        )
+        print(f"[dry-run] would ensure cron: {SNAPSHOT_CRON_LINE}")
+        if args.skip_bot_rebuild:
+            print(
+                "[dry-run] would SKIP bot rebuild (--skip-bot-rebuild); box scripts only"
+            )
+        else:
+            print(
+                "[dry-run] would rebuild+recreate aaats-telegram-bot (--no-deps --build --force-recreate)"
+            )
         client.close()
         return 0
 
@@ -163,54 +190,78 @@ def main() -> int:
         print(f"   {local}  ->  {remote}  sha16={sha}")
     sftp.close()
 
-    # 3) install watchdog cron if missing (idempotent).
-    print("\n[3/5] Ensuring watchdog cron ...")
+    # 3) install crons if missing (idempotent grep-guard).
+    print("\n[3/5] Ensuring watchdog + snapshot crons ...")
     run(
         "( crontab -l 2>/dev/null | grep -F 'aaats-telegram-watchdog.sh' ) "
         f"|| ( crontab -l 2>/dev/null; echo '{CRON_LINE}' ) | crontab -",
-        "cron install",
+        "watchdog cron install",
     )
     run(
-        "crontab -l | grep -F 'aaats-telegram-watchdog.sh' || echo 'CRON MISSING'",
+        "( crontab -l 2>/dev/null | grep -F 'aaats-telegram-selfheal-snapshot.sh' ) "
+        f"|| ( crontab -l 2>/dev/null; echo '{SNAPSHOT_CRON_LINE}' ) | crontab -",
+        "snapshot cron install",
+    )
+    run(
+        "crontab -l | grep -F 'aaats-telegram-watchdog.sh' || echo 'WATCHDOG CRON MISSING'; "
+        "crontab -l | grep -F 'aaats-telegram-selfheal-snapshot.sh' || echo 'SNAPSHOT CRON MISSING'",
         "cron verify",
     )
 
     # 4) rebuild + recreate ONLY the bot so the healthcheck attaches; seed
-    #    watchdog baseline. --build is REQUIRED: scripts/ is baked into the image
-    #    via `COPY . .` (deployment/Dockerfile, WORKDIR /app) and is NOT
-    #    bind-mounted, so the brand-new scripts/telegram_healthcheck.py only
-    #    reaches the container if the image is rebuilt. Without --build the
-    #    recreate reuses the stale image, the healthcheck file is absent, and the
-    #    container goes permanently `unhealthy` (then the watchdog recreate-loops).
-    print("\n[4/5] Rebuilding + recreating aaats-telegram-bot ...")
-    run(
-        f"cd {REMOTE_REPO} && docker compose -p deployment "
-        "-f deployment/docker-compose.yml up -d --no-deps --build --force-recreate "
-        "aaats-telegram-bot 2>&1",
-        "rebuild+recreate",
-    )
+    #    watchdog baseline. --build is REQUIRED when scripts/ changed: it is baked
+    #    into the image via `COPY . .` (deployment/Dockerfile, WORKDIR /app) and is
+    #    NOT bind-mounted, so a new scripts/telegram_healthcheck.py only reaches
+    #    the container if the image is rebuilt. Without --build the recreate reuses
+    #    the stale image, the healthcheck file is absent, and the container goes
+    #    permanently `unhealthy` (then the watchdog recreate-loops).
+    #    --skip-bot-rebuild bypasses this for box-script-only deploys (no scripts/
+    #    change) so the running bot is not churned.
+    if args.skip_bot_rebuild:
+        print("\n[4/5] Skipping bot rebuild (--skip-bot-rebuild) — box scripts only.")
+    else:
+        print("\n[4/5] Rebuilding + recreating aaats-telegram-bot ...")
+        run(
+            f"cd {REMOTE_REPO} && docker compose -p deployment "
+            "-f deployment/docker-compose.yml up -d --no-deps --build --force-recreate "
+            "aaats-telegram-bot 2>&1",
+            "rebuild+recreate",
+        )
     run(
         "/home/aaats/bin/aaats-telegram-watchdog.sh 2>&1 || true",
         "watchdog first-tick (seed baseline)",
     )
+    run(
+        "/home/aaats/bin/aaats-telegram-selfheal-snapshot.sh 2>&1 || true",
+        "snapshot first-run (seed runtime/telegram_selfheal.json)",
+    )
 
     # 5) post-verify + post-deploy note.
     print("\n[5/5] Post-verify ...")
+    settle = "" if args.skip_bot_rebuild else "sleep 35; "
     run(
-        "sleep 35; docker inspect --format "
-        "'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "
+        settle + "docker inspect --format "
+        "'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarts={{.RestartCount}}' "
         "aaats-telegram-bot 2>&1",
         "health",
     )
-    dl.send_telegram_message(
-        client,
-        "AAATS deploy: telegram self-heal (L1 healthcheck + L3 watchdog) installed. "
-        "Token rotations now auto-apply; unhealthy bot auto-recreates.",
+    run(
+        "cat /srv/aaats/runtime_repo/runtime/telegram_selfheal.json 2>&1 | head -40",
+        "snapshot",
     )
+    if args.skip_bot_rebuild:
+        note = (
+            "AAATS deploy: telegram self-heal telemetry emitter installed "
+            "(runtime/telegram_selfheal.json, */5, read-only). Bot NOT rebuilt."
+        )
+    else:
+        note = (
+            "AAATS deploy: telegram self-heal (L1 healthcheck + L3 watchdog) installed. "
+            "Token rotations now auto-apply; unhealthy bot auto-recreates."
+        )
+    dl.send_telegram_message(client, note)
     client.close()
-    print(
-        "\nDone. Watch `docker inspect aaats-telegram-bot` -> health=healthy within ~2 cycles."
-    )
+    print("\nDone.")
     return 0
 
 
