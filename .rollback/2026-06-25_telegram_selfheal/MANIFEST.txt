@@ -48,3 +48,27 @@
 
   The bot reverts to the pre-change Dockerfile default healthcheck. No trading/
   risk/execution state is touched by deploy or rollback; the book stays flat.
+
+## DELTA 2026-06-26 — watchdog crash-loop hardening re-deploy
+  Only the on-box watchdog script changed (L3 Job 2: RestartCount crash-loop
+  detection + bounded 'starting'). New state files it manages:
+  /srv/aaats/state/telegram_last_restartcount, /srv/aaats/state/telegram_starting_since.
+  Pre-deploy /home/aaats/bin/aaats-telegram-watchdog.sh sha256_16 = 1319aff2907f9815
+  Bot image at delta time = sha256:620ae9bc54f73613 (RestartCount=0).
+  Repo source-of-truth commits: A=d21ea03f (watchdog), B=d8d7f57d (deploy key-auth),
+  docs=99edfd6f.
+  Rollback for the watchdog alone: git checkout <pre-A sha> -- scripts/box/aaats-telegram-watchdog.sh
+  then re-upload; remove the two new state files. (Deploy script also rebuilds the
+  bot image — to revert that, recreate from image 620ae9bc54f73613.)
+
+## DELTA 2026-06-27 (#2) — read-only telemetry emitter (no bot rebuild)
+  Added box-side emitter only; deployed with --skip-bot-rebuild (bot NOT touched:
+  StartedAt 2026-06-27T04:23:52Z + RestartCount=0 preserved across deploy).
+  New file: /home/aaats/bin/aaats-telegram-selfheal-snapshot.sh sha256_16 = 15667a8d49415da7
+  New cron: */5 * * * * .../aaats-telegram-selfheal-snapshot.sh >> .../aaats-telegram-selfheal-snapshot.log
+  New artifact: /srv/aaats/runtime_repo/runtime/telegram_selfheal.json (rides autopush
+  to origin/main; first appeared in autopush commit bd90e6a1). READ-ONLY observability.
+  Repo source-of-truth commits: emitter=130f7cfd, deploy=71020be9, docs=2eec2ab5.
+  Rollback: remove the snapshot cron line; rm /home/aaats/bin/aaats-telegram-selfheal-snapshot.sh;
+  rm /srv/aaats/runtime_repo/runtime/telegram_selfheal.json (next autopush drops it from
+  origin/main). Bot/watchdog control logic untouched — nothing else to revert.
