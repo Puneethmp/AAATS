@@ -1,6 +1,6 @@
 # AAATS runtime snapshot
 
-Last update: 2026-06-30T10:45:11Z
+Last update: 2026-06-30T11:00:18Z
 
 ## Container heartbeats
 - aaats-alloy: Up 7 weeks
@@ -16,6 +16,6 @@ Last update: 2026-06-30T10:45:11Z
 - aaats-postgres: Up 8 weeks (healthy)
 - aaats-prometheus: Up 7 weeks (healthy)
 - aaats-redis-exporter: Up 7 weeks
-- aaats-redis: Up 7 weeks (healthy)
+- aaats-redis: Up 8 weeks (healthy)
 - aaats-telegram-bot: Up 3 days (healthy)
 - aaats-watchdog: Up 5 weeks
